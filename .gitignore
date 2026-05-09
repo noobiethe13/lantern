@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+ui/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# User data — never commit (DB, attachments, persisted browser profile)
+data/
+
+# Bootstrap / per-session scratch
+.claude/session/
+
+# OS
+.DS_Store
+Thumbs.db
