@@ -126,10 +126,19 @@ future sessions respect it._
      (set up in Phase 4). It lists the skills in .claude/skills/ and
      their purpose. -->
 
-_No skills yet — populated in Phase 2 and Phase 3._
+- `/audit` — codebase quality scan; appends to `.claude/known-issues.md`
+- `/remediate [issue-id]` — work through a quality issue end-to-end
+- `/security-audit` — codebase security scan; appends to `.claude/security-findings.md`
+- `/pr-review [pr-number]` — project-aware PR review (replaces deprecated built-in `/review`)
+- `/rca <symptom>` — root-cause analysis on a bug; investigates only, does not apply
+- `/feature <description|resume>` — multi-session feature work using the 3-file session pattern
 
 ## Agents available in this project
 
 <!-- Same as above — auto-maintained. -->
 
-_No agents yet — populated in Phase 3._
+- `code-quality-auditor` — paired with `/audit`. Read-mostly; appends only to `.claude/known-issues.md`.
+- `code-quality-remediator` — paired with `/remediate`. Has project memory at `.claude/agent-memory/code-quality-remediator/`.
+- `security-auditor` — paired with `/security-audit`. Read-mostly; appends only to `.claude/security-findings.md`.
+- `code-reviewer` — paired with `/pr-review`. Has project memory at `.claude/agent-memory/code-reviewer/`.
+- `bug-investigator` — paired with `/rca`. Read-only against the codebase; has project memory at `.claude/agent-memory/bug-investigator/`.
