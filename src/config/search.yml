@@ -1,0 +1,12 @@
+# Active search criteria — edit this file or use the UI to update
+# This file is loaded at scan time.
+title:
+  positive: []   # e.g. ["engineer", "developer", "typescript"]
+  negative: []   # e.g. ["intern", "manager", "director"]
+location:
+  remote_required: false
+  allowed: []    # e.g. ["Berlin", "London", "Remote"]
+seniority:
+  allowed: []    # junior | mid | senior | staff | principal
+salary_min_usd: null
+exclude_companies: []
