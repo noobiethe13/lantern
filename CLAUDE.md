@@ -132,6 +132,7 @@ future sessions respect it._
 - `/pr-review [pr-number]` — project-aware PR review (replaces deprecated built-in `/review`)
 - `/rca <symptom>` — root-cause analysis on a bug; investigates only, does not apply
 - `/feature <description|resume>` — multi-session feature work using the 3-file session pattern
+- `session` — universal 3-file session-continuity pattern (referenced by `/feature`, multi-session `/remediate`, complex `/rca`)
 
 ## Agents available in this project
 
