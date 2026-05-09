@@ -28,7 +28,7 @@ Anthropic auth.
 | Quick cleanup of recently-changed code  | `/simplify` (built-in)                   |
 | Project-aware PR review                 | `/pr-review [pr-number]`                 |
 | Branch-diff security review             | `/security-review` (built-in)            |
-| Codebase quality audit                  | `/audit`                                 |
+| Codebase quality audit                  | `/quality-audit`                         |
 | Work an item from the quality backlog   | `/remediate [issue-id]`                  |
 | Codebase security audit                 | `/security-audit`                        |
 | Root-cause investigation on a bug       | `/rca <symptom>`                         |
@@ -39,7 +39,7 @@ All seven project skills are configured with `disable-model-invocation:
 true`. They run only when you invoke them by slash command — Claude
 won't fire them on its own.
 
-- **`/audit`** — Deep code-quality audit. Forks to the
+- **`/quality-audit`** — Deep code-quality audit. Forks to the
   `code-quality-auditor` agent. Appends new findings to
   `.claude/known-issues.md`. Run on team cadence (monthly, before
   releases), not per-PR.
@@ -72,7 +72,7 @@ Five specialist agents back the workflow skills above. You generally
 don't invoke them directly — the skill that owns each one delegates
 when you run the corresponding slash command.
 
-- **`code-quality-auditor`** — paired with `/audit`. Read-mostly;
+- **`code-quality-auditor`** — paired with `/quality-audit`. Read-mostly;
   appends only to `.claude/known-issues.md`.
 - **`code-quality-remediator`** — paired with `/remediate`. Has
   project memory at `.claude/agent-memory/code-quality-remediator/`
@@ -154,7 +154,7 @@ open → in-progress → fixed (and removed) | accepted | deferred
 
 Three ways to populate it:
 
-- Run `/audit` to have the `code-quality-auditor` append findings.
+- Run `/quality-audit` to have the `code-quality-auditor` append findings.
 - Add an entry yourself when you spot something worth tracking but
   don't want to fix right now.
 - Triage a finding from a PR review into the backlog.
@@ -230,7 +230,7 @@ For richer skill scaffolding (with eval support), install
 
 ## Troubleshooting
 
-- **"`/audit` isn't picking up new files I created"** — Claude Code
+- **"`/quality-audit` isn't picking up new files I created"** — Claude Code
   watches directories live, but newly-added top-level skill
   directories may need a session restart before they appear in
   `/skills`.

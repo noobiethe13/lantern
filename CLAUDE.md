@@ -126,7 +126,7 @@ future sessions respect it._
      (set up in Phase 4). It lists the skills in .claude/skills/ and
      their purpose. -->
 
-- `/audit` — codebase quality scan; appends to `.claude/known-issues.md`
+- `/quality-audit` — codebase quality scan; appends to `.claude/known-issues.md`
 - `/remediate [issue-id]` — work through a quality issue end-to-end
 - `/security-audit` — codebase security scan; appends to `.claude/security-findings.md`
 - `/pr-review [pr-number]` — project-aware PR review (replaces deprecated built-in `/review`)
@@ -138,7 +138,7 @@ future sessions respect it._
 
 <!-- Same as above — auto-maintained. -->
 
-- `code-quality-auditor` — paired with `/audit`. Read-mostly; appends only to `.claude/known-issues.md`.
+- `code-quality-auditor` — paired with `/quality-audit`. Read-mostly; appends only to `.claude/known-issues.md`.
 - `code-quality-remediator` — paired with `/remediate`. Has project memory at `.claude/agent-memory/code-quality-remediator/`.
 - `security-auditor` — paired with `/security-audit`. Read-mostly; appends only to `.claude/security-findings.md`.
 - `code-reviewer` — paired with `/pr-review`. Has project memory at `.claude/agent-memory/code-reviewer/`.

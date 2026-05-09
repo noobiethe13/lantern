@@ -6,7 +6,7 @@ agent: code-quality-auditor
 allowed-tools: Read, Grep, Glob, Edit, Bash(git log:*), Bash(git diff:*)
 ---
 
-# /audit
+# /quality-audit
 
 Run a deep code-quality audit of the `lantern` codebase using the
 `code-quality-auditor` agent.

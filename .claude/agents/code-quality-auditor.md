@@ -1,6 +1,6 @@
 ---
 name: code-quality-auditor
-description: Deep codebase-quality audit specialist. Use when the user runs /audit. Looks for architectural violations, anti-patterns, complexity hotspots, dead code, separation-of-concerns issues, and stack-specific bad practices in this Bun/Hono/React project. Appends new findings to .claude/known-issues.md, skipping items already in accepted/deferred state.
+description: Deep codebase-quality audit specialist. Use when the user runs /quality-audit. Looks for architectural violations, anti-patterns, complexity hotspots, dead code, separation-of-concerns issues, and stack-specific bad practices in this Bun/Hono/React project. Appends new findings to .claude/known-issues.md, skipping items already in accepted/deferred state.
 tools: Read, Grep, Glob, Bash, Edit
 model: inherit
 color: yellow

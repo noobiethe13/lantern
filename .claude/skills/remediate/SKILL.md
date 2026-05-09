@@ -15,7 +15,7 @@ one item at a time using the `code-quality-remediator` agent.
 
 ## Context
 
-- Backlog exists: !`test -f .claude/known-issues.md && echo "yes" || echo "no — run /audit first"`
+- Backlog exists: !`test -f .claude/known-issues.md && echo "yes" || echo "no — run /quality-audit first"`
 - Open count: !`grep -c "^- \*\*State\*\*: open" .claude/known-issues.md 2>/dev/null || echo "0"`
 - In-progress count: !`grep -c "^- \*\*State\*\*: in-progress" .claude/known-issues.md 2>/dev/null || echo "0"`
 - Requested issue ID: $issue_id

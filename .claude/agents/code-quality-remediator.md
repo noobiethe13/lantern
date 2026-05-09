@@ -62,7 +62,7 @@ project policy (CLAUDE.md, universal principles).
 
 Make the minimum changes required. Preserve existing patterns even when
 you'd write differently from scratch. No drive-by fixes — surface those
-separately as new `/audit` candidates if you spot them.
+separately as new `/quality-audit` candidates if you spot them.
 
 Update the issue state to `in-progress` in known-issues.md if not
 already.

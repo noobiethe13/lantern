@@ -51,7 +51,7 @@ Multi-session feature work using the 3-file session-continuity pattern.
   ask "why" about.
 - If the plan changes mid-stream, edit `plan.md` (don't keep stale
   guidance lying around).
-- Surface anything that warrants its own backlog item to `/audit`'s
+- Surface anything that warrants its own backlog item to `/quality-audit`'s
   `known-issues.md` rather than absorbing it into the feature scope.
 
 ## Verification before declaring the feature done

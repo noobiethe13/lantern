@@ -67,7 +67,7 @@ For each candidate finding:
   `high` (latent exploit, missing auth, injection), `medium` (defense
   in depth missing), `low` (hygiene)
 - Confidence (0-10): only report 6+ for security (lower threshold than
-  /audit because security false-negatives are costlier)
+  /quality-audit because security false-negatives are costlier)
 - Drop items already in `.claude/security-findings.md` with state
   `accepted` or `deferred`
 
