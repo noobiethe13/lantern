@@ -103,11 +103,11 @@ When Claude makes a recurring mistake on this codebase, the team adds a
 line here so it doesn't happen again. Add entries as factual statements,
 not narrative. Keep entries concise.
 
-The ecosystem-review hook (set up in Phase 4) may also propose entries
-when it spots patterns worth recording — a recurring correction across a
-batch, a non-obvious gotcha just encountered. Claude surfaces those
-proposals to you for approval before appending; the hook never
-auto-edits this section.
+The `docs-maintainer` agent (run via `/docs-sync`) may also propose
+entries when it spots patterns worth recording — a recurring correction
+across a batch, a non-obvious gotcha just encountered. It surfaces
+those proposals for approval before appending; it never auto-edits this
+section.
 
 <!-- Example: "API responses are camelCase on the wire, snake_case in
 internal types — convert at the boundary in src/api/client.ts" -->
@@ -122,9 +122,8 @@ future sessions respect it._
 
 ## Skills available in this project
 
-<!-- This section is auto-maintained by the ecosystem-review hook
-     (set up in Phase 4). It lists the skills in .claude/skills/ and
-     their purpose. -->
+<!-- Keep this list in sync with .claude/skills/. Run /docs-sync to
+     check for drift. -->
 
 - `/quality-audit` — codebase quality scan; appends to `.claude/known-issues.md`
 - `/remediate [issue-id]` — work through a quality issue end-to-end
@@ -132,14 +131,17 @@ future sessions respect it._
 - `/pr-review [pr-number]` — project-aware PR review (replaces deprecated built-in `/review`)
 - `/rca <symptom>` — root-cause analysis on a bug; investigates only, does not apply
 - `/feature <description|resume>` — multi-session feature work using the 3-file session pattern
+- `/docs-sync [check | create <doc-type>]` — manually review every project .md file for drift, or generate a new doc (README, LICENSE, CONTRIBUTING, CHANGELOG, ARCHITECTURE, ADR)
 - `session` — universal 3-file session-continuity pattern (referenced by `/feature`, multi-session `/remediate`, complex `/rca`)
 
 ## Agents available in this project
 
-<!-- Same as above — auto-maintained. -->
+<!-- Keep this list in sync with .claude/agents/. Run /docs-sync to
+     check for drift. -->
 
 - `code-quality-auditor` — paired with `/quality-audit`. Read-mostly; appends only to `.claude/known-issues.md`.
 - `code-quality-remediator` — paired with `/remediate`. Has project memory at `.claude/agent-memory/code-quality-remediator/`.
 - `security-auditor` — paired with `/security-audit`. Read-mostly; appends only to `.claude/security-findings.md`.
 - `code-reviewer` — paired with `/pr-review`. Has project memory at `.claude/agent-memory/code-reviewer/`.
 - `bug-investigator` — paired with `/rca`. Read-only against the codebase; has project memory at `.claude/agent-memory/bug-investigator/`.
+- `docs-maintainer` — paired with `/docs-sync`. Reviews every .md file for drift and generates new docs on request; never auto-edits human-authored docs. Has project memory at `.claude/agent-memory/docs-maintainer/`.

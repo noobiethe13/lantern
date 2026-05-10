@@ -16,6 +16,9 @@ data/
 # Bootstrap / per-session scratch
 .claude/session/
 
+# User-local Claude Code overrides (permissions, personal prefs)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

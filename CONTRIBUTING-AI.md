@@ -32,10 +32,12 @@ Anthropic auth.
 | Work an item from the quality backlog   | `/remediate [issue-id]`                  |
 | Codebase security audit                 | `/security-audit`                        |
 | Root-cause investigation on a bug       | `/rca <symptom>`                         |
+| Review project docs for drift           | `/docs-sync` (or `/docs-sync check`)     |
+| Generate a new doc                      | `/docs-sync create <type>`               |
 
 ## Available skills (project-specific)
 
-All seven project skills are configured with `disable-model-invocation:
+All eight project skills are configured with `disable-model-invocation:
 true`. They run only when you invoke them by slash command — Claude
 won't fire them on its own.
 
@@ -62,13 +64,20 @@ won't fire them on its own.
   `security-auditor` agent. Findings appended to
   `.claude/security-findings.md`. Distinct from `/security-review`
   (which is PR-diff scope).
+- **`/docs-sync [check | create <doc-type>]`** — Manual docs
+  maintenance. Forks to the `docs-maintainer` agent. With no argument
+  or `check`, scans every `.md` file in the project (`.claude/`,
+  top-level, `docs/`) for drift vs the codebase. With
+  `create <doc-type>`, generates a new doc — README, LICENSE,
+  CONTRIBUTING, CHANGELOG, ARCHITECTURE, ADR, or a free-form request.
+  Never auto-edits human-authored docs.
 - **`session`** — Reference-only skill, not a slash command. Documents
   the universal 3-file session-continuity pattern that any
   multi-session workflow should follow.
 
 ## Available agents (project-specific)
 
-Five specialist agents back the workflow skills above. You generally
+Six specialist agents back the workflow skills above. You generally
 don't invoke them directly — the skill that owns each one delegates
 when you run the corresponding slash command.
 
@@ -83,6 +92,11 @@ when you run the corresponding slash command.
   at `.claude/agent-memory/code-reviewer/`.
 - **`bug-investigator`** — paired with `/rca`. Read-only against the
   codebase; has project memory at `.claude/agent-memory/bug-investigator/`.
+- **`docs-maintainer`** — paired with `/docs-sync`. Reviews every
+  `.md` file in the project for drift and generates new docs on
+  request. Never auto-edits human-authored docs (README, CHANGELOG,
+  ARCHITECTURE, CONTRIBUTING, the prose sections of CLAUDE.md). Has
+  project memory at `.claude/agent-memory/docs-maintainer/`.
 
 The agent-memory directories don't exist on disk yet — they'll be
 created the first time each agent runs and decides something is worth
@@ -137,11 +151,12 @@ recurring corrections so Claude doesn't repeat them. Two paths:
    - Good: "API responses are camelCase on the wire, snake_case in
      internal types — convert at the boundary in `src/api/client.ts`"
 
-2. **The ecosystem-review hook proposes one.** When the hook spots a
-   pattern worth recording (a recurring correction across a batch, a
-   non-obvious gotcha just encountered), it surfaces the proposal in
-   Claude's context. Claude then asks for your approval before
-   appending. The hook never auto-edits CLAUDE.md.
+2. **`/docs-sync` proposes one.** When you run `/docs-sync`, the
+   `docs-maintainer` agent scans recent activity and may surface
+   Lessons Learned candidates — a recurring correction across the
+   working set, or a non-obvious gotcha worth recording. It asks for
+   your approval before appending. The agent never auto-edits
+   CLAUDE.md.
 
 ## How to add a known issue
 
@@ -176,28 +191,40 @@ deps, persisted state, the Gemini subprocess boundary, attachment
 handling, and the local HTTP server. `/security-review` covers what
 just changed.
 
-## Ecosystem-review hook
+## Manual docs maintenance
 
-A `PostToolBatch` hook configured in `.claude/settings.json` runs
-after every batch of tool calls. It uses Haiku and a 30-second timeout
-to detect drift between `.claude/` infrastructure and other artifacts:
+Earlier iterations of this setup used a `PostToolBatch` ecosystem-review
+hook that ran Haiku after every batch of tool calls. That has been
+removed in favor of an explicit, user-driven workflow: run
+`/docs-sync` when you want a docs check.
 
-- Triggers on edits to `.claude/`, CLAUDE.md, CONTRIBUTING-AI.md, the
-  backlog files, or `docs/`.
-- Also triggers on volume (3+ Edit/Write calls in one batch) — but
-  only enables the "Lessons Learned candidates" check in that case.
-- Outputs JSON `additionalContext` for Claude's next turn. You don't
-  see the output directly; Claude reads it and surfaces actionable
-  items to you.
-- Never auto-modifies human-authored files (CLAUDE.md, README,
-  CHANGELOG). Lessons-Learned and stale-doc suggestions always require
-  your sign-off.
+Why manual:
 
-If the hook ever fires too aggressively, two options:
+- Hook output was injected as context for Claude's next turn — you
+  couldn't see it directly, and the signal was noisy on most batches.
+- Most batches have nothing to flag, so the hook's gating logic grew
+  complex and still ran on every batch.
+- A single command you run on team cadence (or before a release) is
+  easier to reason about and produces a clear, reviewable report.
 
-- Adjust the prompt's confidence threshold inline in
-  `.claude/settings.json`.
-- Disable temporarily: `/hooks` → toggle PostToolBatch.
+What `/docs-sync` covers:
+
+- Every `.md` file under `.claude/` (skills, agents, top-level
+  backlogs), every top-level `.md` (README, CHANGELOG, ARCHITECTURE,
+  CONTRIBUTING, CLAUDE.md), and everything under `docs/` (including
+  ADRs).
+- Index sync between CLAUDE.md and `.claude/skills/` /
+  `.claude/agents/`.
+- Stale command/path/library references vs the current `package.json`
+  and `src/`.
+- Backlog freshness — file paths in `open` known-issues / security
+  findings that no longer exist.
+- Cross-doc consistency — same fact stated differently in two places.
+
+`/docs-sync create <type>` generates new docs from scratch (README,
+LICENSE, CONTRIBUTING, CHANGELOG, ARCHITECTURE, ADRs). Existing files
+are never overwritten — the agent switches to suggesting an update
+patch instead.
 
 ## Contributing to the setup itself
 
@@ -214,12 +241,12 @@ To extend Claude's project capabilities:
   so the rule only loads when relevant files are in context.
 - **Add a hook**: extend `.claude/settings.json` under `hooks`. Use
   `type: command` for shell scripts, `type: prompt` for inline
-  LLM-driven hooks (like the existing ecosystem-review hook).
+  LLM-driven hooks. There are no project-level hooks configured today.
 
 When you add a skill or agent, also update the `Skills available in
 this project` and `Agents available in this project` indexes in
-[CLAUDE.md](CLAUDE.md). The ecosystem-review hook will flag drift if
-you forget.
+[CLAUDE.md](CLAUDE.md). Run `/docs-sync` afterwards to confirm the
+indexes match what's on disk.
 
 For richer skill scaffolding (with eval support), install
 `/skill-creator`:
@@ -234,13 +261,9 @@ For richer skill scaffolding (with eval support), install
   watches directories live, but newly-added top-level skill
   directories may need a session restart before they appear in
   `/skills`.
-- **"The ecosystem hook never fires"** — confirm `.claude/settings.json`
-  is valid JSON (any JSON validator works; or paste it into a
-  syntax-highlighter). A parse failure silently disables the hook.
-- **"I see the hook noted drift but Claude didn't act on it"** — the
-  hook injects context for Claude's next turn. If Claude's turn ends
-  immediately after the hook fires, the context goes unread. Continue
-  the session and Claude will see it.
+- **"`/docs-sync` flagged drift that isn't actually drift"** — tell the
+  agent in chat. It writes accepted exceptions to
+  `.claude/agent-memory/docs-maintainer/` so future runs skip them.
 - **"Token cost feels high after this setup"** — run `/context` to see
   what's loading per session. Path-scoped rules and skills with
   `disable-model-invocation: true` shouldn't load unless triggered.
