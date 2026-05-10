@@ -1,0 +1,94 @@
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { db } from '../db/client';
+
+export const jobs = new Hono();
+
+const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden', 'archived'] as const;
+
+jobs.get('/', c => {
+  const status = c.req.query('status');
+  const l1 = c.req.query('l1');
+  const l2 = c.req.query('l2');
+  const q = c.req.query('q');
+  const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
+  const offset = Number(c.req.query('offset') ?? 0);
+
+  type Binding = string | number | null;
+  const conditions: string[] = [];
+  const params: Binding[] = [];
+
+  if (status) {
+    const statuses = status.split(',').filter(s => JOB_STATUSES.includes(s as typeof JOB_STATUSES[number]));
+    if (statuses.length > 0) {
+      conditions.push(`j.status IN (${statuses.map(() => '?').join(',')})`);
+      params.push(...statuses);
+    }
+  }
+  if (l1 === '1') conditions.push('j.l1_pass = 1');
+  if (l2 === '1') conditions.push('j.l2_verdict_json IS NOT NULL');
+  if (q) {
+    conditions.push('(j.title LIKE ? OR j.company LIKE ?)');
+    params.push(`%${q}%`, `%${q}%`);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const rows = db.query<Record<string, unknown>, Binding[]>(
+    `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+     FROM jobs j
+     LEFT JOIN sources s ON s.id = j.source_id
+     ${where}
+     ORDER BY j.first_seen DESC
+     LIMIT ? OFFSET ?`
+  ).all(...params, limit, offset);
+
+  const total = db.query<{ n: number }, Binding[]>(
+    `SELECT COUNT(*) AS n FROM jobs j ${where}`
+  ).get(...params)?.n ?? 0;
+
+  return c.json({ jobs: rows.map(parseJobRow), total, limit, offset });
+});
+
+jobs.get('/:id', c => {
+  const row = db.query<Record<string, unknown>, [number]>(
+    `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+     FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
+     WHERE j.id = ?`
+  ).get(Number(c.req.param('id')));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  return c.json(parseJobRow(row));
+});
+
+jobs.patch('/:id/status', async c => {
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = z.object({ status: z.enum(JOB_STATUSES) }).safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+
+  const { status } = parsed.data;
+  const id = Number(c.req.param('id'));
+  const now = Date.now();
+  db.run(
+    `UPDATE jobs SET status = ?, applied_at = CASE WHEN ? = 'applied' AND applied_at IS NULL THEN ? ELSE applied_at END WHERE id = ?`,
+    [status, status, now, id]
+  );
+  return c.json({ ok: true });
+});
+
+jobs.patch('/:id/notes', async c => {
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = z.object({ notes: z.string().max(4000) }).safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+
+  db.run('UPDATE jobs SET notes = ? WHERE id = ?', [parsed.data.notes, Number(c.req.param('id'))]);
+  return c.json({ ok: true });
+});
+
+function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
+  const { l2_verdict_json, l1_reasons, ...rest } = row;
+  return {
+    ...rest,
+    l2_verdict: l2_verdict_json ? JSON.parse(l2_verdict_json as string) : null,
+    l1_reasons: l1_reasons ? JSON.parse(l1_reasons as string) : null,
+  };
+}

@@ -10,6 +10,7 @@ import type { Job } from '../core/job';
 import { callGeminiValidated } from '../llm/gemini';
 import { VerdictShape } from '../llm/schemas';
 import { verdictPrompt } from '../llm/prompts';
+import { bus, type ScanEvent } from './progress';
 
 interface SeedSource {
   type: string;
@@ -27,7 +28,25 @@ interface DbSource {
   config_json: string | null;
 }
 
-function loadCriteriaRaw(): string {
+export interface L2JobRow {
+  id: number;
+  title: string;
+  company: string;
+  location: string | null;
+  jd_text: string | null;
+}
+
+export interface ScanOptions {
+  onEvent?: (event: ScanEvent) => void;
+}
+
+let isScanning = false;
+
+export function getScanningState(): boolean {
+  return isScanning;
+}
+
+export function loadCriteriaRaw(): string {
   try {
     const criteriaRow = db
       .query<{ yaml: string }, []>('SELECT yaml FROM criteria WHERE id = 1')
@@ -40,7 +59,7 @@ function loadCriteriaRaw(): string {
   return readFileSync(searchYml, 'utf-8');
 }
 
-function loadCriteria(): Criteria {
+export function loadCriteria(): Criteria {
   return yaml.load(loadCriteriaRaw()) as Criteria;
 }
 
@@ -113,8 +132,13 @@ function upsertJob(
 
 const CONCURRENCY = 10;
 
-async function runScan(): Promise<number> {
+export async function runScan(opts?: ScanOptions): Promise<number> {
+  const emit = (type: ScanEvent['type'], msg: string, data?: Record<string, unknown>) => {
+    opts?.onEvent?.({ runId: 0, type, msg, data });
+  };
+
   console.log('lantern — starting scan');
+  emit('start', 'Starting scan');
 
   seedSources();
 
@@ -126,13 +150,18 @@ async function runScan(): Promise<number> {
 
   const criteria = loadCriteria();
   console.log(`Sources enabled: ${sources.length}`);
+  emit('start', `Sources enabled: ${sources.length}`, { sourcesTotal: sources.length });
 
-  // Insert run record
   const runId = db
     .query<{ id: number }, [number, number]>(
       'INSERT INTO runs (started_at, sources_total) VALUES (?, ?) RETURNING id'
     )
     .get(Date.now(), sources.length)!.id;
+
+  // Re-emit start with the actual runId so the bus has it
+  if (opts?.onEvent) {
+    opts.onEvent({ runId, type: 'start', msg: `Run #${runId} started`, data: { runId, sourcesTotal: sources.length } });
+  }
 
   const runErrors: { source: string; error: string }[] = [];
   let jobsFound = 0;
@@ -141,7 +170,6 @@ async function runScan(): Promise<number> {
 
   const abort = new AbortController();
 
-  // Process sources in batches of CONCURRENCY
   for (let i = 0; i < sources.length; i += CONCURRENCY) {
     const batch = sources.slice(i, i + CONCURRENCY);
 
@@ -153,6 +181,9 @@ async function runScan(): Promise<number> {
           return;
         }
 
+        bus.emit({ runId, type: 'source_start', msg: `Scanning ${source.display_name}`, data: { source: source.display_name } });
+        opts?.onEvent?.({ runId, type: 'source_start', msg: `Scanning ${source.display_name}`, data: { source: source.display_name } });
+
         const config: Record<string, unknown> = {
           identifier: source.identifier,
           display_name: source.display_name,
@@ -162,7 +193,11 @@ async function runScan(): Promise<number> {
         const ctx = {
           sourceId: source.id,
           config,
-          emitProgress: (msg: string, _n?: number) => console.log(`  ${msg}`),
+          emitProgress: (msg: string, _n?: number) => {
+            console.log(`  ${msg}`);
+            bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });
+            opts?.onEvent?.({ runId, type: 'job_found', msg, data: { source: source.display_name } });
+          },
           abortSignal: abort.signal,
         };
 
@@ -182,6 +217,10 @@ async function runScan(): Promise<number> {
             `UPDATE sources SET last_scan_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?`,
             [Date.now(), source.id]
           );
+
+          const doneMsg = `${source.display_name}: ${sourceJobCount} jobs`;
+          bus.emit({ runId, type: 'source_done', msg: doneMsg, data: { source: source.display_name, count: sourceJobCount } });
+          opts?.onEvent?.({ runId, type: 'source_done', msg: doneMsg, data: { source: source.display_name, count: sourceJobCount } });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`  [error] ${source.display_name}: ${msg}`);
@@ -190,6 +229,8 @@ async function runScan(): Promise<number> {
             `UPDATE sources SET last_scan_at = ?, last_status = 'http-error', last_error = ? WHERE id = ?`,
             [Date.now(), msg, source.id]
           );
+          bus.emit({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}`, data: { source: source.display_name, error: msg } });
+          opts?.onEvent?.({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}` });
         }
 
         return sourceJobCount;
@@ -203,7 +244,6 @@ async function runScan(): Promise<number> {
     }
   }
 
-  // Update run record
   db.run(
     `UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, jobs_l1_pass = ?, errors_json = ?
      WHERE id = ?`,
@@ -217,29 +257,24 @@ async function runScan(): Promise<number> {
     ]
   );
 
+  const summary = `Scan complete — found: ${jobsFound}, new: ${jobsNew}, L1 pass: ${jobsL1Pass}`;
   console.log('\n── Scan complete ─────────────────────────');
   console.log(`  Jobs found:    ${jobsFound}`);
   console.log(`  Jobs new:      ${jobsNew}`);
   console.log(`  L1 passed:     ${jobsL1Pass}`);
   if (runErrors.length > 0) {
     console.log(`  Errors:        ${runErrors.length}`);
-    for (const e of runErrors) {
-      console.log(`    ${e.source}: ${e.error}`);
-    }
+    for (const e of runErrors) console.log(`    ${e.source}: ${e.error}`);
   }
   console.log('─────────────────────────────────────────\n');
+
+  bus.emit({ runId, type: 'done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, errors: runErrors.length } });
+  opts?.onEvent?.({ runId, type: 'done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, errors: runErrors.length } });
+
   return runId;
 }
 
-interface L2JobRow {
-  id: number;
-  title: string;
-  company: string;
-  location: string | null;
-  jd_text: string | null;
-}
-
-async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
+export async function runL2Pass(runId: number, criteriaYaml: string, opts?: ScanOptions): Promise<void> {
   const jobs = db
     .query<L2JobRow, []>(
       `SELECT id, title, company, location, jd_text
@@ -250,10 +285,15 @@ async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
 
   if (jobs.length === 0) {
     console.log('L2: no pending jobs');
+    bus.emit({ runId, type: 'l2_done', msg: 'L2: no pending jobs', data: { l2Pass: 0, errors: 0 } });
+    opts?.onEvent?.({ runId, type: 'l2_done', msg: 'L2: no pending jobs', data: { l2Pass: 0 } });
     return;
   }
 
-  console.log(`\nL2 — scoring ${jobs.length} jobs with Gemini Pro...`);
+  const l2Start = `L2 — scoring ${jobs.length} jobs with Gemini Pro...`;
+  console.log(`\n${l2Start}`);
+  bus.emit({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
+  opts?.onEvent?.({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
 
   let l2Pass = 0;
   const errors: { id: number; error: string }[] = [];
@@ -279,6 +319,9 @@ async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
       ]);
       if (verdict.fit) l2Pass++;
       process.stdout.write('.');
+      const progressMsg = `L2: scored "${job.title}" at ${job.company}`;
+      bus.emit({ runId, type: 'l2_progress', msg: progressMsg, data: { jobId: job.id, fit: verdict.fit, score: verdict.score } });
+      opts?.onEvent?.({ runId, type: 'l2_progress', msg: progressMsg, data: { jobId: job.id, fit: verdict.fit } });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push({ id: job.id, error: msg });
@@ -295,11 +338,27 @@ async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
 
   db.run('UPDATE runs SET jobs_l2_pass = ? WHERE id = ?', [l2Pass, runId]);
 
-  console.log(`L2 complete — fit: ${l2Pass}, errors: ${errors.length}`);
+  const doneMsg = `L2 complete — fit: ${l2Pass}, errors: ${errors.length}`;
+  console.log(doneMsg);
   if (errors.length > 0) {
     for (const e of errors.slice(0, 5)) {
       console.error(`  [l2 error] job ${e.id}: ${e.error}`);
     }
+  }
+  bus.emit({ runId, type: 'l2_done', msg: doneMsg, data: { l2Pass, errors: errors.length } });
+  opts?.onEvent?.({ runId, type: 'l2_done', msg: doneMsg, data: { l2Pass, errors: errors.length } });
+}
+
+export async function runFull(opts?: ScanOptions): Promise<number> {
+  if (isScanning) throw new Error('A scan is already running');
+  isScanning = true;
+  try {
+    const runId = await runScan(opts);
+    const criteriaYaml = loadCriteriaRaw();
+    await runL2Pass(runId, criteriaYaml, opts);
+    return runId;
+  } finally {
+    isScanning = false;
   }
 }
 
