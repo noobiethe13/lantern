@@ -2,11 +2,15 @@ import type { SourceAdapter } from '../core/job';
 import { GreenhouseAdapter } from './greenhouse';
 import { AshbyAdapter } from './ashby';
 import { LeverAdapter } from './lever';
+import { HNWhosHiringAdapter } from './hn-whos-hiring';
+import { GenericUrlAdapter } from './generic-url';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
   ashby: new AshbyAdapter(),
   lever: new LeverAdapter(),
+  'hn-whos-hiring': new HNWhosHiringAdapter(),
+  'generic-url': new GenericUrlAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {
