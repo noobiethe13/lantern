@@ -7,6 +7,9 @@ import { l1Filter, type Criteria } from '../core/filter';
 import { contentHash } from '../core/dedup';
 import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
+import { callGeminiValidated } from '../llm/gemini';
+import { VerdictShape } from '../llm/schemas';
+import { verdictPrompt } from '../llm/prompts';
 
 interface SeedSource {
   type: string;
@@ -24,19 +27,21 @@ interface DbSource {
   config_json: string | null;
 }
 
-function loadCriteria(): Criteria {
+function loadCriteriaRaw(): string {
   try {
     const criteriaRow = db
       .query<{ yaml: string }, []>('SELECT yaml FROM criteria WHERE id = 1')
       .get();
-    if (criteriaRow) {
-      return yaml.load(criteriaRow.yaml) as Criteria;
-    }
+    if (criteriaRow) return criteriaRow.yaml;
   } catch {
     // fall through to file
   }
   const searchYml = join(process.cwd(), 'src/config/search.yml');
-  return yaml.load(readFileSync(searchYml, 'utf-8')) as Criteria;
+  return readFileSync(searchYml, 'utf-8');
+}
+
+function loadCriteria(): Criteria {
+  return yaml.load(loadCriteriaRaw()) as Criteria;
 }
 
 function seedSources(): void {
@@ -66,13 +71,15 @@ function upsertJob(
   const row = toDbRow(job, sourceId, hash);
   const now = Date.now();
 
-  // Check if exists
   const existing = db
     .query<{ id: number }, [string]>('SELECT id FROM jobs WHERE url = ?')
     .get(job.url);
 
   if (existing) {
-    db.run('UPDATE jobs SET last_seen = ? WHERE url = ?', [now, job.url]);
+    db.run(
+      'UPDATE jobs SET last_seen = ?, l1_pass = ?, l1_reasons = ? WHERE url = ?',
+      [now, l1Pass ? 1 : 0, l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null, job.url]
+    );
     return 'seen';
   }
 
@@ -106,7 +113,7 @@ function upsertJob(
 
 const CONCURRENCY = 10;
 
-async function runScan(): Promise<void> {
+async function runScan(): Promise<number> {
   console.log('lantern — starting scan');
 
   seedSources();
@@ -221,6 +228,87 @@ async function runScan(): Promise<void> {
     }
   }
   console.log('─────────────────────────────────────────\n');
+  return runId;
 }
 
-await runScan();
+interface L2JobRow {
+  id: number;
+  title: string;
+  company: string;
+  location: string | null;
+  jd_text: string | null;
+}
+
+async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
+  const jobs = db
+    .query<L2JobRow, []>(
+      `SELECT id, title, company, location, jd_text
+       FROM jobs
+       WHERE l1_pass = 1 AND l2_verdict_json IS NULL`
+    )
+    .all();
+
+  if (jobs.length === 0) {
+    console.log('L2: no pending jobs');
+    return;
+  }
+
+  console.log(`\nL2 — scoring ${jobs.length} jobs with Gemini Pro...`);
+
+  let l2Pass = 0;
+  const errors: { id: number; error: string }[] = [];
+  let isFirstJob = true;
+
+  for (const job of jobs) {
+    const prompt = verdictPrompt(
+      criteriaYaml,
+      job.title,
+      job.company,
+      job.location ?? '',
+      job.jd_text ?? ''
+    );
+
+    try {
+      const verdict = await callGeminiValidated(
+        { model: 'gemini-2.5-pro', prompt },
+        VerdictShape
+      );
+      db.run('UPDATE jobs SET l2_verdict_json = ? WHERE id = ?', [
+        JSON.stringify(verdict),
+        job.id,
+      ]);
+      if (verdict.fit) l2Pass++;
+      process.stdout.write('.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({ id: job.id, error: msg });
+      process.stdout.write('!');
+      if (isFirstJob) {
+        console.error(`\n[l2] first job failed — stopping early: ${msg}`);
+        break;
+      }
+    }
+    isFirstJob = false;
+  }
+
+  process.stdout.write('\n');
+
+  db.run('UPDATE runs SET jobs_l2_pass = ? WHERE id = ?', [l2Pass, runId]);
+
+  console.log(`L2 complete — fit: ${l2Pass}, errors: ${errors.length}`);
+  if (errors.length > 0) {
+    for (const e of errors.slice(0, 5)) {
+      console.error(`  [l2 error] job ${e.id}: ${e.error}`);
+    }
+  }
+}
+
+if (import.meta.main) {
+  const scoreL2 = process.argv.includes('--score-l2');
+  await runScan().then(async runId => {
+    if (scoreL2) {
+      const criteriaYaml = loadCriteriaRaw();
+      await runL2Pass(runId, criteriaYaml);
+    }
+  });
+}
