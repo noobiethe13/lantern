@@ -13,7 +13,7 @@ Run a periodic security audit of the `lantern` codebase using the
 
 ## Context
 
-- Project: !`basename $(pwd)`
+- Project: !pwd
 - Last audit date: !`grep "^- \*\*Identified\*\*" .claude/security-findings.md 2>/dev/null | tail -1 | sed 's/^- \*\*Identified\*\*: //' || echo "(no prior audit found)"`
 - Open security finding count: !`grep -c "^- \*\*State\*\*: open" .claude/security-findings.md 2>/dev/null || echo "0"`
 - Critical open count: !`grep -B1 "^- \*\*Severity\*\*: critical" .claude/security-findings.md 2>/dev/null | grep -c "^- \*\*State\*\*: open" || echo "0"`

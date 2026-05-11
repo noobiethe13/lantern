@@ -13,7 +13,7 @@ Run a deep code-quality audit of the `lantern` codebase using the
 
 ## Context
 
-- Project: !`basename $(pwd)`
+- Project: !pwd
 - Branch: !`git branch --show-current`
 - Last audit identified date: !`grep "^- \*\*Identified\*\*" .claude/known-issues.md 2>/dev/null | tail -1 | sed 's/^- \*\*Identified\*\*: //' || echo "(no prior audit found)"`
 - Open issue count: !`grep -c "^- \*\*State\*\*: open" .claude/known-issues.md 2>/dev/null || echo "0"`

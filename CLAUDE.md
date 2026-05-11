@@ -11,11 +11,6 @@ L1 YAML rules + Gemini CLI L2 verdicts. SQLite store. Local web UI at
 `localhost:3000`. Runs on the user's own machine using their Google AI Pro
 quota via the Gemini CLI subprocess — no paid API keys, no cloud.
 
-> **Status:** the canonical spec for the project lives at
-> `C:\Users\Debayan\.claude\plans\review-this-codebase-want-scalable-badger.md`
-> and `.claude/session/project-intent.md`. Code may not exist yet — paths
-> below describe the planned layout in `src/`, `ui/`, `scripts/`, `data/`.
-
 ## Stack
 
 - **Bun** (runtime, not Node) — native TS, `bun:sqlite`, builtin fetch.
@@ -114,11 +109,7 @@ internal types — convert at the boundary in src/api/client.ts" -->
 
 ## Architectural notes — work with these, not against them
 
-_None yet. The structural red-flag review at Phase 1 found no codebase
-to review (lantern is pre-implementation as of 2026-05-09). When the team
-accepts a non-obvious pattern as the way things are done here — something
-Claude might otherwise try to "fix" — record it as 1–3 factual lines so
-future sessions respect it._
+_None yet. When the team accepts a non-obvious pattern as the way things are done here — something Claude might otherwise try to "fix" — record it as 1–3 factual lines so future sessions respect it._
 
 ## Skills available in this project
 

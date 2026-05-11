@@ -16,7 +16,7 @@ aligned with the codebase, or to generate a new doc.
 
 ## Context
 
-- Project: !`basename $(pwd)`
+- Project: !pwd
 - Branch: !`git branch --show-current`
 - Recent commits: !`git log --oneline -20 2>/dev/null || echo "(no git history)"`
 - Top-level .md files: !`ls *.md 2>/dev/null || echo "(none)"`
