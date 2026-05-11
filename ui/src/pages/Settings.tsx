@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CheckCircle2, XCircle, Circle, Trash2, Plus,
-  Wand2, Save, AlertCircle,
+  Wand2, Save, AlertCircle, RefreshCw,
 } from 'lucide-react';
-import { api, type Source, type Criteria, type SourceType } from '@/lib/api';
-import { Button, Input, Textarea, Badge, Spinner } from '@/components/ui';
+import { api, type Source, type Criteria, type SourceType, type HealthCheck } from '@/lib/api';
+import { Button, Input, Textarea, Badge, Spinner, useToast } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -452,6 +452,143 @@ function SourcesSection() {
   );
 }
 
+// ─── Health section ───────────────────────────────────────────────────────────
+
+const HEALTH_LABELS: Record<string, string> = {
+  db:            'Database',
+  gemini:        'Gemini CLI',
+  playwright:    'Playwright / Chromium',
+  browserProfile:'Browser profile (X/Grok)',
+};
+
+const HEALTH_FIX: Record<string, string> = {
+  db:            'Check that data/ is writable. Run: bun run setup',
+  gemini:        'Install: npm i -g @google/gemini-cli  then run: gemini auth',
+  playwright:    'Run: bun x playwright install chromium',
+  browserProfile:'Run: bun run setup  and complete the X/Grok login step.',
+};
+
+function HealthRow({ name, status }: { name: string; status: { ok: boolean; detail?: string } }) {
+  const [open, setOpen] = useState(false);
+  const label = HEALTH_LABELS[name] ?? name;
+
+  return (
+    <div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 16px',
+          borderBottom: '1px solid var(--border-subtle)',
+          cursor: status.ok ? 'default' : 'pointer',
+        }}
+        onClick={() => !status.ok && setOpen(o => !o)}
+      >
+        {status.ok
+          ? <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+          : <XCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+        }
+        <span style={{ fontSize: '13px', color: 'var(--text)', flex: 1 }}>{label}</span>
+        {status.detail && status.ok && (
+          <span style={{ fontSize: '11px', color: 'var(--text-faint)', fontFamily: 'var(--mono)' }}>
+            {status.detail.slice(0, 60)}
+          </span>
+        )}
+        {!status.ok && (
+          <span style={{ fontSize: '11px', color: 'var(--accent-hover)', fontWeight: 500 }}>
+            {open ? 'Hide fix' : 'How to fix'}
+          </span>
+        )}
+      </div>
+      {!status.ok && open && (
+        <div
+          style={{
+            padding: '10px 16px 10px 40px',
+            background: 'rgba(239,68,68,0.04)',
+            borderBottom: '1px solid var(--border-subtle)',
+            fontSize: '12px',
+            color: 'var(--text-muted)',
+            animation: 'fadeIn 150ms ease-out',
+          }}
+        >
+          <div style={{ marginBottom: 4, color: 'var(--danger)', fontSize: '11px' }}>
+            {status.detail}
+          </div>
+          <code style={{ fontFamily: 'var(--mono)', fontSize: '12px', color: 'var(--text)' }}>
+            {HEALTH_FIX[name]}
+          </code>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HealthSection() {
+  const [health, setHealth] = useState<HealthCheck | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const toast = useToast();
+
+  const check = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.health.check();
+      setHealth(res);
+      setCheckedAt(Date.now());
+      if (!res.ok) toast('Some health checks failed — see details below.', 'error');
+    } catch (e) {
+      toast(`Health check failed: ${String(e)}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => { check(); }, [check]);
+
+  const entries = health ? Object.entries(health.checks) : [];
+  const ordered = ['db', 'gemini', 'playwright', 'browserProfile'].map(k => {
+    const found = entries.find(([name]) => name === k);
+    return found ?? [k, { ok: false, detail: 'not checked' }] as [string, { ok: boolean; detail?: string }];
+  }).concat(entries.filter(([name]) => !['db','gemini','playwright','browserProfile'].includes(name)));
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <h2 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+          Health
+        </h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {checkedAt && !loading && (
+            <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>
+              Checked {new Date(checkedAt).toLocaleTimeString()}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={check} loading={loading} style={{ gap: 5 }}>
+            <RefreshCw size={12} />
+            Re-check
+          </Button>
+        </div>
+      </div>
+      <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-muted)' }}>
+        Runtime dependencies lantern needs to scan.
+      </p>
+
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+        {loading && health === null ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+            <Spinner />
+          </div>
+        ) : (
+          ordered.map(([name, status]) => (
+            <HealthRow key={name} name={name} status={status} />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function Settings() {
@@ -465,6 +602,8 @@ export default function Settings() {
         <CriteriaSection />
         <div style={{ height: 1, background: 'var(--border)' }} />
         <SourcesSection />
+        <div style={{ height: 1, background: 'var(--border)' }} />
+        <HealthSection />
         <div style={{ height: 1, background: 'var(--border)' }} />
         <DangerZone />
       </div>

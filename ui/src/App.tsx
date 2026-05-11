@@ -1,10 +1,31 @@
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Briefcase, Play, Settings as SettingsIcon, Zap } from 'lucide-react';
+import { Briefcase, Play, Settings as SettingsIcon, Zap, Sun, Moon } from 'lucide-react';
 import Jobs from './pages/Jobs';
 import Run from './pages/Run';
 import Settings from './pages/Settings';
+import { ToastProvider } from './components/ui';
+
+function useTheme() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof localStorage !== 'undefined') {
+      return (localStorage.getItem('lantern-theme') as 'dark' | 'light') ?? 'dark';
+    }
+    return 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme === 'light' ? 'light' : '';
+    localStorage.setItem('lantern-theme', theme);
+  }, [theme]);
+
+  const toggle = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+  return { theme, toggle };
+}
 
 function Sidebar() {
+  const { theme, toggle } = useTheme();
+
   const navClass = ({ isActive }: { isActive: boolean }) =>
     [
       'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-fast',
@@ -27,7 +48,7 @@ function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex flex-col gap-0.5">
+      <nav className="flex flex-col gap-0.5 flex-1">
         <NavLink to="/jobs" className={navClass}>
           <Briefcase size={15} />
           Jobs
@@ -41,6 +62,39 @@ function Sidebar() {
           Settings
         </NavLink>
       </nav>
+
+      {/* Theme toggle */}
+      <button
+        onClick={toggle}
+        title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 12px',
+          borderRadius: '8px',
+          background: 'none',
+          border: 'none',
+          color: 'var(--text-muted)',
+          fontSize: '12px',
+          fontWeight: 500,
+          cursor: 'pointer',
+          transition: 'all 150ms ease-out',
+          width: '100%',
+          fontFamily: 'inherit',
+        }}
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)';
+          (e.currentTarget as HTMLButtonElement).style.background = 'var(--surface-2)';
+        }}
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)';
+          (e.currentTarget as HTMLButtonElement).style.background = 'none';
+        }}
+      >
+        {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+        {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+      </button>
     </aside>
   );
 }
@@ -48,17 +102,19 @@ function Sidebar() {
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
-        <Sidebar />
-        <main className="flex-1 min-w-0 overflow-auto">
-          <Routes>
-            <Route path="/" element={<Navigate to="/jobs" replace />} />
-            <Route path="/jobs" element={<Jobs />} />
-            <Route path="/run" element={<Run />} />
-            <Route path="/settings" element={<Settings />} />
-          </Routes>
-        </main>
-      </div>
+      <ToastProvider>
+        <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
+          <Sidebar />
+          <main className="flex-1 min-w-0 overflow-auto">
+            <Routes>
+              <Route path="/" element={<Navigate to="/jobs" replace />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/run" element={<Run />} />
+              <Route path="/settings" element={<Settings />} />
+            </Routes>
+          </main>
+        </div>
+      </ToastProvider>
     </BrowserRouter>
   );
 }

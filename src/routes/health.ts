@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { db } from '../db/client';
 
 export const health = new Hono();
@@ -35,6 +37,12 @@ health.get('/', async c => {
   } catch (err) {
     checks.playwright = { ok: false, detail: String(err) };
   }
+
+  // Browser profile check
+  const profileDir = join(process.cwd(), 'data', 'browser-profile');
+  checks.browserProfile = existsSync(profileDir)
+    ? { ok: true }
+    : { ok: false, detail: 'data/browser-profile/ not found — run: bun run setup' };
 
   const allOk = Object.values(checks).every(c => c.ok);
   return c.json({ ok: allOk, checks }, allOk ? 200 : 503);

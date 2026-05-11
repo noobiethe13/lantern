@@ -50,6 +50,29 @@
   code, pre, .mono { font-family: var(--mono); }
 }
 
+[data-theme="light"] {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --border: #e4e4e7;
+  --border-subtle: #f0f0f1;
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-faint: #a1a1aa;
+  --accent-hover: #4f46e5;
+  --accent-muted: rgba(99, 102, 241, 0.08);
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 @layer utilities {
   .text-muted { color: var(--text-muted); }
   .text-faint { color: var(--text-faint); }

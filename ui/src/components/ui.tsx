@@ -1,5 +1,9 @@
-import { forwardRef, type ButtonHTMLAttributes, type InputHTMLAttributes, type TextareaHTMLAttributes, type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import {
+  forwardRef, createContext, useContext, useState, useCallback,
+  type ButtonHTMLAttributes, type InputHTMLAttributes,
+  type TextareaHTMLAttributes, type ReactNode,
+} from 'react';
+import { Loader2, X } from 'lucide-react';
 
 // ─── Button ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +215,134 @@ export function Spinner({ size = 16 }: { size?: number }) {
       size={size}
       style={{ animation: 'spin 1s linear infinite', color: 'var(--text-muted)' }}
     />
+  );
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+interface SkeletonProps {
+  width?: string | number;
+  height?: string | number;
+  style?: React.CSSProperties;
+}
+
+export function Skeleton({ width, height, style }: SkeletonProps) {
+  return (
+    <div
+      style={{
+        width: width ?? '100%',
+        height: height ?? '14px',
+        borderRadius: '4px',
+        background: 'linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%)',
+        backgroundSize: '200% 100%',
+        animation: 'skeleton-shimmer 1.4s infinite linear',
+        ...style,
+      }}
+    />
+  );
+}
+
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+type ToastType = 'success' | 'error' | 'info';
+type ToastFn = (msg: string, type?: ToastType) => void;
+
+const ToastContext = createContext<ToastFn>(() => {});
+
+export function useToast(): ToastFn {
+  return useContext(ToastContext);
+}
+
+interface ToastItem {
+  id: number;
+  msg: string;
+  type: ToastType;
+}
+
+const toastBg: Record<ToastType, string> = {
+  success: 'rgba(34,197,94,0.12)',
+  error:   'rgba(239,68,68,0.12)',
+  info:    'var(--surface)',
+};
+const toastBorder: Record<ToastType, string> = {
+  success: 'rgba(34,197,94,0.3)',
+  error:   'rgba(239,68,68,0.3)',
+  info:    'var(--border)',
+};
+const toastColor: Record<ToastType, string> = {
+  success: 'var(--success)',
+  error:   'var(--danger)',
+  info:    'var(--text)',
+};
+
+export function ToastProvider({ children }: { children: ReactNode }) {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const toast = useCallback<ToastFn>((msg, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
+  }, []);
+
+  const dismiss = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
+
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          maxWidth: 380,
+          pointerEvents: 'none',
+        }}
+      >
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              padding: '10px 12px',
+              borderRadius: '9px',
+              fontSize: '13px',
+              lineHeight: 1.4,
+              background: toastBg[t.type],
+              border: `1px solid ${toastBorder[t.type]}`,
+              color: toastColor[t.type],
+              boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+              animation: 'toast-in 200ms ease-out',
+              pointerEvents: 'all',
+            }}
+          >
+            <span style={{ flex: 1 }}>{t.msg}</span>
+            <button
+              onClick={() => dismiss(t.id)}
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'inherit',
+                opacity: 0.6,
+                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0,
+                marginTop: 1,
+              }}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
   );
 }
 
