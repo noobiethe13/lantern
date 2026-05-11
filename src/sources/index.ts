@@ -4,6 +4,7 @@ import { AshbyAdapter } from './ashby';
 import { LeverAdapter } from './lever';
 import { HNWhosHiringAdapter } from './hn-whos-hiring';
 import { GenericUrlAdapter } from './generic-url';
+import { XGrokAdapter } from './x-grok';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
@@ -11,6 +12,7 @@ export const adapterRegistry: Record<string, SourceAdapter> = {
   lever: new LeverAdapter(),
   'hn-whos-hiring': new HNWhosHiringAdapter(),
   'generic-url': new GenericUrlAdapter(),
+  'x-grok': new XGrokAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {

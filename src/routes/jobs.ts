@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
+import { runLivenessCheck } from '../runner/liveness';
 
 export const jobs = new Hono();
 
@@ -82,6 +83,15 @@ jobs.patch('/:id/notes', async c => {
 
   db.run('UPDATE jobs SET notes = ? WHERE id = ?', [parsed.data.notes, Number(c.req.param('id'))]);
   return c.json({ ok: true });
+});
+
+jobs.post('/liveness', async c => {
+  try {
+    const summary = await runLivenessCheck();
+    return c.json(summary);
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
 });
 
 function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
