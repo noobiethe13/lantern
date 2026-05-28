@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { classifyErrorMessage, LlmError } from '../provider';
 import type { HealthcheckResult, LlmProvider, LlmRequest, LlmTask } from '../provider';
 import { zodToProviderSchema } from '../zod-to-schema';
 
@@ -37,7 +38,8 @@ export class OllamaProvider implements LlmProvider {
   async call<T>(req: LlmRequest, schema: z.ZodType<T>): Promise<T> {
     const model = req.modelOverride ?? this.defaultModelFor(req.task);
     if (!model) {
-      throw new Error(
+      throw new LlmError(
+        'fatal',
         `Ollama: no model configured for task '${req.task}'. ` +
         `Pull one (e.g. 'ollama pull llama3.1:8b') and set it under ` +
         `Settings → LLM → Advanced → ${req.task}.`,
@@ -48,12 +50,22 @@ export class OllamaProvider implements LlmProvider {
       const raw = await this.generate(model, req.prompt, schema, req.timeoutMs);
       const first = schema.safeParse(raw);
       if (first.success) return first.data;
-    } catch {
-      // fall through to strict retry
+      console.warn(`[ollama] first-attempt schema error: ${first.error.message}`);
+    } catch (err) {
+      const msg = (err as Error).message;
+      console.warn(`[ollama] first-attempt failed: ${msg}`);
+      if (classifyErrorMessage(msg) === 'fatal') {
+        throw new LlmError('fatal', `ollama: ${msg}`);
+      }
     }
 
-    const strict = await this.generate(model, req.prompt + STRICT_SUFFIX, schema, req.timeoutMs);
-    return schema.parse(strict);
+    try {
+      const strict = await this.generate(model, req.prompt + STRICT_SUFFIX, schema, req.timeoutMs);
+      return schema.parse(strict);
+    } catch (err) {
+      const msg = (err as Error).message;
+      throw new LlmError(classifyErrorMessage(msg), `ollama: ${msg}`);
+    }
   }
 
   async healthcheck(): Promise<HealthcheckResult> {

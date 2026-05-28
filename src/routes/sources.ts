@@ -7,7 +7,7 @@ import { isSourceFetchError, type SourceFetchErrorKind } from '../server/errors'
 
 export const sources = new Hono();
 
-const SOURCE_TYPES = ['greenhouse', 'ashby', 'lever', 'hn-whos-hiring', 'generic-url'] as const;
+const SOURCE_TYPES = ['greenhouse', 'ashby', 'lever', 'hn-whos-hiring', 'generic-url', 'local-parser'] as const;
 
 const CreateSourceSchema = z.object({
   type: z.enum(SOURCE_TYPES),
@@ -36,6 +36,11 @@ function validateIdentifier(type: typeof SOURCE_TYPES[number], identifier: strin
         assertSafeHttpUrl(identifier);
         return null;
       case 'hn-whos-hiring':
+        return null;
+      case 'local-parser':
+        // Trust-the-user: no path-traversal guard, no binary allowlist. The
+        // identifier IS the command line. Only sanity-check that it's not blank.
+        if (!identifier.trim()) return 'local-parser: command cannot be empty';
         return null;
     }
   } catch (err) {

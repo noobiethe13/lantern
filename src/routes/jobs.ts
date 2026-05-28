@@ -95,10 +95,11 @@ jobs.post('/liveness', async c => {
 });
 
 function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
-  const { l2_verdict_json, l1_reasons, ...rest } = row;
+  const { l2_verdict_json, l1_reasons, duplicate_urls, ...rest } = row;
   return {
     ...rest,
     l2_verdict: l2_verdict_json ? JSON.parse(l2_verdict_json as string) : null,
     l1_reasons: l1_reasons ? JSON.parse(l1_reasons as string) : null,
+    duplicate_urls: duplicate_urls ? JSON.parse(duplicate_urls as string) : null,
   };
 }

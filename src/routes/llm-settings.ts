@@ -8,11 +8,12 @@ import { OLLAMA_DEFAULT_BASE_URL, OllamaProvider } from '../llm/providers/ollama
 export const llmSettings = new Hono();
 
 const TASKS = ['verdict', 'nl-filter', 'html-extract', 'hn-extract'] as const;
-const PROVIDERS = ['gemini-api', 'claude-code', 'antigravity-cli', 'ollama'] as const;
+const PROVIDERS = ['gemini-api', 'anthropic-api', 'claude-code', 'antigravity-cli', 'ollama'] as const;
 
 const LlmSettingsSchema = z.object({
   provider: z.enum(PROVIDERS),
   gemini_api_key: z.string().optional(),
+  anthropic_api_key: z.string().optional(),
   ollama_base_url: z.string().url().optional(),
   per_task_overrides: z.record(z.enum(TASKS), z.string().min(1).max(120)).optional(),
 });
@@ -30,12 +31,22 @@ function readSettings(): LlmSettingsBody {
   return parsed.success ? parsed.data : DEFAULT;
 }
 
+// Providers that ship but don't have a working backend yet (currently:
+// antigravity-cli, which is a stub until Google publishes a headless contract
+// for the `agy` binary). Surfaced to the UI so it can render a non-blocking
+// "unsupported" badge instead of letting users select a provider that errors
+// out on the first call.
+const UNSUPPORTED_PROVIDERS: Partial<Record<ProviderName, string>> = {
+  'antigravity-cli': "No documented headless JSON mode yet. Switch to another provider.",
+};
+
 llmSettings.get('/', c => {
   return c.json({
     settings: readSettings(),
     available_providers: PROVIDERS,
     tasks: TASKS,
     deprecations: {} as Record<ProviderName, string>,
+    unsupported: UNSUPPORTED_PROVIDERS,
   });
 });
 

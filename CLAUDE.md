@@ -18,8 +18,9 @@ no user-facing CLI surface.
 - **cheerio** (HTML parsing), **Playwright** chromium (headless browser).
 - **LLM** via pluggable provider abstraction at `src/llm/` — interface in
   `src/llm/provider.ts`, factory + `llm` singleton in `src/llm/index.ts`,
-  backends under `src/llm/providers/` (`gemini-api`, `claude-code`, `ollama`,
-  `antigravity-cli` stub). Default backend: Gemini API SDK (`@google/generative-ai`)
+  backends under `src/llm/providers/` (`gemini-api`, `anthropic-api`,
+  `claude-code`, `ollama`, `antigravity-cli` stub). Default backend: Gemini
+  API SDK (`@google/generative-ai`)
   using `gemini-2.5-pro` (HTML extract, verdict) and `gemini-2.5-flash`
   (NL→filter, lightweight extract). Provider + per-task overrides + Ollama
   baseUrl + API keys live in the `settings` KV table, editable via Settings UI.

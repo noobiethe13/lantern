@@ -35,7 +35,12 @@ criteria.put('/', async c => {
      ON CONFLICT(id) DO UPDATE SET yaml = excluded.yaml, updated_at = excluded.updated_at`,
     [parsed.data.yaml, now]
   );
-  return c.json({ ok: true });
+  // Criteria change invalidates every prior L2 verdict — those were scored
+  // against the old rubric. Next scan re-runs L2 over the survivors.
+  const { changes: invalidated } = db.run(
+    'UPDATE jobs SET l2_verdict_json = NULL WHERE l2_verdict_json IS NOT NULL'
+  );
+  return c.json({ ok: true, invalidated });
 });
 
 criteria.post('/from-nl', async c => {
@@ -53,6 +58,10 @@ criteria.post('/from-nl', async c => {
      ON CONFLICT(id) DO UPDATE SET yaml = excluded.yaml, source_text = excluded.source_text, updated_at = excluded.updated_at`,
     [yamlStr, parsed.data.text, now]
   );
+  // See PUT / — same invalidation logic on the NL path.
+  const { changes: invalidated } = db.run(
+    'UPDATE jobs SET l2_verdict_json = NULL WHERE l2_verdict_json IS NOT NULL'
+  );
 
-  return c.json({ yaml: yamlStr, parsed: result });
+  return c.json({ yaml: yamlStr, parsed: result, invalidated });
 });

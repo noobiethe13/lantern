@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { z } from 'zod';
+import { classifyErrorMessage, LlmError } from '../provider';
 import type { HealthcheckResult, LlmProvider, LlmRequest, LlmTask } from '../provider';
 import { zodToProviderSchema } from '../zod-to-schema';
 
@@ -23,6 +24,10 @@ export class GeminiApiProvider implements LlmProvider {
   }
 
   async call<T>(req: LlmRequest, schema: z.ZodType<T>): Promise<T> {
+    if (!this.apiKey) {
+      throw new LlmError('fatal', 'gemini-api: no API key configured (Settings → LLM → Gemini API key)');
+    }
+
     const modelName = req.modelOverride ?? this.defaultModelFor(req.task);
     const client = new GoogleGenerativeAI(this.apiKey);
     const model = client.getGenerativeModel({
@@ -41,11 +46,21 @@ export class GeminiApiProvider implements LlmProvider {
       if (first.success) return first.data;
       console.warn(`[gemini-api] first-attempt schema error: ${first.error.message}`);
     } catch (err) {
-      console.warn(`[gemini-api] first-attempt failed: ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      console.warn(`[gemini-api] first-attempt failed: ${msg}`);
+      // Auth + model-not-found errors won't improve on retry — abort early.
+      if (classifyErrorMessage(msg) === 'fatal') {
+        throw new LlmError('fatal', `gemini-api: ${msg}`);
+      }
     }
 
-    const strict = await model.generateContent(req.prompt + STRICT_SUFFIX);
-    return schema.parse(JSON.parse(strict.response.text()));
+    try {
+      const strict = await model.generateContent(req.prompt + STRICT_SUFFIX);
+      return schema.parse(JSON.parse(strict.response.text()));
+    } catch (err) {
+      const msg = (err as Error).message;
+      throw new LlmError(classifyErrorMessage(msg), `gemini-api: ${msg}`);
+    }
   }
 
   async healthcheck(): Promise<HealthcheckResult> {

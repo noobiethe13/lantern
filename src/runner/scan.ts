@@ -4,10 +4,11 @@ import yaml from 'js-yaml';
 import { db } from '../db/client';
 import { getAdapter } from '../sources/index';
 import { l1Filter, type Criteria } from '../core/filter';
-import { contentHash } from '../core/dedup';
+import { contentHash, normalizeCompany, rolesMatch } from '../core/dedup';
 import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
 import { llm } from '../llm';
+import { LlmError } from '../llm/provider';
 import { VerdictShape } from '../llm/schemas';
 import { verdictPrompt } from '../llm/prompts';
 import { bus, type ScanEvent } from './progress';
@@ -81,6 +82,35 @@ function seedSources(): void {
   }
 }
 
+interface FuzzyCandidateRow {
+  id: number;
+  title: string;
+  company: string;
+  url: string;
+  duplicate_urls: string | null;
+}
+
+function findFuzzyDuplicate(job: Job): FuzzyCandidateRow | null {
+  const normCo = normalizeCompany(job.company);
+  if (!normCo) return null;
+
+  // Iterate over jobs from the same human-readable company. SQLite's LOWER
+  // collation is good enough as a coarse prefilter — the JS-side
+  // normalizeCompany check below handles "Inc/Ltd/etc" stripping.
+  const candidates = db
+    .query<FuzzyCandidateRow, []>(
+      'SELECT id, title, company, url, duplicate_urls FROM jobs'
+    )
+    .all();
+
+  for (const c of candidates) {
+    if (normalizeCompany(c.company) !== normCo) continue;
+    if (!rolesMatch(c.title, job.title)) continue;
+    return c;
+  }
+  return null;
+}
+
 function upsertJob(
   job: Job,
   sourceId: number,
@@ -100,6 +130,24 @@ function upsertJob(
       'UPDATE jobs SET last_seen = ?, l1_pass = ?, l1_reasons = ? WHERE url = ?',
       [now, l1Pass ? 1 : 0, l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null, job.url]
     );
+    return 'seen';
+  }
+
+  // Fuzzy dedup: same normalized company + matching role tokens. The canonical
+  // row keeps its original URL; the new URL is appended to duplicate_urls so we
+  // don't lose the link from the second board.
+  const fuzzy = findFuzzyDuplicate(job);
+  if (fuzzy) {
+    const dupes: string[] = fuzzy.duplicate_urls ? JSON.parse(fuzzy.duplicate_urls) : [];
+    if (job.url !== fuzzy.url && !dupes.includes(job.url)) {
+      dupes.push(job.url);
+      db.run(
+        'UPDATE jobs SET last_seen = ?, duplicate_urls = ? WHERE id = ?',
+        [now, JSON.stringify(dupes), fuzzy.id]
+      );
+    } else {
+      db.run('UPDATE jobs SET last_seen = ? WHERE id = ?', [now, fuzzy.id]);
+    }
     return 'seen';
   }
 
@@ -299,7 +347,12 @@ export async function runL2Pass(runId: number, criteriaYaml: string, opts?: Scan
 
   let l2Pass = 0;
   const errors: { id: number; error: string }[] = [];
-  let isFirstJob = true;
+  // Fatal LlmError (auth, missing CLI, banned model) aborts immediately.
+  // Otherwise count consecutive transient failures and bail after MAX_CONSECUTIVE_FAILURES
+  // to avoid blasting through hundreds of jobs while the provider is wedged.
+  const MAX_CONSECUTIVE_FAILURES = 3;
+  let consecutiveFailures = 0;
+  let aborted = false;
 
   for (const job of jobs) {
     const prompt = verdictPrompt(
@@ -317,6 +370,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, opts?: Scan
         job.id,
       ]);
       if (verdict.fit) l2Pass++;
+      consecutiveFailures = 0;
       process.stdout.write('.');
       const progressMsg = `L2: scored "${job.title}" at ${job.company}`;
       bus.emit({ runId, type: 'l2_progress', msg: progressMsg, data: { jobId: job.id, fit: verdict.fit, score: verdict.score } });
@@ -325,19 +379,29 @@ export async function runL2Pass(runId: number, criteriaYaml: string, opts?: Scan
       const msg = err instanceof Error ? err.message : String(err);
       errors.push({ id: job.id, error: msg });
       process.stdout.write('!');
-      if (isFirstJob) {
-        console.error(`\n[l2] first job failed — stopping early: ${msg}`);
+
+      if (err instanceof LlmError && err.kind === 'fatal') {
+        console.error(`\n[l2] fatal provider error — aborting: ${msg}`);
+        aborted = true;
+        break;
+      }
+
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.error(`\n[l2] ${MAX_CONSECUTIVE_FAILURES} consecutive failures — aborting (last: ${msg})`);
+        aborted = true;
         break;
       }
     }
-    isFirstJob = false;
   }
 
   process.stdout.write('\n');
 
   db.run('UPDATE runs SET jobs_l2_pass = ? WHERE id = ?', [l2Pass, runId]);
 
-  const doneMsg = `L2 complete — fit: ${l2Pass}, errors: ${errors.length}`;
+  const doneMsg = aborted
+    ? `L2 aborted — fit: ${l2Pass}, errors: ${errors.length}`
+    : `L2 complete — fit: ${l2Pass}, errors: ${errors.length}`;
   console.log(doneMsg);
   if (errors.length > 0) {
     for (const e of errors.slice(0, 5)) {

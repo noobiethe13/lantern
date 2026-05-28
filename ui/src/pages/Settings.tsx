@@ -26,6 +26,7 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'lever', label: 'Lever', placeholder: 'jobs.lever.co/company' },
   { value: 'hn-whos-hiring', label: 'HN Who\'s Hiring', placeholder: 'hn-whos-hiring' },
   { value: 'generic-url', label: 'Generic URL', placeholder: 'https://company.com/careers' },
+  { value: 'local-parser', label: 'Local parser', placeholder: 'node ./scripts/my-parser.js' },
 ];
 
 const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'default'> = {
@@ -34,6 +35,7 @@ const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'gree
   lever: 'amber',
   'hn-whos-hiring': 'indigo',
   'generic-url': 'default',
+  'local-parser': 'red',
 };
 
 function timeAgo(ts: number | null): string {
@@ -507,6 +509,7 @@ function SourcesSection() {
 
 const PROVIDER_LABELS: Record<LlmProviderName, string> = {
   'gemini-api': 'Gemini API',
+  'anthropic-api': 'Anthropic API',
   'claude-code': 'Claude Code',
   'antigravity-cli': 'Antigravity CLI',
   'ollama': 'Ollama (local)',
@@ -553,6 +556,7 @@ function LlmProviderSection() {
   }
 
   const deprecation = data.deprecations[draft.provider];
+  const unsupported = data.unsupported?.[draft.provider];
 
   const setOverride = (task: LlmTask, value: string) => {
     setDraft(d => {
@@ -576,6 +580,9 @@ function LlmProviderSection() {
     const geminiKey = payload.gemini_api_key?.trim();
     if (!geminiKey) { const { gemini_api_key: _drop, ...rest } = payload; payload = rest; }
     else payload = { ...payload, gemini_api_key: geminiKey };
+    const anthropicKey = payload.anthropic_api_key?.trim();
+    if (!anthropicKey) { const { anthropic_api_key: _drop, ...rest } = payload; payload = rest; }
+    else payload = { ...payload, anthropic_api_key: anthropicKey };
     try {
       await api.llmSettings.save(payload);
       toast('LLM settings saved.', 'success');
@@ -650,10 +657,18 @@ function LlmProviderSection() {
           {deprecation && (
             <Badge variant="amber">Deprecating</Badge>
           )}
+          {unsupported && (
+            <Badge variant="red">Unsupported</Badge>
+          )}
         </div>
         {deprecation && (
           <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--warning, #d97706)' }}>
             {deprecation}
+          </p>
+        )}
+        {unsupported && (
+          <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--danger, #dc2626)' }}>
+            {unsupported}
           </p>
         )}
 
@@ -672,6 +687,24 @@ function LlmProviderSection() {
             />
             <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
               Get a free API key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>aistudio.google.com/apikey</a>. The free tier includes Gemini 2.5 Flash.
+            </p>
+          </div>
+        )}
+
+        {draft.provider === 'anthropic-api' && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
+              API key
+            </label>
+            <Input
+              type="password"
+              value={draft.anthropic_api_key ?? ''}
+              onChange={e => setDraft({ ...draft, anthropic_api_key: e.target.value })}
+              placeholder="sk-ant-…"
+              style={{ fontSize: '12px', height: '30px' }}
+            />
+            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
+              Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>console.anthropic.com</a>. Pay-as-you-go; structured output uses native tool_use.
             </p>
           </div>
         )}

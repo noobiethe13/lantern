@@ -23,6 +23,6 @@ export interface SourceContext {
 }
 
 export interface SourceAdapter {
-  type: 'greenhouse' | 'ashby' | 'lever' | 'hn-whos-hiring' | 'generic-url';
+  type: 'greenhouse' | 'ashby' | 'lever' | 'hn-whos-hiring' | 'generic-url' | 'local-parser';
   fetch(ctx: SourceContext): AsyncIterable<Job>;
 }

@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { LlmError } from '../provider';
 import type { HealthcheckResult, LlmProvider, LlmRequest, LlmTask } from '../provider';
 
 // The Antigravity CLI binary is `agy`. As of 2026-05-23 it does not document a
@@ -24,7 +25,7 @@ export class AntigravityCliProvider implements LlmProvider {
   }
 
   async call<T>(_req: LlmRequest, _schema: z.ZodType<T>): Promise<T> {
-    throw new Error(NOT_READY_MSG);
+    throw new LlmError('fatal', NOT_READY_MSG);
   }
 
   async healthcheck(): Promise<HealthcheckResult> {

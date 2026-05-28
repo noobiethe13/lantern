@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sources (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   type            TEXT NOT NULL CHECK (type IN (
     'greenhouse', 'ashby', 'lever',
-    'hn-whos-hiring', 'generic-url'
+    'hn-whos-hiring', 'generic-url', 'local-parser'
   )),
   identifier      TEXT NOT NULL,
   display_name    TEXT NOT NULL,
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   l1_pass              INTEGER NOT NULL DEFAULT 0,
   l1_reasons           TEXT,
   l2_verdict_json      TEXT,
+  duplicate_urls       TEXT,
   status               TEXT NOT NULL DEFAULT 'new'
                        CHECK (status IN ('new','shortlist','applied','interview',
                                           'offer','rejected','hidden','archived')),

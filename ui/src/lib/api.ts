@@ -60,6 +60,7 @@ export interface Job {
   l1_pass: number;
   l1_reasons: string[] | null;
   l2_verdict: Verdict | null;
+  duplicate_urls: string[] | null;
   status: JobStatus;
   applied_at: number | null;
   notes: string | null;
@@ -67,7 +68,7 @@ export interface Job {
 
 export type SourceType =
   | 'greenhouse' | 'ashby' | 'lever'
-  | 'hn-whos-hiring' | 'generic-url';
+  | 'hn-whos-hiring' | 'generic-url' | 'local-parser';
 
 export interface Source {
   id: number;
@@ -106,12 +107,18 @@ export interface HealthCheck {
   checks: Record<string, { ok: boolean; detail?: string; deprecation?: string }>;
 }
 
-export type LlmProviderName = 'gemini-api' | 'claude-code' | 'antigravity-cli' | 'ollama';
+export type LlmProviderName =
+  | 'gemini-api'
+  | 'anthropic-api'
+  | 'claude-code'
+  | 'antigravity-cli'
+  | 'ollama';
 export type LlmTask = 'verdict' | 'nl-filter' | 'html-extract' | 'hn-extract';
 
 export interface LlmSettings {
   provider: LlmProviderName;
   gemini_api_key?: string;
+  anthropic_api_key?: string;
   ollama_base_url?: string;
   per_task_overrides?: Partial<Record<LlmTask, string>>;
 }
@@ -121,6 +128,7 @@ export interface LlmSettingsResponse {
   available_providers: LlmProviderName[];
   tasks: LlmTask[];
   deprecations: Partial<Record<LlmProviderName, string>>;
+  unsupported: Partial<Record<LlmProviderName, string>>;
 }
 
 export interface LlmHealth {

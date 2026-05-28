@@ -1,14 +1,16 @@
 import { z } from 'zod';
 import { db } from '../db/client';
 import type { HealthcheckResult, LlmProvider, LlmRequest, ProviderName } from './provider';
+import { AnthropicApiProvider } from './providers/anthropic-api';
 import { AntigravityCliProvider } from './providers/antigravity-cli';
 import { ClaudeCodeProvider } from './providers/claude-code';
 import { GeminiApiProvider } from './providers/gemini-api';
 import { OllamaProvider } from './providers/ollama';
 
 const LlmSettingsShape = z.object({
-  provider: z.enum(['gemini-api', 'claude-code', 'antigravity-cli', 'ollama']),
+  provider: z.enum(['gemini-api', 'anthropic-api', 'claude-code', 'antigravity-cli', 'ollama']),
   gemini_api_key: z.string().optional(),
+  anthropic_api_key: z.string().optional(),
   ollama_base_url: z.string().url().optional(),
   per_task_overrides: z.record(z.string()).optional(),
 });
@@ -34,6 +36,8 @@ function createProvider(settings: LlmSettings): LlmProvider {
   switch (settings.provider) {
     case 'gemini-api':
       return new GeminiApiProvider(settings.gemini_api_key ?? '');
+    case 'anthropic-api':
+      return new AnthropicApiProvider(settings.anthropic_api_key ?? '');
     case 'claude-code':
       return new ClaudeCodeProvider();
     case 'ollama':
@@ -44,10 +48,10 @@ function createProvider(settings: LlmSettings): LlmProvider {
 }
 
 // Cache invalidates whenever any provider-construction input changes (the
-// provider name itself, or the Ollama baseUrl). per_task_overrides do NOT
-// trigger reconstruction — they're re-read on every call().
+// provider name itself, API keys, or the Ollama baseUrl). per_task_overrides
+// do NOT trigger reconstruction — they're re-read on every call().
 function constructionKey(s: LlmSettings): string {
-  return `${s.provider}|${s.gemini_api_key ?? ''}|${s.ollama_base_url ?? ''}`;
+  return `${s.provider}|${s.gemini_api_key ?? ''}|${s.anthropic_api_key ?? ''}|${s.ollama_base_url ?? ''}`;
 }
 
 let cached: { provider: LlmProvider; settings: LlmSettings; key: string } | null = null;
