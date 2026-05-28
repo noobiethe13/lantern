@@ -1,5 +1,7 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
-import { fetchJson } from '../core/fetch';
+import { assertValidSlug, fetchJson } from '../core/fetch';
+
+const LEVER_ALLOWED_HOSTS = ['api.lever.co'];
 
 export function parseLever(json: unknown, company: string): Job[] {
   if (!Array.isArray(json)) return [];
@@ -25,10 +27,11 @@ export class LeverAdapter implements SourceAdapter {
       identifier: string;
       display_name: string;
     };
+    assertValidSlug(identifier, 'Lever board slug');
     const apiUrl = `https://api.lever.co/v0/postings/${identifier}`;
     ctx.emitProgress(`Fetching ${display_name} (Lever)…`);
 
-    const json = await fetchJson(apiUrl);
+    const json = await fetchJson(apiUrl, { allowedHosts: LEVER_ALLOWED_HOSTS });
     const jobs = parseLever(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

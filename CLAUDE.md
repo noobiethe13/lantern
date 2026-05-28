@@ -6,10 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **lantern** is a local-first, single-machine job-search harness. Scans
 Greenhouse / Ashby / Lever public APIs + HN "Who's Hiring" (Algolia) +
-arbitrary user-supplied URLs + X.com via Grok. Filters via deterministic
-L1 YAML rules + Gemini CLI L2 verdicts. SQLite store. Local web UI at
-`localhost:3000`. Runs on the user's own machine using their Google AI Pro
-quota via the Gemini CLI subprocess — no paid API keys, no cloud.
+arbitrary user-supplied URLs. Filters via deterministic L1 YAML rules +
+LLM L2 verdicts. SQLite store. Local web UI at `localhost:3000`. UI-only —
+no user-facing CLI surface.
 
 ## Stack
 
@@ -17,11 +16,15 @@ quota via the Gemini CLI subprocess — no paid API keys, no cloud.
 - **Hono** (HTTP server, with SSE for run progress).
 - **bun:sqlite** (DB at `data/data.db`).
 - **cheerio** (HTML parsing), **Playwright** chromium (headless browser).
-- **Gemini CLI** subprocess via `src/llm/gemini.ts` — Google AI Pro OAuth.
-  Models: `gemini-2.5-pro` (HTML extract, verdict) and `gemini-2.5-flash`
-  (NL→filter, lightweight extract).
+- **LLM** via pluggable provider abstraction at `src/llm/` — interface in
+  `src/llm/provider.ts`, factory + `llm` singleton in `src/llm/index.ts`,
+  backends under `src/llm/providers/` (`gemini-api`, `claude-code`, `ollama`,
+  `antigravity-cli` stub). Default backend: Gemini API SDK (`@google/generative-ai`)
+  using `gemini-2.5-pro` (HTML extract, verdict) and `gemini-2.5-flash`
+  (NL→filter, lightweight extract). Provider + per-task overrides + Ollama
+  baseUrl + API keys live in the `settings` KV table, editable via Settings UI.
 - **Vite + React 19 + TailwindCSS 4 + shadcn/ui** for the SPA.
-- **zod** for every Gemini output and adapter contract.
+- **zod** for every LLM output and adapter contract.
 - TypeScript everywhere (strict). English-only UI.
 
 ## Architecture
@@ -33,34 +36,36 @@ quota via the Gemini CLI subprocess — no paid API keys, no cloud.
   `SourceAdapter` so the runner can stream `Job` objects into SQLite and
   emit progress without buffering. Registry at `src/sources/index.ts`.
 - **Two-tier filter**: L1 deterministic YAML rules (`src/core/filter.ts`)
-  runs inline during scan and kills ~80% with zero LLM cost. L2 Gemini
+  runs inline during scan and kills ~80% with zero LLM cost. L2 LLM
   verdict runs as a separate sequential pass over L1 survivors; verdicts
-  are cached on `criteria_yaml + content_hash`.
+  are stored per job and invalidated whenever criteria are saved.
 - **Liveness** (`src/core/liveness.ts`) is deferred from scan time — runs
   only on shortlisted jobs, hybrid fetch-then-Playwright fallback.
 - **Frontend** (`ui/src/`): three pages — `/settings`, `/run`, `/jobs`.
 
 ## Critical rules
 
-1. **NEVER edit `data/`** — that's user data (`data.db`, `attachments/`,
-   `browser-profile/`). Schema changes go through `src/db/migrate.ts`
+1. **NEVER edit `data/`** — that's user data (`data.db`, `attachments/`).
+   Schema changes go through `src/db/migrate.ts`
    (idempotent — `CREATE ... IF NOT EXISTS`).
-2. **NEVER call Gemini's HTTP API directly** — always via the
-   `src/llm/gemini.ts` subprocess wrapper. The user has AI Pro auth on the
-   CLI; there is no API key.
-3. **Playwright is sequential.** One tab at a time. The Grok adapter and
-   the liveness Playwright fallback must not run concurrently.
-4. **All Gemini outputs go through zod** (`src/llm/schemas.ts`). On parse
+2. **NEVER call any LLM HTTP API directly** — always via the `llm` singleton
+   from `src/llm/index.ts`.
+3. **Playwright is sequential.** One tab at a time. The liveness Playwright
+   fallback must not run concurrently with any other Playwright code.
+4. **All LLM outputs go through zod** (`src/llm/schemas.ts`). On parse
    failure, retry once with a stricter "ONLY JSON, no prose, no markdown"
-   addendum; on second failure, log and skip.
+   addendum; on second failure, log and skip. Every provider's `call()`
+   honors this contract; keep new providers symmetric.
 5. **Source adapters are async iterables** so the runner can stream.
 6. **L1 runs inline during scan, no LLM.** L2 is a separate pass.
 7. **Liveness only runs on shortlisted jobs**, not at scan time.
 8. **Bind the local server to `localhost` only**, never `0.0.0.0`.
-9. **HTML / scraped content fed to Gemini is an injection vector** — cap
+9. **HTML / scraped content fed to LLMs is an injection vector** — cap
    length (~16–32KB) and sanitize before substitution into prompts.
-10. **Persisted browser profile** (`data/browser-profile/`) holds an X.com
-    session — never log it, never share it, never check it in.
+10. **`chromium.launchPersistentContext` is banned in lantern.** Always use
+    `chromium.launch()` + `browser.newContext()`. The persistent profile
+    concept was removed with x-grok (MAC-3). `data/browser-profile/` can be
+    safely deleted.
 11. **Attachment uploads** (resume / cover-letter PDFs) need
     path-traversal-safe filename handling and content-type checks.
 
@@ -69,12 +74,8 @@ quota via the Gemini CLI subprocess — no paid API keys, no cloud.
 ```bash
 bun install
 bunx playwright install chromium
-npm i -g @google/gemini-cli && gemini auth   # one-time, AI Pro OAuth
-bun run setup            # interactive first-run wizard
-bun run healthcheck      # verify gemini CLI, Playwright, DB
 bun run dev              # concurrently runs server (watch) + Vite dev
 bun start                # build UI then serve on localhost:3000
-bun run scan             # one-shot scan via CLI (no UI)
 bun test                 # bun's test runner
 bun test path/to/file.test.ts             # single test file
 bun test --test-name-pattern "..."        # single test by name
@@ -106,6 +107,23 @@ section.
 
 <!-- Example: "API responses are camelCase on the wire, snake_case in
 internal types — convert at the boundary in src/api/client.ts" -->
+
+- When refactoring a cross-cutting symbol (LLM call, db helper, prompt
+  template), grep across `src/`, `ui/`, and test files — not just
+  the module itself.
+- Importing `src/llm/index.ts` (and anything that transitively pulls in
+  `src/db/client.ts`) runs `createDb()` and all migrations at module
+  load. Tests and standalone tools that import the `llm` singleton pay
+  filesystem cost up-front; if they don't need the DB, stub it.
+- All Playwright code must use ephemeral `chromium.launch()` +
+  `browser.newContext()`. `chromium.launchPersistentContext` is banned
+  everywhere; the test in `src/runner/liveness.test.ts` enforces this.
+- Provider-construction inputs live in the `settings` KV table
+  (`key`, `value_json`, `updated_at`). When adding a new
+  provider-specific setting (e.g. Ollama baseUrl, API key), extend the
+  cache key in `constructionKey()` in `src/llm/index.ts` so edits trigger
+  reconstruction. `per_task_overrides` is intentionally NOT part of the
+  cache key — it's re-read every call.
 
 ## Architectural notes — work with these, not against them
 

@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import yaml from 'js-yaml';
 import { db } from '../db/client';
-import { callGeminiValidated } from '../llm/gemini';
+import { llm } from '../llm';
 import { NLFilterShape } from '../llm/schemas';
 import { nlFilterPrompt } from '../llm/prompts';
 
@@ -44,7 +44,7 @@ criteria.post('/from-nl', async c => {
   if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
 
   const prompt = nlFilterPrompt(parsed.data.text);
-  const result = await callGeminiValidated({ model: 'gemini-2.5-flash', prompt }, NLFilterShape);
+  const result = await llm.call({ task: 'nl-filter', prompt }, NLFilterShape);
 
   const yamlStr = yaml.dump(result, { lineWidth: 120 });
   const now = Date.now();

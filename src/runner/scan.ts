@@ -7,10 +7,11 @@ import { l1Filter, type Criteria } from '../core/filter';
 import { contentHash } from '../core/dedup';
 import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
-import { callGeminiValidated } from '../llm/gemini';
+import { llm } from '../llm';
 import { VerdictShape } from '../llm/schemas';
 import { verdictPrompt } from '../llm/prompts';
 import { bus, type ScanEvent } from './progress';
+import { isSourceFetchError } from '../server/errors';
 
 interface SeedSource {
   type: string;
@@ -223,11 +224,12 @@ export async function runScan(opts?: ScanOptions): Promise<number> {
           opts?.onEvent?.({ runId, type: 'source_done', msg: doneMsg, data: { source: source.display_name, count: sourceJobCount } });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error(`  [error] ${source.display_name}: ${msg}`);
+          const status = isSourceFetchError(err) ? err.kind : 'http-error';
+          console.error(`  [error:${status}] ${source.display_name}: ${msg}`);
           runErrors.push({ source: source.display_name, error: msg });
           db.run(
-            `UPDATE sources SET last_scan_at = ?, last_status = 'http-error', last_error = ? WHERE id = ?`,
-            [Date.now(), msg, source.id]
+            `UPDATE sources SET last_scan_at = ?, last_status = ?, last_error = ? WHERE id = ?`,
+            [Date.now(), status, msg, source.id]
           );
           bus.emit({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}`, data: { source: source.display_name, error: msg } });
           opts?.onEvent?.({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}` });
@@ -290,7 +292,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, opts?: Scan
     return;
   }
 
-  const l2Start = `L2 — scoring ${jobs.length} jobs with Gemini Pro...`;
+  const l2Start = `L2 — scoring ${jobs.length} jobs via ${llm.providerName}...`;
   console.log(`\n${l2Start}`);
   bus.emit({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
   opts?.onEvent?.({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
@@ -309,10 +311,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, opts?: Scan
     );
 
     try {
-      const verdict = await callGeminiValidated(
-        { model: 'gemini-2.5-pro', prompt },
-        VerdictShape
-      );
+      const verdict = await llm.call({ task: 'verdict', prompt }, VerdictShape);
       db.run('UPDATE jobs SET l2_verdict_json = ? WHERE id = ?', [
         JSON.stringify(verdict),
         job.id,
@@ -362,12 +361,3 @@ export async function runFull(opts?: ScanOptions): Promise<number> {
   }
 }
 
-if (import.meta.main) {
-  const scoreL2 = process.argv.includes('--score-l2');
-  await runScan().then(async runId => {
-    if (scoreL2) {
-      const criteriaYaml = loadCriteriaRaw();
-      await runL2Pass(runId, criteriaYaml);
-    }
-  });
-}

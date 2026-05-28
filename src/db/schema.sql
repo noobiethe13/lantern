@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sources (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   type            TEXT NOT NULL CHECK (type IN (
     'greenhouse', 'ashby', 'lever',
-    'hn-whos-hiring', 'generic-url', 'x-grok'
+    'hn-whos-hiring', 'generic-url'
   )),
   identifier      TEXT NOT NULL,
   display_name    TEXT NOT NULL,
@@ -83,4 +83,11 @@ CREATE TABLE IF NOT EXISTS criteria (
   yaml         TEXT NOT NULL,
   source_text  TEXT,
   updated_at   INTEGER NOT NULL
+);
+
+-- ── settings (KV) ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS settings (
+  key         TEXT PRIMARY KEY,
+  value_json  TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
 );

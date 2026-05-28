@@ -67,7 +67,7 @@ export interface Job {
 
 export type SourceType =
   | 'greenhouse' | 'ashby' | 'lever'
-  | 'hn-whos-hiring' | 'generic-url' | 'x-grok';
+  | 'hn-whos-hiring' | 'generic-url';
 
 export interface Source {
   id: number;
@@ -103,7 +103,55 @@ export interface Criteria {
 
 export interface HealthCheck {
   ok: boolean;
-  checks: Record<string, { ok: boolean; detail?: string }>;
+  checks: Record<string, { ok: boolean; detail?: string; deprecation?: string }>;
+}
+
+export type LlmProviderName = 'gemini-api' | 'claude-code' | 'antigravity-cli' | 'ollama';
+export type LlmTask = 'verdict' | 'nl-filter' | 'html-extract' | 'hn-extract';
+
+export interface LlmSettings {
+  provider: LlmProviderName;
+  gemini_api_key?: string;
+  ollama_base_url?: string;
+  per_task_overrides?: Partial<Record<LlmTask, string>>;
+}
+
+export interface LlmSettingsResponse {
+  settings: LlmSettings;
+  available_providers: LlmProviderName[];
+  tasks: LlmTask[];
+  deprecations: Partial<Record<LlmProviderName, string>>;
+}
+
+export interface LlmHealth {
+  provider: LlmProviderName;
+  ok: boolean;
+  detail: string;
+  deprecation?: string;
+}
+
+export interface OllamaModel {
+  name: string;
+  size?: number;
+  modified_at?: string;
+}
+
+export interface OllamaModelsResponse {
+  baseUrl: string;
+  models: OllamaModel[];
+  error?: string;
+}
+
+export type SourceTestKind = 'http' | 'gated' | 'auth' | 'extract' | 'unsupported';
+
+export interface SourceTestResult {
+  ok: boolean;
+  kind?: SourceTestKind;
+  detail: string;
+  finalUrl?: string;
+  title?: string;
+  contentKind?: 'innerText' | 'outerHTML';
+  snippet?: string;
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -154,6 +202,8 @@ export const api = {
     update: (id: number, body: { display_name?: string; enabled?: boolean; config_json?: Record<string, unknown> }) =>
       request<{ ok: boolean }>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: number) => request<{ ok: boolean }>(`/sources/${id}`, { method: 'DELETE' }),
+    test: (id: number) =>
+      request<SourceTestResult>(`/sources/${id}/test`, { method: 'POST' }),
   },
 
   criteria: {
@@ -179,6 +229,20 @@ export const api = {
 
   admin: {
     clearJobs: () => request<{ ok: boolean; msg: string }>('/admin/clear-jobs', { method: 'POST' }),
+  },
+
+  llmSettings: {
+    get: () => request<LlmSettingsResponse>('/settings/llm'),
+    save: (settings: LlmSettings) =>
+      request<{ ok: boolean; settings: LlmSettings }>('/settings/llm', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
+    health: () => request<LlmHealth>('/settings/llm/health'),
+    ollamaModels: (baseUrl?: string) => {
+      const qs = baseUrl ? `?baseUrl=${encodeURIComponent(baseUrl)}` : '';
+      return request<OllamaModelsResponse>(`/settings/llm/ollama-models${qs}`);
+    },
   },
 
   attachments: {

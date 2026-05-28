@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { load as cheerioLoad } from 'cheerio';
 import { db } from '../db/client';
 import { classifyLiveness, MIN_CONTENT, type LivenessInput } from '../core/liveness';
@@ -54,30 +53,35 @@ async function fetchLiveness(url: string): Promise<LivenessInput | null> {
 async function fetchLivenessPlaywright(url: string): Promise<LivenessInput | null> {
   if (playwrightBusy) return null;
   playwrightBusy = true;
+  // Always ephemeral: chromium.launch() + newContext(). Persistent-context API is banned.
   try {
     const { chromium } = await import('playwright');
-    const profilePath = join(process.cwd(), 'data', 'browser-profile');
-    const browser = await chromium.launchPersistentContext(profilePath, { headless: true });
+    const browser = await chromium.launch({ headless: true });
     try {
-      const page = await browser.newPage();
+      const context = await browser.newContext();
       try {
-        const res = await page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(2_000);
+        const page = await context.newPage();
+        try {
+          const res = await page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(2_000);
 
-        const status = res?.status() ?? 200;
-        const finalUrl = page.url();
-        const bodyText: string = await page.evaluate(() => document.body.innerText ?? '');
-        const applyControls: string[] = await page.evaluate(() => {
-          const els = Array.from(document.querySelectorAll('a, button'));
-          return els.map(e => (e as HTMLElement).innerText?.trim() ?? '').filter(Boolean);
-        });
+          const status = res?.status() ?? 200;
+          const finalUrl = page.url();
+          const bodyText: string = await page.evaluate(() => document.body.innerText ?? '');
+          const applyControls: string[] = await page.evaluate(() => {
+            const els = Array.from(document.querySelectorAll('a, button'));
+            return els.map(e => (e as HTMLElement).innerText?.trim() ?? '').filter(Boolean);
+          });
 
-        return { status, finalUrl, bodyText, applyControls };
+          return { status, finalUrl, bodyText, applyControls };
+        } finally {
+          await page.close().catch(() => {});
+        }
       } finally {
-        await page.close();
+        await context.close().catch(() => {});
       }
     } finally {
-      await browser.close();
+      await browser.close().catch(() => {});
     }
   } catch (err) {
     console.error(`[liveness] playwright error for ${url}: ${err}`);

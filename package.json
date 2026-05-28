@@ -4,29 +4,28 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "setup": "bun run scripts/setup.ts",
-    "healthcheck": "bun run scripts/healthcheck.ts",
     "dev": "concurrently -k \"bun run dev:server\" \"bun run dev:ui\"",
     "dev:server": "bun --watch src/server.ts",
     "dev:ui": "vite --config vite.config.ts",
     "build:ui": "vite build",
     "start": "bun run build:ui && bun run src/server.ts",
-    "scan": "bun run src/runner/scan.ts",
     "test": "bun test"
   },
   "dependencies": {
-    "hono": "^4.6.0",
-    "zod": "^3.23.0",
-    "js-yaml": "^4.1.0",
+    "@google/generative-ai": "0.24.1",
     "cheerio": "^1.0.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "hono": "^4.6.0",
+    "js-yaml": "^4.1.0",
+    "lucide-react": "^0.460.0",
     "playwright": "^1.49.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0",
-    "lucide-react": "^0.460.0",
-    "class-variance-authority": "^0.7.0",
-    "clsx": "^2.1.0",
-    "tailwind-merge": "^2.5.0"
+    "tailwind-merge": "^2.5.0",
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

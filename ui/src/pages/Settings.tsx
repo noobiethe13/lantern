@@ -1,9 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CheckCircle2, XCircle, Circle, Trash2, Plus,
-  Wand2, Save, AlertCircle, RefreshCw,
+  Wand2, Save, AlertCircle, RefreshCw, ChevronDown, ChevronRight,
+  Wifi,
 } from 'lucide-react';
-import { api, type Source, type Criteria, type SourceType, type HealthCheck } from '@/lib/api';
+import {
+  api,
+  type Source,
+  type Criteria,
+  type SourceType,
+  type HealthCheck,
+  type LlmProviderName,
+  type LlmSettings as LlmSettingsModel,
+  type LlmSettingsResponse,
+  type LlmTask,
+  type OllamaModel,
+} from '@/lib/api';
 import { Button, Input, Textarea, Badge, Spinner, useToast } from '@/components/ui';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -14,7 +26,6 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'lever', label: 'Lever', placeholder: 'jobs.lever.co/company' },
   { value: 'hn-whos-hiring', label: 'HN Who\'s Hiring', placeholder: 'hn-whos-hiring' },
   { value: 'generic-url', label: 'Generic URL', placeholder: 'https://company.com/careers' },
-  { value: 'x-grok', label: 'X / Grok', placeholder: 'x-grok' },
 ];
 
 const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'default'> = {
@@ -23,7 +34,6 @@ const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'gree
   lever: 'amber',
   'hn-whos-hiring': 'indigo',
   'generic-url': 'default',
-  'x-grok': 'red',
 };
 
 function timeAgo(ts: number | null): string {
@@ -114,7 +124,7 @@ function CriteriaSection() {
           </Button>
         </div>
         <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
-          Uses Gemini Flash to convert your description into filter YAML.
+          Uses the active LLM provider to convert your description into filter YAML.
         </p>
       </div>
 
@@ -179,8 +189,29 @@ function SourceRow({ source, onToggle, onDelete }: {
   onDelete: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [testing, setTesting] = useState(false);
   const enabled = source.enabled === 1;
   const typeOpt = SOURCE_TYPE_OPTIONS.find(t => t.value === source.type);
+  const toast = useToast();
+
+  const testable = source.type === 'generic-url';
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const res = await api.sources.test(source.id);
+      if (res.ok) {
+        toast(`${source.display_name}: ${res.detail}`, 'success');
+      } else {
+        const label = res.kind ? `[${res.kind}] ` : '';
+        toast(`${source.display_name}: ${label}${res.detail}`, 'error');
+      }
+    } catch (e) {
+      toast(`${source.display_name}: ${String(e)}`, 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const statusIcon = !source.last_scan_at
     ? <Circle size={8} style={{ color: 'var(--text-faint)' }} />
@@ -192,7 +223,7 @@ function SourceRow({ source, onToggle, onDelete }: {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '1fr 100px 80px 80px 60px',
+        gridTemplateColumns: '1fr 100px 80px 80px 90px',
         alignItems: 'center',
         gap: 16,
         padding: '10px 16px',
@@ -243,9 +274,9 @@ function SourceRow({ source, onToggle, onDelete }: {
         {enabled ? 'On' : 'Off'}
       </button>
 
-      {/* Delete */}
+      {/* Actions: Test (if applicable) + Delete */}
       {confirming ? (
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
           <button
             onClick={() => { onDelete(); setConfirming(false); }}
             style={{ fontSize: '11px', color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px' }}
@@ -260,14 +291,34 @@ function SourceRow({ source, onToggle, onDelete }: {
           </button>
         </div>
       ) : (
-        <button
-          onClick={() => setConfirming(true)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 4, display: 'flex', alignItems: 'center', transition: 'color 120ms' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-faint)'; }}
-        >
-          <Trash2 size={13} />
-        </button>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
+          {testable && (
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              title="Test URL"
+              style={{
+                background: 'none', border: 'none',
+                cursor: testing ? 'wait' : 'pointer',
+                color: testing ? 'var(--text-faint)' : 'var(--text-muted)',
+                padding: 4, display: 'flex', alignItems: 'center',
+                transition: 'color 120ms',
+              }}
+              onMouseEnter={e => { if (!testing) (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-hover)'; }}
+              onMouseLeave={e => { if (!testing) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; }}
+            >
+              {testing ? <Spinner /> : <Wifi size={13} />}
+            </button>
+          )}
+          <button
+            onClick={() => setConfirming(true)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 4, display: 'flex', alignItems: 'center', transition: 'color 120ms' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-faint)'; }}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -413,7 +464,7 @@ function SourcesSection() {
       ) : (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden', marginBottom: 12 }}>
           {/* Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 80px 80px 60px', gap: 16, padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px 80px 80px 90px', gap: 16, padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
             {['Source', 'Type', 'Last scan', 'Enabled', ''].map((h, i) => (
               <span key={i} style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
             ))}
@@ -452,20 +503,321 @@ function SourcesSection() {
   );
 }
 
+// ─── LLM provider section ─────────────────────────────────────────────────────
+
+const PROVIDER_LABELS: Record<LlmProviderName, string> = {
+  'gemini-api': 'Gemini API',
+  'claude-code': 'Claude Code',
+  'antigravity-cli': 'Antigravity CLI',
+  'ollama': 'Ollama (local)',
+};
+
+const TASK_LABELS: Record<LlmTask, string> = {
+  'verdict': 'Verdict (L2 scoring)',
+  'nl-filter': 'NL → filter',
+  'html-extract': 'HTML → jobs',
+  'hn-extract': 'HN comment → jobs',
+};
+
+const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
+
+function LlmProviderSection() {
+  const [data, setData] = useState<LlmSettingsResponse | null>(null);
+  const [draft, setDraft] = useState<LlmSettingsModel | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[] | null>(null);
+  const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
+  const toast = useToast();
+
+  const load = useCallback(async () => {
+    const res = await api.llmSettings.get();
+    setData(res);
+    setDraft(res.settings);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (!data || !draft) {
+    return (
+      <div>
+        <h2 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+          LLM provider
+        </h2>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
+      </div>
+    );
+  }
+
+  const deprecation = data.deprecations[draft.provider];
+
+  const setOverride = (task: LlmTask, value: string) => {
+    setDraft(d => {
+      if (!d) return d;
+      const next = { ...(d.per_task_overrides ?? {}) };
+      if (value.trim()) next[task] = value.trim();
+      else delete next[task];
+      return { ...d, per_task_overrides: Object.keys(next).length ? next : undefined };
+    });
+  };
+
+  const handleSave = async () => {
+    if (!draft) return;
+    setSaving(true);
+    setTestResult(null);
+    // Strip empty optional fields so the backend validators don't reject empty strings.
+    let payload: LlmSettingsModel = { ...draft };
+    const ollamaTrimmed = payload.ollama_base_url?.trim();
+    if (!ollamaTrimmed) { const { ollama_base_url: _drop, ...rest } = payload; payload = rest; }
+    else payload = { ...payload, ollama_base_url: ollamaTrimmed };
+    const geminiKey = payload.gemini_api_key?.trim();
+    if (!geminiKey) { const { gemini_api_key: _drop, ...rest } = payload; payload = rest; }
+    else payload = { ...payload, gemini_api_key: geminiKey };
+    try {
+      await api.llmSettings.save(payload);
+      toast('LLM settings saved.', 'success');
+      load();
+    } catch (e) {
+      toast(`Save failed: ${String(e)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleListOllamaModels = async () => {
+    setOllamaLoading(true);
+    setOllamaError(null);
+    setOllamaModels(null);
+    try {
+      const res = await api.llmSettings.ollamaModels(draft?.ollama_base_url?.trim() || undefined);
+      setOllamaModels(res.models);
+      if (res.models.length === 0) {
+        setOllamaError("No models installed. Pull one with 'ollama pull llama3.1:8b'.");
+      }
+    } catch (e) {
+      setOllamaError(String(e));
+    } finally {
+      setOllamaLoading(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await api.llmSettings.health();
+      setTestResult({ ok: res.ok, detail: res.detail });
+    } catch (e) {
+      setTestResult({ ok: false, detail: String(e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(data.settings);
+
+  return (
+    <div>
+      <h2 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+        LLM provider
+      </h2>
+      <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-muted)' }}>
+        Which backend runs the L1→L2 scoring, NL-to-filter conversion, and HTML extraction.
+      </p>
+
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
+        {/* Provider dropdown */}
+        <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
+          Provider
+        </label>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <select
+            value={draft.provider}
+            onChange={e => setDraft({ ...draft, provider: e.target.value as LlmProviderName })}
+            style={{
+              background: 'var(--surface-2)', border: '1px solid var(--border)',
+              borderRadius: '7px', color: 'var(--text)', fontFamily: 'inherit',
+              fontSize: '13px', padding: '6px 10px', outline: 'none', minWidth: 200,
+            }}
+          >
+            {data.available_providers.map(p => (
+              <option key={p} value={p}>{PROVIDER_LABELS[p] ?? p}</option>
+            ))}
+          </select>
+          {deprecation && (
+            <Badge variant="amber">Deprecating</Badge>
+          )}
+        </div>
+        {deprecation && (
+          <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--warning, #d97706)' }}>
+            {deprecation}
+          </p>
+        )}
+
+        {/* Provider-specific configuration */}
+        {draft.provider === 'gemini-api' && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
+              API key
+            </label>
+            <Input
+              type="password"
+              value={draft.gemini_api_key ?? ''}
+              onChange={e => setDraft({ ...draft, gemini_api_key: e.target.value })}
+              placeholder="AIza…"
+              style={{ fontSize: '12px', height: '30px' }}
+            />
+            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
+              Get a free API key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>aistudio.google.com/apikey</a>. The free tier includes Gemini 2.5 Flash.
+            </p>
+          </div>
+        )}
+
+        {draft.provider === 'ollama' && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
+              Ollama base URL
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Input
+                value={draft.ollama_base_url ?? ''}
+                onChange={e => setDraft({ ...draft, ollama_base_url: e.target.value })}
+                placeholder={OLLAMA_DEFAULT_BASE_URL}
+                style={{ fontSize: '12px', height: '30px', flex: 1 }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleListOllamaModels}
+                loading={ollamaLoading}
+                style={{ flexShrink: 0 }}
+              >
+                List models
+              </Button>
+            </div>
+            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
+              Leave blank to use the default ({OLLAMA_DEFAULT_BASE_URL}). Make sure <code style={{ fontFamily: 'var(--mono)' }}>ollama serve</code> is running.
+            </p>
+
+            {ollamaError && (
+              <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', fontSize: '11px', color: 'var(--danger)' }}>
+                {ollamaError}
+              </div>
+            )}
+
+            {ollamaModels && ollamaModels.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginBottom: 6 }}>
+                  Installed models — copy one into a per-task field under Advanced:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {ollamaModels.map(m => (
+                    <button
+                      key={m.name}
+                      type="button"
+                      onClick={() => { void navigator.clipboard?.writeText(m.name); toast(`Copied "${m.name}" to clipboard.`, 'success'); }}
+                      style={{
+                        fontFamily: 'var(--mono)', fontSize: '11px',
+                        padding: '3px 8px', borderRadius: '5px',
+                        background: 'var(--surface-2)', color: 'var(--text)',
+                        border: '1px solid var(--border)', cursor: 'pointer',
+                      }}
+                      title="Click to copy"
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {draft.provider === 'antigravity-cli' && (
+          <div style={{ marginTop: 16, padding: '10px 12px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: '8px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--warning, #d97706)', fontWeight: 500, marginBottom: 4 }}>
+              Stub provider
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+              The Antigravity CLI (<code style={{ fontFamily: 'var(--mono)' }}>agy</code>) doesn't yet expose a documented headless JSON mode. Scans will fail until support lands. Pick another provider for now.
+            </div>
+          </div>
+        )}
+
+        {/* Advanced — per-task overrides */}
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+          <button
+            onClick={() => setShowAdvanced(s => !s)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--text-muted)', fontSize: '12px', padding: 0,
+            }}
+          >
+            {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Advanced — per-task model overrides
+          </button>
+
+          {showAdvanced && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, animation: 'fadeIn 150ms ease-out' }}>
+              <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-faint)' }}>
+                Leave blank to use the provider's default. Specific model names are provider-specific
+                (e.g. <code style={{ fontFamily: 'var(--mono)' }}>gemini-2.5-flash</code>,{' '}
+                <code style={{ fontFamily: 'var(--mono)' }}>claude-haiku-4-5</code>).
+              </p>
+              {data.tasks.map(task => (
+                <div key={task} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', alignItems: 'center', gap: 10 }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    {TASK_LABELS[task] ?? task}
+                  </label>
+                  <Input
+                    value={draft.per_task_overrides?.[task] ?? ''}
+                    onChange={e => setOverride(task, e.target.value)}
+                    placeholder="(provider default)"
+                    style={{ fontSize: '12px', height: '28px' }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Button onClick={handleSave} loading={saving} disabled={!dirty}>
+            <Save size={13} />
+            Save
+          </Button>
+          <Button variant="ghost" onClick={handleTest} loading={testing}>
+            Test connection
+          </Button>
+          {testResult && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '12px', color: testResult.ok ? 'var(--success)' : 'var(--danger)' }}>
+              {testResult.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+              {testResult.detail.slice(0, 80)}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Health section ───────────────────────────────────────────────────────────
 
 const HEALTH_LABELS: Record<string, string> = {
-  db:            'Database',
-  gemini:        'Gemini CLI',
-  playwright:    'Playwright / Chromium',
-  browserProfile:'Browser profile (X/Grok)',
+  db:         'Database',
+  llm:        'LLM provider',
+  playwright: 'Playwright / Chromium',
 };
 
 const HEALTH_FIX: Record<string, string> = {
-  db:            'Check that data/ is writable. Run: bun run setup',
-  gemini:        'Install: npm i -g @google/gemini-cli  then run: gemini auth',
-  playwright:    'Run: bun x playwright install chromium',
-  browserProfile:'Run: bun run setup  and complete the X/Grok login step.',
+  db:         'Check that data/ is writable.',
+  llm:        'See the detail above — fix depends on the active provider (API key, CLI install).',
+  playwright: 'Run: bunx playwright install chromium',
 };
 
 function HealthRow({ name, status }: { name: string; status: { ok: boolean; detail?: string } }) {
@@ -547,10 +899,10 @@ function HealthSection() {
   useEffect(() => { check(); }, [check]);
 
   const entries = health ? Object.entries(health.checks) : [];
-  const ordered = ['db', 'gemini', 'playwright', 'browserProfile'].map(k => {
+  const ordered = ['db', 'llm', 'playwright', 'browserProfile'].map(k => {
     const found = entries.find(([name]) => name === k);
     return found ?? [k, { ok: false, detail: 'not checked' }] as [string, { ok: boolean; detail?: string }];
-  }).concat(entries.filter(([name]) => !['db','gemini','playwright','browserProfile'].includes(name)));
+  }).concat(entries.filter(([name]) => !['db','llm','playwright','browserProfile'].includes(name)));
 
   return (
     <div>
@@ -602,6 +954,8 @@ export default function Settings() {
         <CriteriaSection />
         <div style={{ height: 1, background: 'var(--border)' }} />
         <SourcesSection />
+        <div style={{ height: 1, background: 'var(--border)' }} />
+        <LlmProviderSection />
         <div style={{ height: 1, background: 'var(--border)' }} />
         <HealthSection />
         <div style={{ height: 1, background: 'var(--border)' }} />

@@ -70,20 +70,3 @@ Page content:
 ---
 ${content}`;
 }
-
-export function xGrokExtractorPrompt(responseText: string): string {
-  return `This is a response from the Grok AI assistant on X.com about job openings. Extract all distinct job listings into a JSON array.
-
-Schema: [{"company":"","title":"","location":"","url":"","remote":false,"salary_min_usd":null,"jd_text":""}]
-
-Rules:
-- Extract only concrete job listings (company + role + apply link or post URL).
-- If a post URL is mentioned but no direct apply link, use the post URL as "url".
-- If no job listings are present, return [].
-- "jd_text" is any role description text found in the response.
-- "remote" is true if the listing explicitly says remote/distributed/anywhere.
-
-Response text:
----
-${responseText}`;
-}

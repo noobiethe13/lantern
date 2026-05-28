@@ -1,5 +1,7 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
-import { fetchJson } from '../core/fetch';
+import { assertValidSlug, fetchJson } from '../core/fetch';
+
+const GREENHOUSE_ALLOWED_HOSTS = ['boards-api.greenhouse.io'];
 
 export function parseGreenhouse(json: unknown, company: string): Job[] {
   const data = json as { jobs?: unknown[] };
@@ -26,10 +28,11 @@ export class GreenhouseAdapter implements SourceAdapter {
       identifier: string;
       display_name: string;
     };
+    assertValidSlug(identifier, 'Greenhouse board slug');
     const apiUrl = `https://boards-api.greenhouse.io/v1/boards/${identifier}/jobs`;
     ctx.emitProgress(`Fetching ${display_name} (Greenhouse)…`);
 
-    const json = await fetchJson(apiUrl);
+    const json = await fetchJson(apiUrl, { allowedHosts: GREENHOUSE_ALLOWED_HOSTS });
     const jobs = parseGreenhouse(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

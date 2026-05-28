@@ -1,5 +1,7 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
-import { fetchJson } from '../core/fetch';
+import { assertValidSlug, fetchJson } from '../core/fetch';
+
+const ASHBY_ALLOWED_HOSTS = ['api.ashbyhq.com'];
 
 export function parseAshby(json: unknown, company: string): Job[] {
   const data = json as { jobs?: unknown[] };
@@ -35,10 +37,11 @@ export class AshbyAdapter implements SourceAdapter {
       identifier: string;
       display_name: string;
     };
+    assertValidSlug(identifier, 'Ashby board slug');
     const apiUrl = `https://api.ashbyhq.com/posting-api/job-board/${identifier}?includeCompensation=true`;
     ctx.emitProgress(`Fetching ${display_name} (Ashby)…`);
 
-    const json = await fetchJson(apiUrl);
+    const json = await fetchJson(apiUrl, { allowedHosts: ASHBY_ALLOWED_HOSTS });
     const jobs = parseAshby(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

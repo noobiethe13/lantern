@@ -12,11 +12,11 @@ Add new entries at the bottom; never renumber existing IDs.
 ---
 
 ## KI-001 — generic-url adapter silently returns 0 jobs on gated job boards
-- **State**: open
+- **State**: fixed (2026-05-23, llm-overhaul Phase 4)
 - **Severity**: medium
 - **File**: `src/sources/generic-url.ts`
 - **Description**: The generic-url adapter accepts any URL but silently produces zero jobs when pointed at LinkedIn, Indeed, Glassdoor, Wellfound, or similar sites. These platforms require authentication or use bot-detection (Cloudflare, login walls). Playwright loads the gate; Gemini receives sparse content and returns `[]`; no error is recorded. The user gets silence instead of a clear failure.
-- **Fix direction**: (a) Detect known gated hosts and emit a `source_error` with a "login required" explanation rather than silently yielding nothing. (b) For Wellfound, consider a dedicated adapter using their unofficial API or OAuth flow. LinkedIn/Indeed have no usable public API — best to document them as unsupported.
+- **Fix**: Added `SourceFetchError` (`src/server/errors.ts`) with `kind: 'http' | 'gated' | 'auth' | 'extract'`. `fetchGenericUrlPage()` now runs a multi-signal login-wall heuristic (`/login`-shaped redirect, password field + short content, auth title + password + short content) and throws `kind: 'auth'`. `src/runner/scan.ts` writes `err.kind` to `last_status`. Settings UI gained a per-row Test button (`/api/sources/:id/test`) so users can sanity-check a source before scanning. Also switched generic-url to ephemeral `browser.newContext()` so X.com cookies no longer bleed across adapters. A host denylist is intentionally NOT shipped (user choice — see `context.md` Phase 4 finding #3): the heuristic + Test button gives the user a fast feedback loop without lantern picking winners.
 
 ## KI-002 — SSE stream closes before L2 scoring begins; L2 progress invisible in UI
 - **State**: open

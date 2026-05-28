@@ -21,4 +21,9 @@ export function runMigrations(db: Database): void {
   for (const stmt of statements) {
     db.run(stmt);
   }
+
+  // One-time: remove x-grok sources and their jobs before the CHECK constraint
+  // that dropped 'x-grok' takes effect on new rows.
+  db.run(`DELETE FROM jobs WHERE source_id IN (SELECT id FROM sources WHERE type = 'x-grok')`);
+  db.run(`DELETE FROM sources WHERE type = 'x-grok'`);
 }

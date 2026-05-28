@@ -1,6 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { fetchJson } from '../core/fetch';
-import { callGeminiValidated } from '../llm/gemini';
+import { llm } from '../llm';
 import { HNJobsShape, type HNJob } from '../llm/schemas';
 import { hnExtractorPrompt } from '../llm/prompts';
 
@@ -85,8 +85,8 @@ export class HNWhosHiringAdapter implements SourceAdapter {
 
       let jobs: HNJob[];
       try {
-        jobs = await callGeminiValidated(
-          { model: 'gemini-2.5-flash', prompt: hnExtractorPrompt(text) },
+        jobs = await llm.call(
+          { task: 'hn-extract', prompt: hnExtractorPrompt(text) },
           HNJobsShape
         );
       } catch (err) {
