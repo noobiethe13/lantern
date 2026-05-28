@@ -2,12 +2,12 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { llm, resetLlmCache } from '../llm';
+import { LLM_TASKS } from '../llm/provider';
 import type { ProviderName } from '../llm/provider';
 import { OLLAMA_DEFAULT_BASE_URL, OllamaProvider } from '../llm/providers/ollama';
 
 export const llmSettings = new Hono();
 
-const TASKS = ['verdict', 'nl-filter', 'html-extract', 'hn-extract'] as const;
 const PROVIDERS = ['gemini-api', 'anthropic-api', 'claude-code', 'antigravity-cli', 'ollama'] as const;
 
 const LlmSettingsSchema = z.object({
@@ -15,7 +15,7 @@ const LlmSettingsSchema = z.object({
   gemini_api_key: z.string().optional(),
   anthropic_api_key: z.string().optional(),
   ollama_base_url: z.string().url().optional(),
-  per_task_overrides: z.record(z.enum(TASKS), z.string().min(1).max(120)).optional(),
+  per_task_overrides: z.record(z.enum(LLM_TASKS), z.string().min(1).max(120)).optional(),
 });
 
 type LlmSettingsBody = z.infer<typeof LlmSettingsSchema>;
@@ -44,7 +44,7 @@ llmSettings.get('/', c => {
   return c.json({
     settings: readSettings(),
     available_providers: PROVIDERS,
-    tasks: TASKS,
+    tasks: LLM_TASKS,
     deprecations: {} as Record<ProviderName, string>,
     unsupported: UNSUPPORTED_PROVIDERS,
   });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { db } from '../db/client';
 import type { HealthcheckResult, LlmProvider, LlmRequest, ProviderName } from './provider';
+import { LLM_TASKS } from './provider';
 import { AnthropicApiProvider } from './providers/anthropic-api';
 import { AntigravityCliProvider } from './providers/antigravity-cli';
 import { ClaudeCodeProvider } from './providers/claude-code';
@@ -12,7 +13,7 @@ const LlmSettingsShape = z.object({
   gemini_api_key: z.string().optional(),
   anthropic_api_key: z.string().optional(),
   ollama_base_url: z.string().url().optional(),
-  per_task_overrides: z.record(z.string()).optional(),
+  per_task_overrides: z.record(z.enum(LLM_TASKS), z.string().min(1)).optional(),
 });
 
 type LlmSettings = z.infer<typeof LlmSettingsShape>;
@@ -20,16 +21,33 @@ type LlmSettings = z.infer<typeof LlmSettingsShape>;
 const DEFAULT_SETTINGS: LlmSettings = { provider: 'gemini-api' };
 
 function loadSettings(): LlmSettings {
+  let row: { value_json: string } | null = null;
   try {
-    const row = db
+    row = db
       .query<{ value_json: string }, []>("SELECT value_json FROM settings WHERE key = 'llm'")
       .get();
-    if (!row) return DEFAULT_SETTINGS;
-    const parsed = LlmSettingsShape.safeParse(JSON.parse(row.value_json));
-    return parsed.success ? parsed.data : DEFAULT_SETTINGS;
-  } catch {
+  } catch (err) {
+    console.warn(`[llm] settings table read failed, using defaults: ${(err as Error).message}`);
     return DEFAULT_SETTINGS;
   }
+  if (!row) return DEFAULT_SETTINGS;
+
+  let json: unknown;
+  try {
+    json = JSON.parse(row.value_json);
+  } catch (err) {
+    console.warn(
+      `[llm] settings JSON parse failed, using defaults — value: "${row.value_json.slice(0, 100)}" — ${(err as Error).message}`,
+    );
+    return DEFAULT_SETTINGS;
+  }
+
+  const parsed = LlmSettingsShape.safeParse(json);
+  if (!parsed.success) {
+    console.warn(`[llm] settings shape mismatch, using defaults: ${parsed.error.message}`);
+    return DEFAULT_SETTINGS;
+  }
+  return parsed.data;
 }
 
 function createProvider(settings: LlmSettings): LlmProvider {

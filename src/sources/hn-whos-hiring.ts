@@ -5,7 +5,9 @@ import { HNJobsShape, type HNJob } from '../llm/schemas';
 import { hnExtractorPrompt } from '../llm/prompts';
 
 const MAX_COMMENT_CHARS = 8192;
-const MAX_COMMENTS_PER_RUN = 5; // Top N comments
+const DEFAULT_MAX_COMMENTS = 5; // Top N comments. Per-source override:
+                                // sources.config_json.max_comments (1..50).
+const MAX_COMMENTS_CEILING = 50;
 
 interface AlgoliaSearchResult {
   hits: Array<{ objectID: string; title: string }>;
@@ -50,6 +52,11 @@ export class HNWhosHiringAdapter implements SourceAdapter {
   type = 'hn-whos-hiring' as const;
 
   async *fetch(ctx: SourceContext): AsyncIterable<Job> {
+    const configMax = (ctx.config.max_comments as number | undefined);
+    const maxComments = Number.isFinite(configMax)
+      ? Math.max(1, Math.min(MAX_COMMENTS_CEILING, Math.floor(configMax!)))
+      : DEFAULT_MAX_COMMENTS;
+
     ctx.emitProgress("HN Who's Hiring: finding latest thread…");
 
     const search = (await fetchJson(
@@ -65,7 +72,7 @@ export class HNWhosHiringAdapter implements SourceAdapter {
     )) as HNStory;
 
     const comments = story.children ?? [];
-    const toProcess = Math.min(comments.length, MAX_COMMENTS_PER_RUN);
+    const toProcess = Math.min(comments.length, maxComments);
     ctx.emitProgress(`HN Who's Hiring: processing ${toProcess}/${comments.length} comments…`);
 
     let processed = 0;

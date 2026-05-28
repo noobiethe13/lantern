@@ -82,18 +82,14 @@ runs.post('/scan', async c => {
     return c.json({ error: 'A scan is already running' }, 409);
   }
 
-  // Start the scan in the background (don't await)
-  runFull({
-    onEvent: event => {
-      bus.emit(event);
-    },
-  }).catch(err => {
+  // Start the scan in the background (don't await). Progress goes through
+  // the bus directly — there's no longer a parallel onEvent callback.
+  runFull().catch(err => {
     console.error('[scan] unhandled error:', err);
   });
 
-  // We need the run_id — it gets created in runScan and re-emitted.
-  // Return a response right after the scan is kicked off.
-  // The client will find the latest run_id from GET /api/runs.
-  // For SSE wiring, the client polls /api/runs immediately after this.
+  // We need the run_id — it gets created in runScan and emitted on the bus.
+  // Return a response right after the scan is kicked off; the client polls
+  // GET /api/runs to find the latest run_id and then opens the SSE stream.
   return c.json({ ok: true, msg: 'Scan started' }, 202);
 });

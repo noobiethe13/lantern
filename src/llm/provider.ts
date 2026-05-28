@@ -1,10 +1,11 @@
 import type { z } from 'zod';
 
-export type LlmTask =
-  | 'verdict'      // L2 fit scoring with criteria + JD
-  | 'nl-filter'    // user natural-language → structured filter
-  | 'html-extract' // arbitrary HTML → jobs[]
-  | 'hn-extract';  // HN "Who's Hiring" comment → jobs[]
+// Single source of truth for the LLM task list. Used by:
+//   - LlmTask union type (below)
+//   - routes/llm-settings.ts schema (z.enum on TASKS)
+//   - core/llm/index.ts settings shape (per_task_overrides validation)
+export const LLM_TASKS = ['verdict', 'nl-filter', 'html-extract', 'hn-extract'] as const;
+export type LlmTask = (typeof LLM_TASKS)[number];
 
 export type ProviderName =
   | 'gemini-api'

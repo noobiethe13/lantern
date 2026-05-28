@@ -92,3 +92,14 @@ CREATE TABLE IF NOT EXISTS settings (
   value_json  TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+
+-- ── scan_locks ──────────────────────────────────────────────────────
+-- Advisory lock used to enforce single-scanner-at-a-time. The runner
+-- inserts a row keyed 'scan' and deletes it on completion; concurrent
+-- attempts hit the PRIMARY KEY conflict and fail loudly. Survives the
+-- bus and module-state reloads that the previous in-memory boolean did not.
+CREATE TABLE IF NOT EXISTS scan_locks (
+  key         TEXT PRIMARY KEY,
+  acquired_at INTEGER NOT NULL,
+  pid         INTEGER
+);
