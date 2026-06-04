@@ -2,50 +2,63 @@ import type { SourceAdapter } from '../core/job';
 import { GreenhouseAdapter } from './greenhouse';
 import { AshbyAdapter } from './ashby';
 import { LeverAdapter } from './lever';
+import { RecruiteeAdapter } from './recruitee';
+import { SmartRecruitersAdapter } from './smartrecruiters';
+import { WorkableAdapter } from './workable';
+import { PersonioAdapter } from './personio';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
   ashby: new AshbyAdapter(),
   lever: new LeverAdapter(),
+  recruitee: new RecruiteeAdapter(),
+  smartrecruiters: new SmartRecruitersAdapter(),
+  workable: new WorkableAdapter(),
+  personio: new PersonioAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {
   return adapterRegistry[type] ?? null;
 }
 
-export function detectBoard(
-  careersUrl: string,
-  explicitApi?: string
-):
-  | { type: 'greenhouse'; api: string }
-  | { type: 'ashby'; api: string }
-  | { type: 'lever'; api: string }
-  | null {
-  if (explicitApi?.includes('greenhouse')) {
-    return { type: 'greenhouse', api: explicitApi };
-  }
+export type DetectedBoard =
+  | { type: 'greenhouse'; identifier: string }
+  | { type: 'ashby'; identifier: string }
+  | { type: 'lever'; identifier: string }
+  | { type: 'recruitee'; identifier: string }
+  | { type: 'smartrecruiters'; identifier: string }
+  | { type: 'workable'; identifier: string }
+  | { type: 'personio'; identifier: string };
+
+/**
+ * Best-effort detection of a board type + identifier from a public careers URL.
+ * Per-company boards key off their tenant slug, which the adapters re-derive
+ * into the canonical API/feed URL (so detection only needs the slug, not the
+ * full API URL). Returns null when no known board pattern matches.
+ */
+export function detectBoard(careersUrl: string): DetectedBoard | null {
   const url = careersUrl ?? '';
 
   const ashby = url.match(/jobs\.ashbyhq\.com\/([^/?#]+)/);
-  if (ashby)
-    return {
-      type: 'ashby',
-      api: `https://api.ashbyhq.com/posting-api/job-board/${ashby[1]}?includeCompensation=true`,
-    };
+  if (ashby) return { type: 'ashby', identifier: ashby[1] };
 
   const lever = url.match(/jobs\.lever\.co\/([^/?#]+)/);
-  if (lever)
-    return {
-      type: 'lever',
-      api: `https://api.lever.co/v0/postings/${lever[1]}`,
-    };
+  if (lever) return { type: 'lever', identifier: lever[1] };
 
   const ghEu = url.match(/job-boards(?:\.eu)?\.greenhouse\.io\/([^/?#]+)/);
-  if (ghEu)
-    return {
-      type: 'greenhouse',
-      api: `https://boards-api.greenhouse.io/v1/boards/${ghEu[1]}/jobs`,
-    };
+  if (ghEu) return { type: 'greenhouse', identifier: ghEu[1] };
+
+  const recruitee = url.match(/^https?:\/\/([a-z0-9][a-z0-9-]*)\.recruitee\.com/i);
+  if (recruitee) return { type: 'recruitee', identifier: recruitee[1] };
+
+  const sr = url.match(/(?:careers|jobs)\.smartrecruiters\.com\/([^/?#]+)/);
+  if (sr) return { type: 'smartrecruiters', identifier: sr[1] };
+
+  const workable = url.match(/apply\.workable\.com\/([^/?#]+)/);
+  if (workable) return { type: 'workable', identifier: workable[1] };
+
+  const personio = url.match(/^https?:\/\/([a-z0-9][a-z0-9-]*)\.jobs\.personio\.(?:de|com)/i);
+  if (personio) return { type: 'personio', identifier: personio[1] };
 
   return null;
 }

@@ -80,3 +80,21 @@ export async function fetchJson(url: string, opts: FetchOpts = {}): Promise<unkn
     clearTimeout(t);
   }
 }
+
+/**
+ * Like {@link fetchJson} but returns the raw response body as text. Used by
+ * board adapters whose public feed is markdown (Workable) or XML (Personio)
+ * rather than JSON. Same SSRF guard and `redirect: 'error'` contract.
+ */
+export async function fetchText(url: string, opts: FetchOpts = {}): Promise<string> {
+  assertSafeHttpUrl(url, opts);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(t);
+  }
+}

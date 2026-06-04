@@ -66,7 +66,14 @@ export interface Job {
   notes: string | null;
 }
 
-export type SourceType = 'greenhouse' | 'ashby' | 'lever';
+export type SourceType =
+  | 'greenhouse'
+  | 'ashby'
+  | 'lever'
+  | 'recruitee'
+  | 'smartrecruiters'
+  | 'workable'
+  | 'personio';
 
 export interface Source {
   id: number;

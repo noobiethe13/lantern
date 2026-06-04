@@ -22,7 +22,16 @@ export interface SourceContext {
   abortSignal: AbortSignal;
 }
 
+export type SourceType =
+  | 'greenhouse'
+  | 'ashby'
+  | 'lever'
+  | 'recruitee'
+  | 'smartrecruiters'
+  | 'workable'
+  | 'personio';
+
 export interface SourceAdapter {
-  type: 'greenhouse' | 'ashby' | 'lever';
+  type: SourceType;
   fetch(ctx: SourceContext): AsyncIterable<Job>;
 }

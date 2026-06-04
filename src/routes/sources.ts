@@ -5,7 +5,25 @@ import { assertValidSlug } from '../core/fetch';
 
 export const sources = new Hono();
 
-const SOURCE_TYPES = ['greenhouse', 'ashby', 'lever'] as const;
+const SOURCE_TYPES = [
+  'greenhouse',
+  'ashby',
+  'lever',
+  'recruitee',
+  'smartrecruiters',
+  'workable',
+  'personio',
+] as const;
+
+const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
+  greenhouse: 'Greenhouse board slug',
+  ashby: 'Ashby board slug',
+  lever: 'Lever board slug',
+  recruitee: 'Recruitee tenant slug',
+  smartrecruiters: 'SmartRecruiters company slug',
+  workable: 'Workable account slug',
+  personio: 'Personio tenant slug',
+};
 
 const CreateSourceSchema = z.object({
   type: z.enum(SOURCE_TYPES),
@@ -15,21 +33,12 @@ const CreateSourceSchema = z.object({
   config_json: z.record(z.unknown()).optional(),
 });
 
-// Validate the user-supplied identifier per source type. Greenhouse/Ashby/
-// Lever all expect a board slug.
-function validateIdentifier(type: typeof SOURCE_TYPES[number], identifier: string): string | null {
+// Validate the user-supplied identifier per source type. Every supported board
+// keys off a URL-path-safe tenant/board slug.
+function validateIdentifier(type: (typeof SOURCE_TYPES)[number], identifier: string): string | null {
   try {
-    switch (type) {
-      case 'greenhouse':
-        assertValidSlug(identifier, 'Greenhouse board slug');
-        return null;
-      case 'ashby':
-        assertValidSlug(identifier, 'Ashby board slug');
-        return null;
-      case 'lever':
-        assertValidSlug(identifier, 'Lever board slug');
-        return null;
-    }
+    assertValidSlug(identifier, SLUG_LABELS[type]);
+    return null;
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
   }

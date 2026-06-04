@@ -2,7 +2,8 @@
 CREATE TABLE IF NOT EXISTS sources (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   type            TEXT NOT NULL CHECK (type IN (
-    'greenhouse', 'ashby', 'lever'
+    'greenhouse', 'ashby', 'lever',
+    'recruitee', 'smartrecruiters', 'workable', 'personio'
   )),
   identifier      TEXT NOT NULL,
   display_name    TEXT NOT NULL,

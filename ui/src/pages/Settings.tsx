@@ -21,12 +21,20 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'greenhouse', label: 'Greenhouse', placeholder: 'board-slug (e.g. stripe)' },
   { value: 'ashby', label: 'Ashby', placeholder: 'jobs.ashbyhq.com/company' },
   { value: 'lever', label: 'Lever', placeholder: 'jobs.lever.co/company' },
+  { value: 'recruitee', label: 'Recruitee', placeholder: 'tenant slug (e.g. acme → acme.recruitee.com)' },
+  { value: 'smartrecruiters', label: 'SmartRecruiters', placeholder: 'company slug (e.g. Bosch)' },
+  { value: 'workable', label: 'Workable', placeholder: 'account slug (apply.workable.com/slug)' },
+  { value: 'personio', label: 'Personio', placeholder: 'tenant slug (e.g. acme → acme.jobs.personio.de)' },
 ];
 
 const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'default'> = {
   greenhouse: 'green',
   ashby: 'blue',
   lever: 'amber',
+  recruitee: 'indigo',
+  smartrecruiters: 'red',
+  workable: 'default',
+  personio: 'default',
 };
 
 function timeAgo(ts: number | null): string {
