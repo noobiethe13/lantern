@@ -105,28 +105,18 @@ export interface HealthCheck {
   checks: Record<string, { ok: boolean; detail?: string; deprecation?: string }>;
 }
 
-export type LlmProviderName =
-  | 'gemini-api'
-  | 'anthropic-api'
-  | 'claude-code'
-  | 'antigravity-cli'
-  | 'ollama';
-export type LlmTask = 'verdict' | 'nl-filter' | 'html-extract' | 'hn-extract';
+// claude-code is the only provider since the Phase 8 strip-down.
+export type LlmProviderName = 'claude-code';
+export type LlmTask = 'verdict' | 'nl-filter';
 
 export interface LlmSettings {
-  provider: LlmProviderName;
-  gemini_api_key?: string;
-  anthropic_api_key?: string;
-  ollama_base_url?: string;
   per_task_overrides?: Partial<Record<LlmTask, string>>;
 }
 
 export interface LlmSettingsResponse {
   settings: LlmSettings;
-  available_providers: LlmProviderName[];
+  provider: LlmProviderName;
   tasks: LlmTask[];
-  deprecations: Partial<Record<LlmProviderName, string>>;
-  unsupported: Partial<Record<LlmProviderName, string>>;
 }
 
 export interface LlmHealth {
@@ -134,18 +124,6 @@ export interface LlmHealth {
   ok: boolean;
   detail: string;
   deprecation?: string;
-}
-
-export interface OllamaModel {
-  name: string;
-  size?: number;
-  modified_at?: string;
-}
-
-export interface OllamaModelsResponse {
-  baseUrl: string;
-  models: OllamaModel[];
-  error?: string;
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -231,10 +209,6 @@ export const api = {
         body: JSON.stringify(settings),
       }),
     health: () => request<LlmHealth>('/settings/llm/health'),
-    ollamaModels: (baseUrl?: string) => {
-      const qs = baseUrl ? `?baseUrl=${encodeURIComponent(baseUrl)}` : '';
-      return request<OllamaModelsResponse>(`/settings/llm/ollama-models${qs}`);
-    },
   },
 
   attachments: {

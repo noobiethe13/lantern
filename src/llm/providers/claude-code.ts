@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { extractFirstJsonBlock, stripCodeFence } from '../extract-json';
 import { classifyErrorMessage, LlmError } from '../provider';
@@ -9,12 +12,27 @@ type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
 const TASK_MODELS: Record<LlmTask, ClaudeModel> = {
   verdict: 'claude-sonnet-4-6',
   'nl-filter': 'claude-haiku-4-5',
-  'html-extract': 'claude-sonnet-4-6',
-  'hn-extract': 'claude-haiku-4-5',
 };
 
 const STRICT_SUFFIX =
   '\n\nIMPORTANT: Respond with ONLY the JSON object that conforms to the provided schema. No prose, no markdown, no code fences.';
+
+// Replaces Claude Code's heavy agentic default system prompt. The task prompt
+// already carries full instructions and `--json-schema` constrains the output,
+// so a minimal generic system prompt is enough — and roughly halves per-call
+// token cost versus the default.
+const ISOLATED_SYSTEM_PROMPT =
+  'You convert the user message into a single JSON object that conforms to the provided JSON schema. Output only that JSON object — no prose, no markdown, no code fences.';
+
+const EMPTY_MCP_CONFIG = '{"mcpServers":{}}';
+
+// Run claude from a throwaway directory so no project-level CLAUDE.md is
+// auto-discovered into the context. Created once per process.
+let isolatedCwdMemo: string | null = null;
+function isolatedCwd(): string {
+  if (!isolatedCwdMemo) isolatedCwdMemo = mkdtempSync(join(tmpdir(), 'lantern-claude-'));
+  return isolatedCwdMemo;
+}
 
 // Walk the wrapper Claude Code emits and return the raw structured payload.
 // `--json-schema` is supposed to populate `structured_output`, but versions
@@ -59,17 +77,31 @@ async function spawnClaude<T>(
 ): Promise<unknown> {
   const jsonSchema = JSON.stringify(zodToProviderSchema(schema));
 
-  // --bare: skip hooks, skills, plugins, MCP servers, and CLAUDE.md
-  //   auto-discovery. This is what neutralizes project-level CLAUDE.md
-  //   files without needing a tmpdir cwd workaround.
-  // -p: print mode (one-shot, non-interactive).
-  // --output-format json: structured wrapper around the model output.
-  // --json-schema: constrains the model's response to the supplied schema.
+  // We deliberately do NOT use `--bare`: it disables OAuth/keychain auth and
+  // forces ANTHROPIC_API_KEY, so subscription users get "Not logged in". We
+  // instead keep normal auth and isolate the context flag-by-flag:
+  //   -p                       print mode (one-shot, non-interactive).
+  //   --output-format json     structured wrapper around the model output.
+  //   --json-schema            constrains the response to the supplied schema
+  //                            (populates `structured_output`).
+  //   --system-prompt          replaces the agentic default (cheaper, focused).
+  //   --setting-sources ''     load no user/project/local settings → no hooks.
+  //   --strict-mcp-config +    use only the empty inline MCP config → no MCP
+  //   --mcp-config             servers.
+  //   --disable-slash-commands no skills.
+  //   cwd = throwaway dir      no project CLAUDE.md auto-discovery.
   // Prompt piped on stdin to avoid Windows multi-line argv truncation
   // (same gotcha as the legacy gemini-cli wrapper).
   const proc = Bun.spawn(
-    ['claude', '--bare', '-p', '--model', model, '--output-format', 'json', '--json-schema', jsonSchema],
-    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },
+    [
+      'claude', '-p', '--model', model,
+      '--output-format', 'json', '--json-schema', jsonSchema,
+      '--system-prompt', ISOLATED_SYSTEM_PROMPT,
+      '--setting-sources', '',
+      '--strict-mcp-config', '--mcp-config', EMPTY_MCP_CONFIG,
+      '--disable-slash-commands',
+    ],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', cwd: isolatedCwd() },
   );
 
   const timeout = setTimeout(() => proc.kill('SIGTERM'), timeoutMs ?? 120_000);
@@ -83,10 +115,25 @@ async function spawnClaude<T>(
   clearTimeout(timeout);
 
   if (exitCode !== 0) {
-    throw new Error(`claude cli exit ${exitCode}: ${stderr.trim()}`);
+    // Auth/usage failures (e.g. "Not logged in · Please run /login") arrive on
+    // stdout inside the JSON wrapper's `result`, with stderr empty. Surface
+    // that so classifyErrorMessage can flag fatal cases instead of retrying.
+    throw new Error(`claude cli exit ${exitCode}: ${stderr.trim() || resultMessage(stdout)}`);
   }
 
   return unwrapClaudeResponse(stdout);
+}
+
+// Best-effort extraction of the human-readable message the CLI puts in the
+// wrapper's `result` field on error. Falls back to a stdout preview.
+function resultMessage(stdout: string): string {
+  try {
+    const wrapper = JSON.parse(stdout) as { result?: unknown };
+    if (typeof wrapper.result === 'string' && wrapper.result.trim()) return wrapper.result.trim();
+  } catch {
+    /* not JSON — fall through */
+  }
+  return stdout.slice(0, 200).replace(/\s+/g, ' ').trim() || '(no output)';
 }
 
 export class ClaudeCodeProvider implements LlmProvider {
@@ -139,25 +186,17 @@ export class ClaudeCodeProvider implements LlmProvider {
       };
     }
 
-    // Wrapper-shape probe: confirm --bare + -p + --output-format json still
-    // produce a JSON object on stdout. Doesn't burn a real LLM call (uses
-    // --help-style trivial prompt with a tight timeout). Surfaces upstream
-    // CLI breakage early rather than at first scan.
+    // Real probe: a tiny structured call. `--version` only proves the binary
+    // exists; it does NOT prove auth works (the old --bare/--help probe falsely
+    // reported healthy while the user was logged out). A trivial haiku call
+    // surfaces "Not logged in" and wrapper breakage before the first scan.
+    const ProbeShape = z.object({ ok: z.boolean() });
     try {
-      const proc = Bun.spawn(
-        ['claude', '--bare', '-p', '--output-format', 'json', '--help'],
-        { stdout: 'pipe', stderr: 'pipe' },
-      );
-      const timeout = setTimeout(() => proc.kill('SIGTERM'), 5_000);
-      const exit = await proc.exited;
-      clearTimeout(timeout);
-      if (exit !== 0) {
-        return { ok: true, detail: `${version} (wrapper probe skipped: --help exit ${exit})` };
-      }
-    } catch {
-      // probe failure isn't fatal — version succeeded
+      const raw = await spawnClaude('claude-haiku-4-5', 'Respond with the JSON {"ok":true}.', ProbeShape, 30_000);
+      ProbeShape.parse(raw);
+      return { ok: true, detail: version };
+    } catch (err) {
+      return { ok: false, detail: `${version} — call failed: ${(err as Error).message}` };
     }
-
-    return { ok: true, detail: version };
   }
 }

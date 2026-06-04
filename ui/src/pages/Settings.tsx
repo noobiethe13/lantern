@@ -9,11 +9,9 @@ import {
   type Criteria,
   type SourceType,
   type HealthCheck,
-  type LlmProviderName,
   type LlmSettings as LlmSettingsModel,
   type LlmSettingsResponse,
   type LlmTask,
-  type OllamaModel,
 } from '@/lib/api';
 import { Button, Input, Textarea, Badge, Spinner, useToast } from '@/components/ui';
 
@@ -92,7 +90,7 @@ function CriteriaSection() {
         Search criteria
       </h2>
       <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-muted)' }}>
-        YAML filter rules for L1 and the Gemini scoring prompt. Edit directly or generate from a description.
+        YAML filter rules for L1 and the L2 scoring prompt. Edit directly or generate from a description.
       </p>
 
       {/* NL generator */}
@@ -461,22 +459,10 @@ function SourcesSection() {
 
 // ─── LLM provider section ─────────────────────────────────────────────────────
 
-const PROVIDER_LABELS: Record<LlmProviderName, string> = {
-  'gemini-api': 'Gemini API',
-  'anthropic-api': 'Anthropic API',
-  'claude-code': 'Claude Code',
-  'antigravity-cli': 'Antigravity CLI',
-  'ollama': 'Ollama (local)',
-};
-
 const TASK_LABELS: Record<LlmTask, string> = {
   'verdict': 'Verdict (L2 scoring)',
   'nl-filter': 'NL → filter',
-  'html-extract': 'HTML → jobs',
-  'hn-extract': 'HN comment → jobs',
 };
-
-const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
 
 function LlmProviderSection() {
   const [data, setData] = useState<LlmSettingsResponse | null>(null);
@@ -485,9 +471,6 @@ function LlmProviderSection() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
-  const [ollamaModels, setOllamaModels] = useState<OllamaModel[] | null>(null);
-  const [ollamaLoading, setOllamaLoading] = useState(false);
-  const [ollamaError, setOllamaError] = useState<string | null>(null);
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -509,9 +492,6 @@ function LlmProviderSection() {
     );
   }
 
-  const deprecation = data.deprecations[draft.provider];
-  const unsupported = data.unsupported?.[draft.provider];
-
   const setOverride = (task: LlmTask, value: string) => {
     setDraft(d => {
       if (!d) return d;
@@ -526,42 +506,14 @@ function LlmProviderSection() {
     if (!draft) return;
     setSaving(true);
     setTestResult(null);
-    // Strip empty optional fields so the backend validators don't reject empty strings.
-    let payload: LlmSettingsModel = { ...draft };
-    const ollamaTrimmed = payload.ollama_base_url?.trim();
-    if (!ollamaTrimmed) { const { ollama_base_url: _drop, ...rest } = payload; payload = rest; }
-    else payload = { ...payload, ollama_base_url: ollamaTrimmed };
-    const geminiKey = payload.gemini_api_key?.trim();
-    if (!geminiKey) { const { gemini_api_key: _drop, ...rest } = payload; payload = rest; }
-    else payload = { ...payload, gemini_api_key: geminiKey };
-    const anthropicKey = payload.anthropic_api_key?.trim();
-    if (!anthropicKey) { const { anthropic_api_key: _drop, ...rest } = payload; payload = rest; }
-    else payload = { ...payload, anthropic_api_key: anthropicKey };
     try {
-      await api.llmSettings.save(payload);
+      await api.llmSettings.save(draft);
       toast('LLM settings saved.', 'success');
       load();
     } catch (e) {
       toast(`Save failed: ${String(e)}`, 'error');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleListOllamaModels = async () => {
-    setOllamaLoading(true);
-    setOllamaError(null);
-    setOllamaModels(null);
-    try {
-      const res = await api.llmSettings.ollamaModels(draft?.ollama_base_url?.trim() || undefined);
-      setOllamaModels(res.models);
-      if (res.models.length === 0) {
-        setOllamaError("No models installed. Pull one with 'ollama pull llama3.1:8b'.");
-      }
-    } catch (e) {
-      setOllamaError(String(e));
-    } finally {
-      setOllamaLoading(false);
     }
   };
 
@@ -586,153 +538,18 @@ function LlmProviderSection() {
         LLM provider
       </h2>
       <p style={{ margin: '0 0 20px', fontSize: '13px', color: 'var(--text-muted)' }}>
-        Which backend runs the L1→L2 scoring, NL-to-filter conversion, and HTML extraction.
+        L2 scoring and NL-to-filter conversion run through the Claude Code CLI.
       </p>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '10px', padding: '16px' }}>
-        {/* Provider dropdown */}
-        <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
-          Provider
-        </label>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={draft.provider}
-            onChange={e => setDraft({ ...draft, provider: e.target.value as LlmProviderName })}
-            style={{
-              background: 'var(--surface-2)', border: '1px solid var(--border)',
-              borderRadius: '7px', color: 'var(--text)', fontFamily: 'inherit',
-              fontSize: '13px', padding: '6px 10px', outline: 'none', minWidth: 200,
-            }}
-          >
-            {data.available_providers.map(p => (
-              <option key={p} value={p}>{PROVIDER_LABELS[p] ?? p}</option>
-            ))}
-          </select>
-          {deprecation && (
-            <Badge variant="amber">Deprecating</Badge>
-          )}
-          {unsupported && (
-            <Badge variant="red">Unsupported</Badge>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)' }}>Claude Code</span>
+          <Badge variant="indigo">Provider</Badge>
         </div>
-        {deprecation && (
-          <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--warning, #d97706)' }}>
-            {deprecation}
-          </p>
-        )}
-        {unsupported && (
-          <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--danger, #dc2626)' }}>
-            {unsupported}
-          </p>
-        )}
-
-        {/* Provider-specific configuration */}
-        {draft.provider === 'gemini-api' && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
-              API key
-            </label>
-            <Input
-              type="password"
-              value={draft.gemini_api_key ?? ''}
-              onChange={e => setDraft({ ...draft, gemini_api_key: e.target.value })}
-              placeholder="AIza…"
-              style={{ fontSize: '12px', height: '30px' }}
-            />
-            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
-              Get a free API key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>aistudio.google.com/apikey</a>. The free tier includes Gemini 2.5 Flash.
-            </p>
-          </div>
-        )}
-
-        {draft.provider === 'anthropic-api' && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
-              API key
-            </label>
-            <Input
-              type="password"
-              value={draft.anthropic_api_key ?? ''}
-              onChange={e => setDraft({ ...draft, anthropic_api_key: e.target.value })}
-              placeholder="sk-ant-…"
-              style={{ fontSize: '12px', height: '30px' }}
-            />
-            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
-              Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>console.anthropic.com</a>. Pay-as-you-go; structured output uses native tool_use.
-            </p>
-          </div>
-        )}
-
-        {draft.provider === 'ollama' && (
-          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 500, color: 'var(--text-muted)', marginBottom: 8 }}>
-              Ollama base URL
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Input
-                value={draft.ollama_base_url ?? ''}
-                onChange={e => setDraft({ ...draft, ollama_base_url: e.target.value })}
-                placeholder={OLLAMA_DEFAULT_BASE_URL}
-                style={{ fontSize: '12px', height: '30px', flex: 1 }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleListOllamaModels}
-                loading={ollamaLoading}
-                style={{ flexShrink: 0 }}
-              >
-                List models
-              </Button>
-            </div>
-            <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
-              Leave blank to use the default ({OLLAMA_DEFAULT_BASE_URL}). Make sure <code style={{ fontFamily: 'var(--mono)' }}>ollama serve</code> is running.
-            </p>
-
-            {ollamaError && (
-              <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '6px', fontSize: '11px', color: 'var(--danger)' }}>
-                {ollamaError}
-              </div>
-            )}
-
-            {ollamaModels && ollamaModels.length > 0 && (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginBottom: 6 }}>
-                  Installed models — copy one into a per-task field under Advanced:
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {ollamaModels.map(m => (
-                    <button
-                      key={m.name}
-                      type="button"
-                      onClick={() => { void navigator.clipboard?.writeText(m.name); toast(`Copied "${m.name}" to clipboard.`, 'success'); }}
-                      style={{
-                        fontFamily: 'var(--mono)', fontSize: '11px',
-                        padding: '3px 8px', borderRadius: '5px',
-                        background: 'var(--surface-2)', color: 'var(--text)',
-                        border: '1px solid var(--border)', cursor: 'pointer',
-                      }}
-                      title="Click to copy"
-                    >
-                      {m.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {draft.provider === 'antigravity-cli' && (
-          <div style={{ marginTop: 16, padding: '10px 12px', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: '8px' }}>
-            <div style={{ fontSize: '12px', color: 'var(--warning, #d97706)', fontWeight: 500, marginBottom: 4 }}>
-              Stub provider
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              The Antigravity CLI (<code style={{ fontFamily: 'var(--mono)' }}>agy</code>) doesn't yet expose a documented headless JSON mode. Scans will fail until support lands. Pick another provider for now.
-            </div>
-          </div>
-        )}
+        <p style={{ margin: '8px 0 0', fontSize: '11px', color: 'var(--text-faint)' }}>
+          Requires the <code style={{ fontFamily: 'var(--mono)' }}>claude</code> CLI on your PATH.
+          Install Claude Code from <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>claude.com/claude-code</a>.
+        </p>
 
         {/* Advanced — per-task overrides */}
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
@@ -751,8 +568,8 @@ function LlmProviderSection() {
           {showAdvanced && (
             <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8, animation: 'fadeIn 150ms ease-out' }}>
               <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-faint)' }}>
-                Leave blank to use the provider's default. Specific model names are provider-specific
-                (e.g. <code style={{ fontFamily: 'var(--mono)' }}>gemini-2.5-flash</code>,{' '}
+                Leave blank to use the default model for each task (e.g.{' '}
+                <code style={{ fontFamily: 'var(--mono)' }}>claude-sonnet-4-6</code>,{' '}
                 <code style={{ fontFamily: 'var(--mono)' }}>claude-haiku-4-5</code>).
               </p>
               {data.tasks.map(task => (
@@ -763,7 +580,7 @@ function LlmProviderSection() {
                   <Input
                     value={draft.per_task_overrides?.[task] ?? ''}
                     onChange={e => setOverride(task, e.target.value)}
-                    placeholder="(provider default)"
+                    placeholder="(default model)"
                     style={{ fontSize: '12px', height: '28px' }}
                   />
                 </div>

@@ -12,8 +12,6 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.99.0",
-    "@google/generative-ai": "0.24.1",
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",

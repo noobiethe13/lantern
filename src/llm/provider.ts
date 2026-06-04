@@ -3,16 +3,12 @@ import type { z } from 'zod';
 // Single source of truth for the LLM task list. Used by:
 //   - LlmTask union type (below)
 //   - routes/llm-settings.ts schema (z.enum on TASKS)
-//   - core/llm/index.ts settings shape (per_task_overrides validation)
-export const LLM_TASKS = ['verdict', 'nl-filter', 'html-extract', 'hn-extract'] as const;
+//   - llm/index.ts settings shape (per_task_overrides validation)
+export const LLM_TASKS = ['verdict', 'nl-filter'] as const;
 export type LlmTask = (typeof LLM_TASKS)[number];
 
-export type ProviderName =
-  | 'gemini-api'
-  | 'anthropic-api'
-  | 'claude-code'
-  | 'antigravity-cli'
-  | 'ollama';
+// claude-code is the only provider since the Phase 8 strip-down.
+export type ProviderName = 'claude-code';
 
 export interface LlmRequest {
   task: LlmTask;
@@ -57,6 +53,7 @@ export class LlmError extends Error {
 // only gives us stderr text). Conservative: defaults to transient.
 export function classifyErrorMessage(msg: string): LlmErrorKind {
   if (/401|403|invalid.*api.*key|unauthorized|forbidden|authentication/i.test(msg)) return 'fatal';
+  if (/not logged in|please run \/login|\/login/i.test(msg)) return 'fatal';
   if (/model.*not.*found|unknown.*model|no.*such.*model/i.test(msg)) return 'fatal';
   if (/ENOENT|command.*not.*found|not recognized as.*command/i.test(msg)) return 'fatal';
   return 'transient';
