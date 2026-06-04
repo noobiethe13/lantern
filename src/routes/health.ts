@@ -30,16 +30,6 @@ health.get('/', async c => {
     checks.llm = { ok: false, detail: `${llm.providerName}: ${String(err)}` };
   }
 
-  // Playwright check (just verify the chromium binary exists)
-  try {
-    const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: true });
-    await browser.close();
-    checks.playwright = { ok: true };
-  } catch (err) {
-    checks.playwright = { ok: false, detail: String(err) };
-  }
-
   const allOk = Object.values(checks).every(c => c.ok);
   return c.json({ ok: allOk, checks }, allOk ? 200 : 503);
 });

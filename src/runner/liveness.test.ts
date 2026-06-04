@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-// `chromium.launch()` + `browser.newContext()` — always. The persistent-context
-// call was removed with x-grok (MAC-3). This test asserts no production code
-// re-introduces it. Test files themselves are excluded from the scan.
-describe('no Playwright persistent context in src/', () => {
+// Playwright / headless browsing was removed entirely in Phase 8. Liveness is
+// fetch-only (HTTP + cheerio). This test asserts no production code re-introduces
+// a Playwright dependency. Test files themselves are excluded from the scan.
+describe('no Playwright usage in src/', () => {
   function collectTsFiles(dir: string): string[] {
     const entries = readdirSync(dir);
     return entries.flatMap(entry => {
@@ -22,10 +22,11 @@ describe('no Playwright persistent context in src/', () => {
   const files = collectTsFiles(srcDir);
 
   for (const file of files) {
-    test(`${file.replace(/\\/g, '/')} does not call the banned API`, () => {
+    test(`${file.replace(/\\/g, '/')} does not import playwright`, () => {
       const src = readFileSync(file, 'utf8');
-      // The string we're searching for — split to avoid this file matching itself
-      expect(src).not.toContain('launch' + 'PersistentContext');
+      // Split to avoid this file matching itself.
+      expect(src).not.toContain("'play" + "wright'");
+      expect(src).not.toContain('"play' + 'wright"');
     });
   }
 });

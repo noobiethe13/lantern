@@ -27,27 +27,3 @@ export const NLFilterShape = z.object({
   exclude_companies: z.array(z.string()),
 });
 export type NLFilter = z.infer<typeof NLFilterShape>;
-
-export const HNJobShape = z.object({
-  company: z.string(),
-  title: z.string(),
-  location: z.string(),
-  url: z.string(),
-  remote: z.boolean(),
-  salary_min_usd: z.number().int().nullable(),
-  jd_text: z.string(),
-});
-export const HNJobsShape = z.array(HNJobShape);
-export type HNJob = z.infer<typeof HNJobShape>;
-
-export const HTMLJobShape = z.object({
-  company: z.string(),
-  title: z.string(),
-  location: z.string(),
-  url: z.string(),
-  remote: z.boolean(),
-  salary_min_usd: z.number().int().nullable(),
-  jd_text: z.string(),
-});
-export const HTMLJobsShape = z.array(HTMLJobShape);
-export type HTMLJob = z.infer<typeof HTMLJobShape>;

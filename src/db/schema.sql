@@ -2,8 +2,7 @@
 CREATE TABLE IF NOT EXISTS sources (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   type            TEXT NOT NULL CHECK (type IN (
-    'greenhouse', 'ashby', 'lever',
-    'hn-whos-hiring', 'generic-url', 'local-parser'
+    'greenhouse', 'ashby', 'lever'
   )),
   identifier      TEXT NOT NULL,
   display_name    TEXT NOT NULL,
@@ -95,7 +94,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- ── scan_locks ──────────────────────────────────────────────────────
 -- Advisory lock used to enforce single-scanner-at-a-time. The runner
--- inserts a row keyed 'scan' and deletes it on completion; concurrent
+-- inserts a row keyed 'scan' and deletes it on completion. Concurrent
 -- attempts hit the PRIMARY KEY conflict and fail loudly. Survives the
 -- bus and module-state reloads that the previous in-memory boolean did not.
 CREATE TABLE IF NOT EXISTS scan_locks (

@@ -66,9 +66,7 @@ export interface Job {
   notes: string | null;
 }
 
-export type SourceType =
-  | 'greenhouse' | 'ashby' | 'lever'
-  | 'hn-whos-hiring' | 'generic-url' | 'local-parser';
+export type SourceType = 'greenhouse' | 'ashby' | 'lever';
 
 export interface Source {
   id: number;
@@ -150,18 +148,6 @@ export interface OllamaModelsResponse {
   error?: string;
 }
 
-export type SourceTestKind = 'http' | 'gated' | 'auth' | 'extract' | 'unsupported';
-
-export interface SourceTestResult {
-  ok: boolean;
-  kind?: SourceTestKind;
-  detail: string;
-  finalUrl?: string;
-  title?: string;
-  contentKind?: 'innerText' | 'outerHTML';
-  snippet?: string;
-}
-
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -210,8 +196,6 @@ export const api = {
     update: (id: number, body: { display_name?: string; enabled?: boolean; config_json?: Record<string, unknown> }) =>
       request<{ ok: boolean }>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     delete: (id: number) => request<{ ok: boolean }>(`/sources/${id}`, { method: 'DELETE' }),
-    test: (id: number) =>
-      request<SourceTestResult>(`/sources/${id}/test`, { method: 'POST' }),
   },
 
   criteria: {

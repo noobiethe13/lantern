@@ -1,19 +1,14 @@
 import { load as cheerioLoad } from 'cheerio';
 import { db } from '../db/client';
-import { classifyLiveness, MIN_CONTENT, type LivenessInput } from '../core/liveness';
+import { classifyLiveness, type LivenessInput } from '../core/liveness';
 import { getScanningState } from './scan';
 
 const FETCH_TIMEOUT_MS = 10_000;
 const RECHECK_AFTER_MS = 24 * 60 * 60 * 1000; // 24 h
-const SPA_TYPES = new Set(['ashby', 'lever', 'generic-url']);
-
-// Playwright is sequential — one tab at a time across the whole process.
-let playwrightBusy = false;
 
 interface EligibleJob {
   id: number;
   url: string;
-  source_type: string;
   liveness_checked_at: number | null;
 }
 
@@ -50,47 +45,6 @@ async function fetchLiveness(url: string): Promise<LivenessInput | null> {
   }
 }
 
-async function fetchLivenessPlaywright(url: string): Promise<LivenessInput | null> {
-  if (playwrightBusy) return null;
-  playwrightBusy = true;
-  // Always ephemeral: chromium.launch() + newContext(). Persistent-context API is banned.
-  try {
-    const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: true });
-    try {
-      const context = await browser.newContext();
-      try {
-        const page = await context.newPage();
-        try {
-          const res = await page.goto(url, { timeout: 30_000, waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(2_000);
-
-          const status = res?.status() ?? 200;
-          const finalUrl = page.url();
-          const bodyText: string = await page.evaluate(() => document.body.innerText ?? '');
-          const applyControls: string[] = await page.evaluate(() => {
-            const els = Array.from(document.querySelectorAll('a, button'));
-            return els.map(e => (e as HTMLElement).innerText?.trim() ?? '').filter(Boolean);
-          });
-
-          return { status, finalUrl, bodyText, applyControls };
-        } finally {
-          await page.close().catch(() => {});
-        }
-      } finally {
-        await context.close().catch(() => {});
-      }
-    } finally {
-      await browser.close().catch(() => {});
-    }
-  } catch (err) {
-    console.error(`[liveness] playwright error for ${url}: ${err}`);
-    return null;
-  } finally {
-    playwrightBusy = false;
-  }
-}
-
 export async function runLivenessCheck(): Promise<LivenessSummary> {
   if (getScanningState()) {
     return { checked: 0, active: 0, expired: 0, uncertain: 0, skipped: 1 };
@@ -99,9 +53,8 @@ export async function runLivenessCheck(): Promise<LivenessSummary> {
   const staleThreshold = Date.now() - RECHECK_AFTER_MS;
 
   const jobs = db.query<EligibleJob, [number]>(
-    `SELECT j.id, j.url, s.type AS source_type, j.liveness_checked_at
+    `SELECT j.id, j.url, j.liveness_checked_at
      FROM jobs j
-     LEFT JOIN sources s ON s.id = j.source_id
      WHERE j.status = 'shortlist'
        AND (j.liveness_checked_at IS NULL OR j.liveness_checked_at < ?)`,
   ).all(staleThreshold);
@@ -109,15 +62,7 @@ export async function runLivenessCheck(): Promise<LivenessSummary> {
   const summary: LivenessSummary = { checked: 0, active: 0, expired: 0, uncertain: 0, skipped: 0 };
 
   for (const job of jobs) {
-    let input = await fetchLiveness(job.url);
-
-    // Escalate to Playwright for SPA-board sources with thin/no content
-    if (
-      SPA_TYPES.has(job.source_type) &&
-      (!input || input.bodyText.trim().length < MIN_CONTENT || input.applyControls.length === 0)
-    ) {
-      input = await fetchLivenessPlaywright(job.url) ?? input;
-    }
+    const input = await fetchLiveness(job.url);
 
     if (!input) {
       summary.skipped++;

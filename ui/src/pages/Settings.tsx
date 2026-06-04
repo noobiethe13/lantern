@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   CheckCircle2, XCircle, Circle, Trash2, Plus,
   Wand2, Save, AlertCircle, RefreshCw, ChevronDown, ChevronRight,
-  Wifi,
 } from 'lucide-react';
 import {
   api,
@@ -24,18 +23,12 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'greenhouse', label: 'Greenhouse', placeholder: 'board-slug (e.g. stripe)' },
   { value: 'ashby', label: 'Ashby', placeholder: 'jobs.ashbyhq.com/company' },
   { value: 'lever', label: 'Lever', placeholder: 'jobs.lever.co/company' },
-  { value: 'hn-whos-hiring', label: 'HN Who\'s Hiring', placeholder: 'hn-whos-hiring' },
-  { value: 'generic-url', label: 'Generic URL', placeholder: 'https://company.com/careers' },
-  { value: 'local-parser', label: 'Local parser', placeholder: 'node ./scripts/my-parser.js' },
 ];
 
 const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'default'> = {
   greenhouse: 'green',
   ashby: 'blue',
   lever: 'amber',
-  'hn-whos-hiring': 'indigo',
-  'generic-url': 'default',
-  'local-parser': 'red',
 };
 
 function timeAgo(ts: number | null): string {
@@ -191,29 +184,8 @@ function SourceRow({ source, onToggle, onDelete }: {
   onDelete: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [testing, setTesting] = useState(false);
   const enabled = source.enabled === 1;
   const typeOpt = SOURCE_TYPE_OPTIONS.find(t => t.value === source.type);
-  const toast = useToast();
-
-  const testable = source.type === 'generic-url';
-
-  const handleTest = async () => {
-    setTesting(true);
-    try {
-      const res = await api.sources.test(source.id);
-      if (res.ok) {
-        toast(`${source.display_name}: ${res.detail}`, 'success');
-      } else {
-        const label = res.kind ? `[${res.kind}] ` : '';
-        toast(`${source.display_name}: ${label}${res.detail}`, 'error');
-      }
-    } catch (e) {
-      toast(`${source.display_name}: ${String(e)}`, 'error');
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const statusIcon = !source.last_scan_at
     ? <Circle size={8} style={{ color: 'var(--text-faint)' }} />
@@ -276,7 +248,7 @@ function SourceRow({ source, onToggle, onDelete }: {
         {enabled ? 'On' : 'Off'}
       </button>
 
-      {/* Actions: Test (if applicable) + Delete */}
+      {/* Delete */}
       {confirming ? (
         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
           <button
@@ -294,24 +266,6 @@ function SourceRow({ source, onToggle, onDelete }: {
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', alignItems: 'center' }}>
-          {testable && (
-            <button
-              onClick={handleTest}
-              disabled={testing}
-              title="Test URL"
-              style={{
-                background: 'none', border: 'none',
-                cursor: testing ? 'wait' : 'pointer',
-                color: testing ? 'var(--text-faint)' : 'var(--text-muted)',
-                padding: 4, display: 'flex', alignItems: 'center',
-                transition: 'color 120ms',
-              }}
-              onMouseEnter={e => { if (!testing) (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent-hover)'; }}
-              onMouseLeave={e => { if (!testing) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-muted)'; }}
-            >
-              {testing ? <Spinner /> : <Wifi size={13} />}
-            </button>
-          )}
           <button
             onClick={() => setConfirming(true)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 4, display: 'flex', alignItems: 'center', transition: 'color 120ms' }}
@@ -842,15 +796,13 @@ function LlmProviderSection() {
 // ─── Health section ───────────────────────────────────────────────────────────
 
 const HEALTH_LABELS: Record<string, string> = {
-  db:         'Database',
-  llm:        'LLM provider',
-  playwright: 'Playwright / Chromium',
+  db:  'Database',
+  llm: 'LLM provider',
 };
 
 const HEALTH_FIX: Record<string, string> = {
-  db:         'Check that data/ is writable.',
-  llm:        'See the detail above — fix depends on the active provider (API key, CLI install).',
-  playwright: 'Run: bunx playwright install chromium',
+  db:  'Check that data/ is writable.',
+  llm: 'See the detail above — fix depends on the active provider (API key, CLI install).',
 };
 
 function HealthRow({ name, status }: { name: string; status: { ok: boolean; detail?: string } }) {
@@ -932,10 +884,10 @@ function HealthSection() {
   useEffect(() => { check(); }, [check]);
 
   const entries = health ? Object.entries(health.checks) : [];
-  const ordered = ['db', 'llm', 'playwright', 'browserProfile'].map(k => {
+  const ordered = ['db', 'llm'].map(k => {
     const found = entries.find(([name]) => name === k);
     return found ?? [k, { ok: false, detail: 'not checked' }] as [string, { ok: boolean; detail?: string }];
-  }).concat(entries.filter(([name]) => !['db','llm','playwright','browserProfile'].includes(name)));
+  }).concat(entries.filter(([name]) => !['db', 'llm'].includes(name)));
 
   return (
     <div>

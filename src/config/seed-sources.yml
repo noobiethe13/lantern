@@ -68,5 +68,3 @@ sources:
   - { type: ashby,      identifier: legora,             display_name: Legora,            enabled: true }
   - { type: lever,      identifier: spotify,            display_name: Spotify,           enabled: true }
   - { type: lever,      identifier: vinted,             display_name: Vinted,            enabled: true }
-  # Aggregators
-  - { type: hn-whos-hiring, identifier: monthly,        display_name: HN Who's Hiring,   enabled: true }

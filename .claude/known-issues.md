@@ -31,3 +31,10 @@ Add new entries at the bottom; never renumber existing IDs.
 - **File**: `ui/src/pages/Run.tsx`
 - **Description**: `scanning`, `activeRunId`, and `log` are component-level React state. React Router unmounts `Run.tsx` on navigation; all state resets. On return, `loadRuns()` refetches runs but does not detect that a scan is still in progress (run row has `finished_at = null`) and does not reconnect to the SSE stream. The UI shows "completed" state even though L2 scoring may still be running in the backend.
 - **Fix direction**: Lift scan state to a module-level singleton or React context. On `Run.tsx` mount, check `runs[0].finished_at === null` — if so, restore `scanning = true`, set `activeRunId`, and reconnect SSE. Log entries prior to navigation are lost (acceptable); at minimum the connection and status indicator should recover.
+
+## KI-004 — migrate.ts splits schema.sql on `;`, breaking on semicolons in comments/strings
+- **State**: open
+- **Severity**: low
+- **File**: `src/db/migrate.ts`
+- **Description**: `runMigrations()` splits the entire `schema.sql` on `;`, then strips lines beginning with `--` from each chunk. Any `;` *inside* a comment or a string literal splits mid-statement: the fragment after the `;` on the same physical line is no longer recognised as a comment (its leading `--` was on the previous chunk) and leaks into the next statement. Surfaced in Phase 8 when the DB was purged for a fresh start — a `;` in the `scan_locks` comment produced `SQLiteError: near "concurrent"`. The pre-existing `data.db` predated that comment, so the bug had been latent. Worked around by removing the `;` from the comment, but the splitter remains fragile for future schema edits.
+- **Fix direction**: Either strip comments before splitting (remove `--` to end-of-line first, then split), or run the whole file via a single `db.exec(sql)` (bun:sqlite supports executing multiple statements), which sidesteps manual splitting entirely. Prefer `db.exec` if the one-time ADD COLUMN guard can be sequenced around it.
