@@ -204,7 +204,15 @@ export const api = {
   },
 
   health: {
-    check: () => request<HealthCheck>('/health'),
+    // The endpoint returns 503 when any single check fails, but the body still
+    // carries the per-check detail — parse it regardless so a failing LLM check
+    // doesn't mask a healthy DB.
+    check: async (): Promise<HealthCheck> => {
+      const res = await fetch(`${BASE}/health`);
+      const body = await res.json().catch(() => null);
+      if (body && typeof body === 'object' && 'checks' in body) return body as HealthCheck;
+      throw new ApiError(res.status, res.statusText);
+    },
   },
 
   admin: {

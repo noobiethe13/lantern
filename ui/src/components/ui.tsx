@@ -5,7 +5,7 @@ import {
 } from 'react';
 import { Loader2, X } from 'lucide-react';
 
-// ─── Button ───────────────────────────────────────────────────────────────────
+const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 type ButtonVariant = 'default' | 'ghost' | 'danger' | 'outline';
 type ButtonSize = 'sm' | 'md';
@@ -13,7 +13,7 @@ type ButtonSize = 'sm' | 'md';
 const buttonStyles: Record<ButtonVariant, React.CSSProperties> = {
   default: {
     background: 'var(--accent)',
-    color: '#fff',
+    color: 'var(--accent-ink)',
     border: '1px solid transparent',
   },
   ghost: {
@@ -22,26 +22,26 @@ const buttonStyles: Record<ButtonVariant, React.CSSProperties> = {
     border: '1px solid transparent',
   },
   danger: {
-    background: 'rgba(239,68,68,0.1)',
+    background: 'transparent',
     color: 'var(--danger)',
-    border: '1px solid rgba(239,68,68,0.2)',
+    border: '1px solid color-mix(in oklch, var(--danger) 35%, transparent)',
   },
   outline: {
-    background: 'transparent',
+    background: 'var(--surface)',
     color: 'var(--text)',
     border: '1px solid var(--border)',
   },
 };
 
 const buttonSizes: Record<ButtonSize, React.CSSProperties> = {
-  sm: { padding: '4px 10px', fontSize: '12px', height: '28px', borderRadius: '6px' },
-  md: { padding: '6px 14px', fontSize: '13px', height: '32px', borderRadius: '7px' },
+  sm: { padding: '5px 11px', fontSize: '12.5px', height: '30px', borderRadius: 'var(--radius-sm)' },
+  md: { padding: '7px 15px', fontSize: '13.5px', height: '34px', borderRadius: 'var(--radius-md)' },
 };
 
 const buttonHover: Record<ButtonVariant, React.CSSProperties> = {
   default: { background: 'var(--accent-hover)' },
   ghost: { background: 'var(--surface-2)', color: 'var(--text)' },
-  danger: { background: 'rgba(239,68,68,0.18)' },
+  danger: { background: 'color-mix(in oklch, var(--danger) 12%, transparent)' },
   outline: { background: 'var(--surface-2)' },
 };
 
@@ -60,12 +60,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         style={{
           display: 'inline-flex',
           alignItems: 'center',
+          justifyContent: 'center',
           gap: '6px',
           fontFamily: 'inherit',
-          fontWeight: 500,
+          fontWeight: 550,
           cursor: props.disabled || loading ? 'not-allowed' : 'pointer',
           opacity: props.disabled || loading ? 0.5 : 1,
-          transition: 'all 150ms ease-out',
+          transition: `background 150ms ${EASE}, color 150ms ${EASE}, border-color 150ms ${EASE}`,
           whiteSpace: 'nowrap',
           ...buttonStyles[variant],
           ...buttonSizes[size],
@@ -79,7 +80,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         }}
         onMouseLeave={e => {
           if (!props.disabled && !loading) {
-            Object.assign((e.currentTarget as HTMLButtonElement).style, buttonStyles[variant]);
+            Object.assign((e.currentTarget as HTMLButtonElement).style, buttonStyles[variant], style);
           }
           onMouseLeave?.(e);
         }}
@@ -94,38 +95,39 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 Button.displayName = 'Button';
 
-// ─── Badge ────────────────────────────────────────────────────────────────────
+type BadgeTone = 'neutral' | 'accent' | 'blue' | 'violet' | 'success' | 'warning' | 'danger' | 'dim';
 
-type BadgeVariant = 'default' | 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'dim';
-
-const badgeStyles: Record<BadgeVariant, React.CSSProperties> = {
-  default: { background: '#27272a', color: '#a1a1aa' },
-  indigo: { background: 'rgba(99,102,241,0.15)', color: '#818cf8' },
-  blue: { background: 'rgba(59,130,246,0.15)', color: '#60a5fa' },
-  amber: { background: 'rgba(245,158,11,0.15)', color: '#fbbf24' },
-  green: { background: 'rgba(34,197,94,0.15)', color: '#4ade80' },
-  red: { background: 'rgba(239,68,68,0.15)', color: '#f87171' },
-  dim: { background: '#1c1c1e', color: '#52525b' },
+const badgeTone: Record<BadgeTone, string> = {
+  neutral: 'var(--text-muted)',
+  accent: 'var(--accent-text)',
+  blue: 'var(--tone-blue)',
+  violet: 'var(--tone-violet)',
+  success: 'var(--success)',
+  warning: 'var(--warning)',
+  danger: 'var(--danger)',
+  dim: 'var(--text-faint)',
 };
 
 interface BadgeProps {
-  variant?: BadgeVariant;
+  tone?: BadgeTone;
   children: ReactNode;
   style?: React.CSSProperties;
 }
 
-export function Badge({ variant = 'default', children, style }: BadgeProps) {
+export function Badge({ tone = 'neutral', children, style }: BadgeProps) {
+  const color = badgeTone[tone];
   return (
     <span
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '2px 7px',
-        borderRadius: '4px',
-        fontSize: '11px',
-        fontWeight: 500,
-        letterSpacing: '0.01em',
-        ...badgeStyles[variant],
+        padding: '2px 8px',
+        borderRadius: 'var(--radius-sm)',
+        fontSize: '11.5px',
+        fontWeight: 550,
+        letterSpacing: '0.005em',
+        color,
+        background: `color-mix(in oklch, ${color} 12%, transparent)`,
         ...style,
       }}
     >
@@ -134,63 +136,61 @@ export function Badge({ variant = 'default', children, style }: BadgeProps) {
   );
 }
 
-// ─── Input ────────────────────────────────────────────────────────────────────
+const fieldBase: React.CSSProperties = {
+  background: 'var(--surface)',
+  border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-md)',
+  color: 'var(--text)',
+  fontFamily: 'inherit',
+  fontSize: '13.5px',
+  padding: '8px 11px',
+  outline: 'none',
+  transition: `border-color 150ms ${EASE}, box-shadow 150ms ${EASE}`,
+  width: '100%',
+};
+
+function focusField(el: HTMLElement) {
+  el.style.borderColor = 'var(--accent)';
+  el.style.boxShadow = '0 0 0 3px var(--accent-ring)';
+}
+function blurField(el: HTMLElement) {
+  el.style.borderColor = 'var(--border)';
+  el.style.boxShadow = 'none';
+}
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ style, ...props }, ref) => (
     <input
       ref={ref}
-      style={{
-        background: 'var(--surface-2)',
-        border: '1px solid var(--border)',
-        borderRadius: '7px',
-        color: 'var(--text)',
-        fontFamily: 'inherit',
-        fontSize: '13px',
-        padding: '6px 10px',
-        outline: 'none',
-        transition: 'border-color 150ms ease-out',
-        width: '100%',
-        ...style,
-      }}
-      onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; props.onFocus?.(e); }}
-      onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; props.onBlur?.(e); }}
+      style={{ ...fieldBase, ...style }}
+      onFocus={e => { focusField(e.currentTarget); props.onFocus?.(e); }}
+      onBlur={e => { blurField(e.currentTarget); props.onBlur?.(e); }}
       {...props}
     />
   )
 );
 Input.displayName = 'Input';
 
-// ─── Textarea ─────────────────────────────────────────────────────────────────
-
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
   ({ style, ...props }, ref) => (
     <textarea
       ref={ref}
       style={{
-        background: 'var(--surface-2)',
-        border: '1px solid var(--border)',
-        borderRadius: '7px',
-        color: 'var(--text)',
-        fontFamily: 'var(--mono)',
-        fontSize: '12px',
+        ...fieldBase,
+        fontFamily: 'var(--font-mono)',
+        fontSize: '12.5px',
         lineHeight: 1.65,
-        padding: '10px 12px',
-        outline: 'none',
+        padding: '11px 13px',
         resize: 'vertical',
-        transition: 'border-color 150ms ease-out',
-        width: '100%',
         ...style,
       }}
-      onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; props.onFocus?.(e); }}
-      onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; props.onBlur?.(e); }}
+      onFocus={e => { focusField(e.currentTarget); props.onFocus?.(e); }}
+      onBlur={e => { blurField(e.currentTarget); props.onBlur?.(e); }}
       {...props}
     />
   )
 );
 Textarea.displayName = 'Textarea';
-
-// ─── Card ─────────────────────────────────────────────────────────────────────
 
 export function Card({ children, style }: { children: ReactNode; style?: React.CSSProperties }) {
   return (
@@ -198,7 +198,7 @@ export function Card({ children, style }: { children: ReactNode; style?: React.C
       style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
-        borderRadius: '10px',
+        borderRadius: 'var(--radius-lg)',
         ...style,
       }}
     >
@@ -206,8 +206,6 @@ export function Card({ children, style }: { children: ReactNode; style?: React.C
     </div>
   );
 }
-
-// ─── Spinner ──────────────────────────────────────────────────────────────────
 
 export function Spinner({ size = 16 }: { size?: number }) {
   return (
@@ -217,8 +215,6 @@ export function Spinner({ size = 16 }: { size?: number }) {
     />
   );
 }
-
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 interface SkeletonProps {
   width?: string | number;
@@ -232,7 +228,7 @@ export function Skeleton({ width, height, style }: SkeletonProps) {
       style={{
         width: width ?? '100%',
         height: height ?? '14px',
-        borderRadius: '4px',
+        borderRadius: 'var(--radius-sm)',
         background: 'linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%)',
         backgroundSize: '200% 100%',
         animation: 'skeleton-shimmer 1.4s infinite linear',
@@ -241,8 +237,6 @@ export function Skeleton({ width, height, style }: SkeletonProps) {
     />
   );
 }
-
-// ─── Toast ────────────────────────────────────────────────────────────────────
 
 type ToastType = 'success' | 'error' | 'info';
 type ToastFn = (msg: string, type?: ToastType) => void;
@@ -259,20 +253,10 @@ interface ToastItem {
   type: ToastType;
 }
 
-const toastBg: Record<ToastType, string> = {
-  success: 'rgba(34,197,94,0.12)',
-  error:   'rgba(239,68,68,0.12)',
-  info:    'var(--surface)',
-};
-const toastBorder: Record<ToastType, string> = {
-  success: 'rgba(34,197,94,0.3)',
-  error:   'rgba(239,68,68,0.3)',
-  info:    'var(--border)',
-};
 const toastColor: Record<ToastType, string> = {
   success: 'var(--success)',
-  error:   'var(--danger)',
-  info:    'var(--text)',
+  error: 'var(--danger)',
+  info: 'var(--text)',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -302,56 +286,51 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           pointerEvents: 'none',
         }}
       >
-        {toasts.map(t => (
-          <div
-            key={t.id}
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: '9px',
-              fontSize: '13px',
-              lineHeight: 1.4,
-              background: toastBg[t.type],
-              border: `1px solid ${toastBorder[t.type]}`,
-              color: toastColor[t.type],
-              boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-              animation: 'toast-in 200ms ease-out',
-              pointerEvents: 'all',
-            }}
-          >
-            <span style={{ flex: 1 }}>{t.msg}</span>
-            <button
-              onClick={() => dismiss(t.id)}
+        {toasts.map(t => {
+          const color = toastColor[t.type];
+          return (
+            <div
+              key={t.id}
               style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'inherit',
-                opacity: 0.6,
-                padding: 0,
                 display: 'flex',
-                alignItems: 'center',
-                flexShrink: 0,
-                marginTop: 1,
+                alignItems: 'flex-start',
+                gap: 10,
+                padding: '11px 13px',
+                borderRadius: 'var(--radius-md)',
+                fontSize: '13px',
+                lineHeight: 1.45,
+                background: 'var(--surface)',
+                border: `1px solid ${t.type === 'info' ? 'var(--border)' : `color-mix(in oklch, ${color} 35%, var(--border))`}`,
+                color: 'var(--text)',
+                boxShadow: 'var(--shadow-md)',
+                animation: `toast-in 200ms ${EASE}`,
+                pointerEvents: 'all',
               }}
             >
-              <X size={13} />
-            </button>
-          </div>
-        ))}
+              {t.type !== 'info' && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 6 }} />
+              )}
+              <span style={{ flex: 1 }}>{t.msg}</span>
+              <button
+                onClick={() => dismiss(t.id)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)',
+                  padding: 0, display: 'flex', alignItems: 'center', flexShrink: 0, marginTop: 2,
+                }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );
 }
 
-// ─── global keyframe for spin ─────────────────────────────────────────────────
-// Injected once via a style tag
 if (typeof document !== 'undefined' && !document.getElementById('ui-keyframes')) {
   const style = document.createElement('style');
   style.id = 'ui-keyframes';
-  style.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`;
+  style.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
   document.head.appendChild(style);
 }
