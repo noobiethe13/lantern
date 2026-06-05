@@ -18,6 +18,10 @@ export type Job = z.infer<typeof JobShape>;
 export interface SourceContext {
   sourceId: number;
   config: Record<string, unknown>;
+  /** Positive title keywords from the active criteria. Keyword-global
+   *  aggregator adapters use these to drive their query; per-company board
+   *  adapters ignore them. */
+  keywords?: string[];
   emitProgress: (msg: string, n?: number) => void;
   abortSignal: AbortSignal;
 }
@@ -29,7 +33,10 @@ export type SourceType =
   | 'recruitee'
   | 'smartrecruiters'
   | 'workable'
-  | 'personio';
+  | 'personio'
+  | 'remoteok'
+  | 'arbeitnow'
+  | 'himalayas';
 
 export interface SourceAdapter {
   type: SourceType;

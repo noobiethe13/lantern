@@ -25,6 +25,9 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'smartrecruiters', label: 'SmartRecruiters', placeholder: 'company slug (e.g. Bosch)' },
   { value: 'workable', label: 'Workable', placeholder: 'account slug (apply.workable.com/slug)' },
   { value: 'personio', label: 'Personio', placeholder: 'tenant slug (e.g. acme → acme.jobs.personio.de)' },
+  { value: 'remoteok', label: 'RemoteOK', placeholder: 'global — searched by your role keyword' },
+  { value: 'arbeitnow', label: 'Arbeitnow', placeholder: 'global — searched by your role keyword' },
+  { value: 'himalayas', label: 'Himalayas', placeholder: 'global — searched by your role keyword' },
 ];
 
 const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'green' | 'red' | 'default'> = {
@@ -35,6 +38,9 @@ const TYPE_BADGE_VARIANT: Record<SourceType, 'indigo' | 'blue' | 'amber' | 'gree
   smartrecruiters: 'red',
   workable: 'default',
   personio: 'default',
+  remoteok: 'green',
+  arbeitnow: 'amber',
+  himalayas: 'indigo',
 };
 
 function timeAgo(ts: number | null): string {

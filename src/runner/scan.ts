@@ -262,6 +262,7 @@ export async function runScan(): Promise<number> {
         const ctx = {
           sourceId: source.id,
           config,
+          keywords: criteria.title?.positive ?? [],
           emitProgress: (msg: string, _n?: number) => {
             console.log(`  ${msg}`);
             bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });

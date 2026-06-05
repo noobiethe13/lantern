@@ -13,6 +13,9 @@ const SOURCE_TYPES = [
   'smartrecruiters',
   'workable',
   'personio',
+  'remoteok',
+  'arbeitnow',
+  'himalayas',
 ] as const;
 
 const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
@@ -23,7 +26,15 @@ const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
   smartrecruiters: 'SmartRecruiters company slug',
   workable: 'Workable account slug',
   personio: 'Personio tenant slug',
+  remoteok: 'RemoteOK identifier',
+  arbeitnow: 'Arbeitnow identifier',
+  himalayas: 'Himalayas identifier',
 };
+
+// Keyword-global aggregators have no per-company slug — the role/keyword drives
+// the query. They're seeded as singletons; the identifier is just a fixed,
+// slug-safe sentinel so the (type, identifier) uniqueness constraint holds.
+const AGGREGATOR_TYPES = new Set(['remoteok', 'arbeitnow', 'himalayas']);
 
 const CreateSourceSchema = z.object({
   type: z.enum(SOURCE_TYPES),
@@ -36,6 +47,9 @@ const CreateSourceSchema = z.object({
 // Validate the user-supplied identifier per source type. Every supported board
 // keys off a URL-path-safe tenant/board slug.
 function validateIdentifier(type: (typeof SOURCE_TYPES)[number], identifier: string): string | null {
+  // Aggregators ignore the identifier (no per-company slug); any non-empty
+  // value is fine. CreateSourceSchema already enforces min length.
+  if (AGGREGATOR_TYPES.has(type)) return null;
   try {
     assertValidSlug(identifier, SLUG_LABELS[type]);
     return null;

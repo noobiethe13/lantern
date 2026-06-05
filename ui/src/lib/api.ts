@@ -73,7 +73,10 @@ export type SourceType =
   | 'recruitee'
   | 'smartrecruiters'
   | 'workable'
-  | 'personio';
+  | 'personio'
+  | 'remoteok'
+  | 'arbeitnow'
+  | 'himalayas';
 
 export interface Source {
   id: number;

@@ -6,6 +6,9 @@ import { RecruiteeAdapter } from './recruitee';
 import { SmartRecruitersAdapter } from './smartrecruiters';
 import { WorkableAdapter } from './workable';
 import { PersonioAdapter } from './personio';
+import { RemoteOkAdapter } from './remoteok';
+import { ArbeitnowAdapter } from './arbeitnow';
+import { HimalayasAdapter } from './himalayas';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
@@ -15,6 +18,9 @@ export const adapterRegistry: Record<string, SourceAdapter> = {
   smartrecruiters: new SmartRecruitersAdapter(),
   workable: new WorkableAdapter(),
   personio: new PersonioAdapter(),
+  remoteok: new RemoteOkAdapter(),
+  arbeitnow: new ArbeitnowAdapter(),
+  himalayas: new HimalayasAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {

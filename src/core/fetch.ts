@@ -4,6 +4,9 @@ export interface FetchOpts {
   /** Allowlist of permitted hostnames (lowercase). If omitted, only the
    *  private-host block applies. */
   allowedHosts?: string[];
+  /** Extra request headers. Some aggregator APIs (e.g. RemoteOK) reject
+   *  requests without a `User-Agent`. */
+  headers?: Record<string, string>;
 }
 
 const PRIVATE_HOST_RX = [
@@ -73,7 +76,7 @@ export async function fetchJson(url: string, opts: FetchOpts = {}): Promise<unkn
   try {
     // redirect: 'error' — refuse cross-origin redirects (e.g. a Greenhouse
     // response that 302s to 127.0.0.1 would otherwise bypass the host check).
-    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error' });
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error', headers: opts.headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } finally {
@@ -91,7 +94,7 @@ export async function fetchText(url: string, opts: FetchOpts = {}): Promise<stri
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error' });
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error', headers: opts.headers });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
   } finally {

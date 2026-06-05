@@ -68,3 +68,7 @@ sources:
   - { type: ashby,      identifier: legora,             display_name: Legora,            enabled: true }
   - { type: lever,      identifier: spotify,            display_name: Spotify,           enabled: true }
   - { type: lever,      identifier: vinted,             display_name: Vinted,            enabled: true }
+  # Keyword-global aggregators — the role/keyword drives the query; no per-company slug.
+  - { type: remoteok,   identifier: remoteok,           display_name: "RemoteOK (remote)",   enabled: true }
+  - { type: arbeitnow,  identifier: arbeitnow,          display_name: "Arbeitnow (EU)",      enabled: true }
+  - { type: himalayas,  identifier: himalayas,          display_name: "Himalayas (remote)",  enabled: true }
