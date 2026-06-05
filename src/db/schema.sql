@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   url                  TEXT NOT NULL UNIQUE,
   title                TEXT NOT NULL,
   company              TEXT NOT NULL,
+  -- normalized company name (see normalizeCompany) — the indexed prefilter for
+  -- fuzzy dedup so we don't scan the whole jobs table per insert. Backfilled and
+  -- indexed in migrate.ts. Keep this comment free of semicolons — the migrate
+  -- splitter breaks on a semicolon inside a comment.
+  company_norm         TEXT,
   location             TEXT,
   remote               INTEGER,
   salary_min_usd       INTEGER,

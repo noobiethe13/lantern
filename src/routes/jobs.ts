@@ -95,7 +95,9 @@ jobs.post('/liveness', async c => {
 });
 
 function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
-  const { l2_verdict_json, l1_reasons, duplicate_urls, ...rest } = row;
+  // company_norm is an internal dedup prefilter column; drop it from the API.
+  const { l2_verdict_json, l1_reasons, duplicate_urls, company_norm, ...rest } = row;
+  void company_norm;
   return {
     ...rest,
     l2_verdict: l2_verdict_json ? JSON.parse(l2_verdict_json as string) : null,

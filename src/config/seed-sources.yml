@@ -1,74 +1,341 @@
+# lantern default sources — broad, title-driven default set.
+# Per-company boards (below) are a curated, slug-required quality tier: every
+# slug here was live-probed (returned >0 jobs) when this list was generated.
+# The role/keyword you set in Search filters these at L1; it does NOT need to
+# match a company here. Breadth comes from the keyword aggregators at the end,
+# which query by your keyword with no per-company config.
+#
+# There is no public "list all boards" endpoint for any of these ATSes, so the
+# per-company tier is necessarily a maintained slug list. Add more under the
+# matching board type. Slug = the tenant in the public board URL.
 sources:
-  # AI labs
-  - { type: greenhouse, identifier: anthropic,          display_name: Anthropic,         enabled: true }
-  - { type: greenhouse, identifier: openai,             display_name: OpenAI,            enabled: true }
-  - { type: greenhouse, identifier: polyai,             display_name: PolyAI,            enabled: true }
-  - { type: greenhouse, identifier: parloa,             display_name: Parloa,            enabled: true }
-  - { type: greenhouse, identifier: humeai,             display_name: Hume AI,           enabled: true }
-  - { type: ashby,      identifier: elevenlabs,         display_name: ElevenLabs,        enabled: true }
-  - { type: ashby,      identifier: deepgram,           display_name: Deepgram,          enabled: true }
-  - { type: ashby,      identifier: cohere,             display_name: Cohere,            enabled: true }
-  - { type: ashby,      identifier: langchain,          display_name: LangChain,         enabled: true }
-  - { type: ashby,      identifier: pinecone,           display_name: Pinecone,          enabled: true }
-  - { type: ashby,      identifier: perplexity,         display_name: Perplexity,        enabled: true }
-  - { type: lever,      identifier: mistral,            display_name: Mistral AI,        enabled: true }
-  - { type: lever,      identifier: wandb,              display_name: Weights & Biases,  enabled: true }
-  - { type: lever,      identifier: palantir,           display_name: Palantir,          enabled: true }
-  # Dev tools / AI infra
-  - { type: greenhouse, identifier: vercel,             display_name: Vercel,            enabled: true }
-  - { type: greenhouse, identifier: temporal,           display_name: Temporal,          enabled: true }
-  - { type: greenhouse, identifier: arizeai,            display_name: Arize AI,          enabled: true }
-  - { type: greenhouse, identifier: gleanwork,          display_name: Glean,             enabled: true }
-  - { type: greenhouse, identifier: planetscale,        display_name: PlanetScale,       enabled: true }
-  - { type: ashby,      identifier: supabase,           display_name: Supabase,          enabled: true }
-  - { type: ashby,      identifier: clerk,              display_name: Clerk,             enabled: true }
-  - { type: ashby,      identifier: resend,             display_name: Resend,            enabled: true }
-  - { type: ashby,      identifier: workos,             display_name: WorkOS,            enabled: true }
-  - { type: ashby,      identifier: inngest,            display_name: Inngest,           enabled: true }
-  # Data / SaaS / platforms
-  - { type: greenhouse, identifier: airtable,           display_name: Airtable,          enabled: true }
-  - { type: greenhouse, identifier: intercom,           display_name: Intercom,          enabled: true }
-  - { type: greenhouse, identifier: hightouch,          display_name: Hightouch,         enabled: true }
-  - { type: greenhouse, identifier: runwayml,           display_name: Runway,            enabled: true }
-  - { type: greenhouse, identifier: contentful,         display_name: Contentful,        enabled: true }
-  - { type: greenhouse, identifier: hellofresh,         display_name: HelloFresh,        enabled: true }
-  - { type: greenhouse, identifier: getyourguide,       display_name: GetYourGuide,      enabled: true }
-  - { type: greenhouse, identifier: hootsuite,          display_name: Hootsuite,         enabled: true }
-  - { type: greenhouse, identifier: later,              display_name: Later,             enabled: true }
-  - { type: ashby,      identifier: zapier,             display_name: Zapier,            enabled: true }
-  - { type: ashby,      identifier: n8n,                display_name: n8n,               enabled: true }
-  - { type: ashby,      identifier: lindy,              display_name: Lindy,             enabled: true }
-  - { type: ashby,      identifier: tinybird,           display_name: Tinybird,          enabled: true }
-  - { type: ashby,      identifier: attio,              display_name: Attio,             enabled: true }
-  - { type: ashby,      identifier: travelperk,         display_name: TravelPerk,        enabled: true }
-  - { type: ashby,      identifier: claylabs,           display_name: Clay Labs,         enabled: true }
-  # DACH / EU
-  - { type: ashby,      identifier: AlephAlpha,         display_name: Aleph Alpha,       enabled: true }
-  - { type: ashby,      identifier: DeepL,              display_name: DeepL,             enabled: true }
-  - { type: greenhouse, identifier: blackforestlabs,    display_name: Black Forest Labs, enabled: true }
-  - { type: greenhouse, identifier: helsing,            display_name: Helsing,           enabled: true }
-  - { type: greenhouse, identifier: celonis,            display_name: Celonis,           enabled: true }
-  - { type: greenhouse, identifier: n26,                display_name: N26,               enabled: true }
-  - { type: greenhouse, identifier: traderepublicbank,  display_name: Trade Republic,    enabled: true }
-  - { type: greenhouse, identifier: sumup,              display_name: SumUp,             enabled: true }
-  - { type: lever,      identifier: qonto,              display_name: Qonto,             enabled: true }
-  - { type: lever,      identifier: forto,              display_name: Forto,             enabled: true }
-  - { type: ashby,      identifier: lakera.ai,          display_name: Lakera,            enabled: true }
-  - { type: greenhouse, identifier: scandit,            display_name: Scandit,           enabled: true }
-  # UK
-  - { type: greenhouse, identifier: wayve,              display_name: Wayve,             enabled: true }
-  - { type: greenhouse, identifier: isomorphiclabs,     display_name: Isomorphic Labs,   enabled: true }
-  - { type: greenhouse, identifier: physicsx,           display_name: PhysicsX,          enabled: true }
-  - { type: greenhouse, identifier: stabilityai,        display_name: Stability AI,      enabled: true }
-  - { type: ashby,      identifier: synthesia,          display_name: Synthesia,         enabled: true }
-  - { type: ashby,      identifier: faculty,            display_name: Faculty,           enabled: true }
-  - { type: ashby,      identifier: causaly,            display_name: Causaly,           enabled: true }
-  # Nordics
-  - { type: ashby,      identifier: lovable,            display_name: Lovable,           enabled: true }
-  - { type: ashby,      identifier: legora,             display_name: Legora,            enabled: true }
-  - { type: lever,      identifier: spotify,            display_name: Spotify,           enabled: true }
-  - { type: lever,      identifier: vinted,             display_name: Vinted,            enabled: true }
+  # Greenhouse (170)
+  - { type: greenhouse,      identifier: 6sense,            display_name: "6sense",            enabled: true }
+  - { type: greenhouse,      identifier: a16z,              display_name: "a16z",              enabled: true }
+  - { type: greenhouse,      identifier: abnormalsecurity,  display_name: "Abnormal Security", enabled: true }
+  - { type: greenhouse,      identifier: affirm,            display_name: "Affirm",            enabled: true }
+  - { type: greenhouse,      identifier: airbnb,            display_name: "Airbnb",            enabled: true }
+  - { type: greenhouse,      identifier: airtable,          display_name: "Airtable",          enabled: true }
+  - { type: greenhouse,      identifier: amplitude,         display_name: "Amplitude",         enabled: true }
+  - { type: greenhouse,      identifier: anthropic,         display_name: "Anthropic",         enabled: true }
+  - { type: greenhouse,      identifier: archer,            display_name: "Archer Aviation",   enabled: true }
+  - { type: greenhouse,      identifier: arizeai,           display_name: "Arize AI",          enabled: true }
+  - { type: greenhouse,      identifier: asana,             display_name: "Asana",             enabled: true }
+  - { type: greenhouse,      identifier: assemblyai,        display_name: "AssemblyAI",        enabled: true }
+  - { type: greenhouse,      identifier: astranis,          display_name: "Astranis",          enabled: true }
+  - { type: greenhouse,      identifier: axiom,             display_name: "Axiom",             enabled: true }
+  - { type: greenhouse,      identifier: axios,             display_name: "Axios",             enabled: true }
+  - { type: greenhouse,      identifier: betterment,        display_name: "Betterment",        enabled: true }
+  - { type: greenhouse,      identifier: bigid,             display_name: "BigID",             enabled: true }
+  - { type: greenhouse,      identifier: bitwarden,         display_name: "Bitwarden",         enabled: true }
+  - { type: greenhouse,      identifier: blackforestlabs,   display_name: "Black Forest Labs", enabled: true }
+  - { type: greenhouse,      identifier: blend,             display_name: "Blend",             enabled: true }
+  - { type: greenhouse,      identifier: braze,             display_name: "Braze",             enabled: true }
+  - { type: greenhouse,      identifier: brex,              display_name: "Brex",              enabled: true }
+  - { type: greenhouse,      identifier: builder,           display_name: "Builder.io",        enabled: true }
+  - { type: greenhouse,      identifier: buildkite,         display_name: "Buildkite",         enabled: true }
+  - { type: greenhouse,      identifier: calendly,          display_name: "Calendly",          enabled: true }
+  - { type: greenhouse,      identifier: calm,              display_name: "Calm",              enabled: true }
+  - { type: greenhouse,      identifier: carta,             display_name: "Carta",             enabled: true }
+  - { type: greenhouse,      identifier: carvana,           display_name: "Carvana",           enabled: true }
+  - { type: greenhouse,      identifier: celonis,           display_name: "Celonis",           enabled: true }
+  - { type: greenhouse,      identifier: chainguard,        display_name: "Chainguard",        enabled: true }
+  - { type: greenhouse,      identifier: chime,             display_name: "Chime",             enabled: true }
+  - { type: greenhouse,      identifier: circleci,          display_name: "CircleCI",          enabled: true }
+  - { type: greenhouse,      identifier: clara,             display_name: "Clara",             enabled: true }
+  - { type: greenhouse,      identifier: clickhouse,        display_name: "ClickHouse",        enabled: true }
+  - { type: greenhouse,      identifier: cloudflare,        display_name: "Cloudflare",        enabled: true }
+  - { type: greenhouse,      identifier: cockroachlabs,     display_name: "Cockroach Labs",    enabled: true }
+  - { type: greenhouse,      identifier: consensys,         display_name: "ConsenSys",         enabled: true }
+  - { type: greenhouse,      identifier: contentful,        display_name: "Contentful",        enabled: true }
+  - { type: greenhouse,      identifier: contentstack,      display_name: "Contentstack",      enabled: true }
+  - { type: greenhouse,      identifier: coreweave,         display_name: "CoreWeave",         enabled: true }
+  - { type: greenhouse,      identifier: coursera,          display_name: "Coursera",          enabled: true }
+  - { type: greenhouse,      identifier: cribl,             display_name: "Cribl",             enabled: true }
+  - { type: greenhouse,      identifier: dashlane,          display_name: "Dashlane",          enabled: true }
+  - { type: greenhouse,      identifier: databricks,        display_name: "Databricks",        enabled: true }
+  - { type: greenhouse,      identifier: datadog,           display_name: "Datadog",           enabled: true }
+  - { type: greenhouse,      identifier: dialpad,           display_name: "Dialpad",           enabled: true }
+  - { type: greenhouse,      identifier: discord,           display_name: "Discord",           enabled: true }
+  - { type: greenhouse,      identifier: dremio,            display_name: "Dremio",            enabled: true }
+  - { type: greenhouse,      identifier: dropbox,           display_name: "Dropbox",           enabled: true }
+  - { type: greenhouse,      identifier: duolingo,          display_name: "Duolingo",          enabled: true }
+  - { type: greenhouse,      identifier: ebanx,             display_name: "EBANX",             enabled: true }
+  - { type: greenhouse,      identifier: elastic,           display_name: "Elastic",           enabled: true }
+  - { type: greenhouse,      identifier: epicgames,         display_name: "Epic Games",        enabled: true }
+  - { type: greenhouse,      identifier: epirus,            display_name: "Epirus",            enabled: true }
+  - { type: greenhouse,      identifier: everlaw,           display_name: "Everlaw",           enabled: true }
+  - { type: greenhouse,      identifier: faire,             display_name: "Faire",             enabled: true }
+  - { type: greenhouse,      identifier: fastly,            display_name: "Fastly",            enabled: true }
+  - { type: greenhouse,      identifier: figma,             display_name: "Figma",             enabled: true }
+  - { type: greenhouse,      identifier: figure,            display_name: "Figure",            enabled: true }
+  - { type: greenhouse,      identifier: fireblocks,        display_name: "Fireblocks",        enabled: true }
+  - { type: greenhouse,      identifier: fireworksai,       display_name: "Fireworks AI",      enabled: true }
+  - { type: greenhouse,      identifier: fivetran,          display_name: "Fivetran",          enabled: true }
+  - { type: greenhouse,      identifier: flatironhealth,    display_name: "Flatiron Health",   enabled: true }
+  - { type: greenhouse,      identifier: flexport,          display_name: "Flexport",          enabled: true }
+  - { type: greenhouse,      identifier: found,             display_name: "Found",             enabled: true }
+  - { type: greenhouse,      identifier: gemini,            display_name: "Gemini",            enabled: true }
+  - { type: greenhouse,      identifier: getyourguide,      display_name: "GetYourGuide",      enabled: true }
+  - { type: greenhouse,      identifier: gitlab,            display_name: "GitLab",            enabled: true }
+  - { type: greenhouse,      identifier: gleanwork,         display_name: "Glean",             enabled: true }
+  - { type: greenhouse,      identifier: glossier,          display_name: "Glossier",          enabled: true }
+  - { type: greenhouse,      identifier: gocardless,        display_name: "GoCardless",        enabled: true }
+  - { type: greenhouse,      identifier: gofundme,          display_name: "GoFundMe",          enabled: true }
+  - { type: greenhouse,      identifier: gongio,            display_name: "Gong",              enabled: true }
+  - { type: greenhouse,      identifier: grafanalabs,       display_name: "Grafana",           enabled: true }
+  - { type: greenhouse,      identifier: greenhouse,        display_name: "Greenhouse",        enabled: true }
+  - { type: greenhouse,      identifier: guild,             display_name: "Guild",             enabled: true }
+  - { type: greenhouse,      identifier: gusto,             display_name: "Gusto",             enabled: true }
+  - { type: greenhouse,      identifier: headway,           display_name: "Headway",           enabled: true }
+  - { type: greenhouse,      identifier: hellofresh,        display_name: "HelloFresh",        enabled: true }
+  - { type: greenhouse,      identifier: helsing,           display_name: "Helsing",           enabled: true }
+  - { type: greenhouse,      identifier: hightouch,         display_name: "Hightouch",         enabled: true }
+  - { type: greenhouse,      identifier: hootsuite,         display_name: "Hootsuite",         enabled: true }
+  - { type: greenhouse,      identifier: humeai,            display_name: "Hume AI",           enabled: true }
+  - { type: greenhouse,      identifier: hyperproof,        display_name: "Hyperproof",        enabled: true }
+  - { type: greenhouse,      identifier: instacart,         display_name: "Instacart",         enabled: true }
+  - { type: greenhouse,      identifier: intercom,          display_name: "Intercom",          enabled: true }
+  - { type: greenhouse,      identifier: isomorphiclabs,    display_name: "Isomorphic Labs",   enabled: true }
+  - { type: greenhouse,      identifier: jfrog,             display_name: "JFrog",             enabled: true }
+  - { type: greenhouse,      identifier: justworks,         display_name: "Justworks",         enabled: true }
+  - { type: greenhouse,      identifier: kickstarter,       display_name: "Kickstarter",       enabled: true }
+  - { type: greenhouse,      identifier: klaviyo,           display_name: "Klaviyo",           enabled: true }
+  - { type: greenhouse,      identifier: kodiak,            display_name: "Kodiak Robotics",   enabled: true }
+  - { type: greenhouse,      identifier: komodohealth,      display_name: "Komodo Health",     enabled: true }
+  - { type: greenhouse,      identifier: labelbox,          display_name: "Labelbox",          enabled: true }
+  - { type: greenhouse,      identifier: later,             display_name: "Later",             enabled: true }
+  - { type: greenhouse,      identifier: lattice,           display_name: "Lattice",           enabled: true }
+  - { type: greenhouse,      identifier: launchdarkly,      display_name: "LaunchDarkly",      enabled: true }
+  - { type: greenhouse,      identifier: lithic,            display_name: "Lithic",            enabled: true }
+  - { type: greenhouse,      identifier: lucidsoftware,     display_name: "Lucid Software",    enabled: true }
+  - { type: greenhouse,      identifier: lyft,              display_name: "Lyft",              enabled: true }
+  - { type: greenhouse,      identifier: marqeta,           display_name: "Marqeta",           enabled: true }
+  - { type: greenhouse,      identifier: masterclass,       display_name: "MasterClass",       enabled: true }
+  - { type: greenhouse,      identifier: mercury,           display_name: "Mercury",           enabled: true }
+  - { type: greenhouse,      identifier: mixpanel,          display_name: "Mixpanel",          enabled: true }
+  - { type: greenhouse,      identifier: mongodb,           display_name: "MongoDB",           enabled: true }
+  - { type: greenhouse,      identifier: n26,               display_name: "N26",               enabled: true }
+  - { type: greenhouse,      identifier: nansen,            display_name: "Nansen",            enabled: true }
+  - { type: greenhouse,      identifier: neo4j,             display_name: "Neo4j",             enabled: true }
+  - { type: greenhouse,      identifier: netlify,           display_name: "Netlify",           enabled: true }
+  - { type: greenhouse,      identifier: newrelic,          display_name: "New Relic",         enabled: true }
+  - { type: greenhouse,      identifier: nextdoor,          display_name: "Nextdoor",          enabled: true }
+  - { type: greenhouse,      identifier: nubank,            display_name: "Nubank",            enabled: true }
+  - { type: greenhouse,      identifier: nuro,              display_name: "Nuro",              enabled: true }
+  - { type: greenhouse,      identifier: okta,              display_name: "Okta",              enabled: true }
+  - { type: greenhouse,      identifier: orcasecurity,      display_name: "Orca Security",     enabled: true }
+  - { type: greenhouse,      identifier: oura,              display_name: "Oura",              enabled: true }
+  - { type: greenhouse,      identifier: outschool,         display_name: "Outschool",         enabled: true }
+  - { type: greenhouse,      identifier: pagerduty,         display_name: "PagerDuty",         enabled: true }
+  - { type: greenhouse,      identifier: paradigm,          display_name: "Paradigm",          enabled: true }
+  - { type: greenhouse,      identifier: parloa,            display_name: "Parloa",            enabled: true }
+  - { type: greenhouse,      identifier: peloton,           display_name: "Peloton",           enabled: true }
+  - { type: greenhouse,      identifier: pendo,             display_name: "Pendo",             enabled: true }
+  - { type: greenhouse,      identifier: physicsx,          display_name: "PhysicsX",          enabled: true }
+  - { type: greenhouse,      identifier: pingidentity,      display_name: "Ping Identity",     enabled: true }
+  - { type: greenhouse,      identifier: pinterest,         display_name: "Pinterest",         enabled: true }
+  - { type: greenhouse,      identifier: planetscale,       display_name: "PlanetScale",       enabled: true }
+  - { type: greenhouse,      identifier: polyai,            display_name: "PolyAI",            enabled: true }
+  - { type: greenhouse,      identifier: postman,           display_name: "Postman",           enabled: true }
+  - { type: greenhouse,      identifier: public,            display_name: "Public",            enabled: true }
+  - { type: greenhouse,      identifier: purestorage,       display_name: "Pure Storage",      enabled: true }
+  - { type: greenhouse,      identifier: reddit,            display_name: "Reddit",            enabled: true }
+  - { type: greenhouse,      identifier: relativity,        display_name: "Relativity",        enabled: true }
+  - { type: greenhouse,      identifier: remote,            display_name: "Remote",            enabled: true }
+  - { type: greenhouse,      identifier: ripple,            display_name: "Ripple",            enabled: true }
+  - { type: greenhouse,      identifier: robinhood,         display_name: "Robinhood",         enabled: true }
+  - { type: greenhouse,      identifier: roblox,            display_name: "Roblox",            enabled: true }
+  - { type: greenhouse,      identifier: roofstock,         display_name: "Roofstock",         enabled: true }
+  - { type: greenhouse,      identifier: rubrik,            display_name: "Rubrik",            enabled: true }
+  - { type: greenhouse,      identifier: salesloft,         display_name: "Salesloft",         enabled: true }
+  - { type: greenhouse,      identifier: samsara,           display_name: "Samsara",           enabled: true }
+  - { type: greenhouse,      identifier: scaleai,           display_name: "Scale AI",          enabled: true }
+  - { type: greenhouse,      identifier: scandit,           display_name: "Scandit",           enabled: true }
+  - { type: greenhouse,      identifier: scopely,           display_name: "Scopely",           enabled: true }
+  - { type: greenhouse,      identifier: sigmacomputing,    display_name: "Sigma Computing",   enabled: true }
+  - { type: greenhouse,      identifier: smartsheet,        display_name: "Smartsheet",        enabled: true }
+  - { type: greenhouse,      identifier: snorkelai,         display_name: "Snorkel AI",        enabled: true }
+  - { type: greenhouse,      identifier: socket,            display_name: "Socket",            enabled: true }
+  - { type: greenhouse,      identifier: sofi,              display_name: "SoFi",              enabled: true }
+  - { type: greenhouse,      identifier: sproutsocial,      display_name: "Sprout Social",     enabled: true }
+  - { type: greenhouse,      identifier: squarespace,       display_name: "Squarespace",       enabled: true }
+  - { type: greenhouse,      identifier: stabilityai,       display_name: "Stability AI",      enabled: true }
+  - { type: greenhouse,      identifier: starburst,         display_name: "Starburst",         enabled: true }
+  - { type: greenhouse,      identifier: storyblok,         display_name: "Storyblok",         enabled: true }
+  - { type: greenhouse,      identifier: stripe,            display_name: "Stripe",            enabled: true }
+  - { type: greenhouse,      identifier: suki,              display_name: "Suki AI",           enabled: true }
+  - { type: greenhouse,      identifier: sumup,             display_name: "SumUp",             enabled: true }
+  - { type: greenhouse,      identifier: sweetgreen,        display_name: "Sweetgreen",        enabled: true }
+  - { type: greenhouse,      identifier: tailscale,         display_name: "Tailscale",         enabled: true }
+  - { type: greenhouse,      identifier: thunes,            display_name: "Thunes",            enabled: true }
+  - { type: greenhouse,      identifier: traderepublicbank, display_name: "Trade Republic",    enabled: true }
+  - { type: greenhouse,      identifier: transcarent,       display_name: "Transcarent",       enabled: true }
+  - { type: greenhouse,      identifier: twilio,            display_name: "Twilio",            enabled: true }
+  - { type: greenhouse,      identifier: udemy,             display_name: "Udemy",             enabled: true }
+  - { type: greenhouse,      identifier: unity3d,           display_name: "Unity",             enabled: true }
+  - { type: greenhouse,      identifier: vannevarlabs,      display_name: "Vannevar Labs",     enabled: true }
+  - { type: greenhouse,      identifier: vercel,            display_name: "Vercel",            enabled: true }
+  - { type: greenhouse,      identifier: waymo,             display_name: "Waymo",             enabled: true }
+  - { type: greenhouse,      identifier: wayve,             display_name: "Wayve",             enabled: true }
+  - { type: greenhouse,      identifier: webflow,           display_name: "Webflow",           enabled: true }
+  - { type: greenhouse,      identifier: wrike,             display_name: "Wrike",             enabled: true }
+  # Ashby (111)
+  - { type: ashby,           identifier: abridge,      display_name: "Abridge",       enabled: true }
+  - { type: ashby,           identifier: airbyte,      display_name: "Airbyte",       enabled: true }
+  - { type: ashby,           identifier: AlephAlpha,   display_name: "Aleph Alpha",   enabled: true }
+  - { type: ashby,           identifier: anrok,        display_name: "Anrok",         enabled: true }
+  - { type: ashby,           identifier: arcade,       display_name: "Arcade",        enabled: true }
+  - { type: ashby,           identifier: attio,        display_name: "Attio",         enabled: true }
+  - { type: ashby,           identifier: authzed,      display_name: "AuthZed",       enabled: true }
+  - { type: ashby,           identifier: aviator,      display_name: "Aviator",       enabled: true }
+  - { type: ashby,           identifier: baseten,      display_name: "Baseten",       enabled: true }
+  - { type: ashby,           identifier: braintrust,   display_name: "Braintrust",    enabled: true }
+  - { type: ashby,           identifier: browserbase,  display_name: "Browserbase",   enabled: true }
+  - { type: ashby,           identifier: campfire,     display_name: "Campfire",      enabled: true }
+  - { type: ashby,           identifier: cartesia,     display_name: "Cartesia",      enabled: true }
+  - { type: ashby,           identifier: causaly,      display_name: "Causaly",       enabled: true }
+  - { type: ashby,           identifier: claylabs,     display_name: "Clay Labs",     enabled: true }
+  - { type: ashby,           identifier: coderabbit,   display_name: "CodeRabbit",    enabled: true }
+  - { type: ashby,           identifier: cognition,    display_name: "Cognition",     enabled: true }
+  - { type: ashby,           identifier: cohere,       display_name: "Cohere",        enabled: true }
+  - { type: ashby,           identifier: column,       display_name: "Column",        enabled: true }
+  - { type: ashby,           identifier: commonroom,   display_name: "Common Room",   enabled: true }
+  - { type: ashby,           identifier: continue,     display_name: "Continue",      enabled: true }
+  - { type: ashby,           identifier: crusoe,       display_name: "Crusoe",        enabled: true }
+  - { type: ashby,           identifier: cursor,       display_name: "Cursor",        enabled: true }
+  - { type: ashby,           identifier: decagon,      display_name: "Decagon",       enabled: true }
+  - { type: ashby,           identifier: deepgram,     display_name: "Deepgram",      enabled: true }
+  - { type: ashby,           identifier: DeepL,        display_name: "DeepL",         enabled: true }
+  - { type: ashby,           identifier: deepnote,     display_name: "Deepnote",      enabled: true }
+  - { type: ashby,           identifier: distyl,       display_name: "Distyl AI",     enabled: true }
+  - { type: ashby,           identifier: e2b,          display_name: "E2B",           enabled: true }
+  - { type: ashby,           identifier: elevenlabs,   display_name: "ElevenLabs",    enabled: true }
+  - { type: ashby,           identifier: etched,       display_name: "Etched",        enabled: true }
+  - { type: ashby,           identifier: factory,      display_name: "Factory",       enabled: true }
+  - { type: ashby,           identifier: faculty,      display_name: "Faculty",       enabled: true }
+  - { type: ashby,           identifier: fig,          display_name: "Fig",           enabled: true }
+  - { type: ashby,           identifier: finch,        display_name: "Finch",         enabled: true }
+  - { type: ashby,           identifier: gamma,        display_name: "Gamma",         enabled: true }
+  - { type: ashby,           identifier: granola,      display_name: "Granola",       enabled: true }
+  - { type: ashby,           identifier: graphite,     display_name: "Graphite",      enabled: true }
+  - { type: ashby,           identifier: greptile,     display_name: "Greptile",      enabled: true }
+  - { type: ashby,           identifier: harvey,       display_name: "Harvey",        enabled: true }
+  - { type: ashby,           identifier: helius,       display_name: "Helius",        enabled: true }
+  - { type: ashby,           identifier: highbeam,     display_name: "Highbeam",      enabled: true }
+  - { type: ashby,           identifier: inngest,      display_name: "Inngest",       enabled: true }
+  - { type: ashby,           identifier: knock,        display_name: "Knock",         enabled: true }
+  - { type: ashby,           identifier: krea,         display_name: "Krea",          enabled: true }
+  - { type: ashby,           identifier: lago,         display_name: "Lago",          enabled: true }
+  - { type: ashby,           identifier: lakera.ai,    display_name: "Lakera",        enabled: true }
+  - { type: ashby,           identifier: lambda,       display_name: "Lambda",        enabled: true }
+  - { type: ashby,           identifier: langchain,    display_name: "LangChain",     enabled: true }
+  - { type: ashby,           identifier: langfuse,     display_name: "Langfuse",      enabled: true }
+  - { type: ashby,           identifier: legora,       display_name: "Legora",        enabled: true }
+  - { type: ashby,           identifier: lemlist,      display_name: "lemlist",       enabled: true }
+  - { type: ashby,           identifier: linear,       display_name: "Linear",        enabled: true }
+  - { type: ashby,           identifier: llamaindex,   display_name: "LlamaIndex",    enabled: true }
+  - { type: ashby,           identifier: lovable,      display_name: "Lovable",       enabled: true }
+  - { type: ashby,           identifier: mercor,       display_name: "Mercor",        enabled: true }
+  - { type: ashby,           identifier: merge,        display_name: "Merge",         enabled: true }
+  - { type: ashby,           identifier: mintlify,     display_name: "Mintlify",      enabled: true }
+  - { type: ashby,           identifier: mosaic,       display_name: "Mosaic",        enabled: true }
+  - { type: ashby,           identifier: mux,          display_name: "Mux",           enabled: true }
+  - { type: ashby,           identifier: n8n,          display_name: "n8n",           enabled: true }
+  - { type: ashby,           identifier: nango,        display_name: "Nango",         enabled: true }
+  - { type: ashby,           identifier: notion,       display_name: "Notion",        enabled: true }
+  - { type: ashby,           identifier: nuon,         display_name: "Nuon",          enabled: true }
+  - { type: ashby,           identifier: openevidence, display_name: "OpenEvidence",  enabled: true }
+  - { type: ashby,           identifier: orb,          display_name: "Orb",           enabled: true }
+  - { type: ashby,           identifier: oso,          display_name: "Oso",           enabled: true }
+  - { type: ashby,           identifier: parafin,      display_name: "Parafin",       enabled: true }
+  - { type: ashby,           identifier: paragon,      display_name: "Paragon",       enabled: true }
+  - { type: ashby,           identifier: perplexity,   display_name: "Perplexity",    enabled: true }
+  - { type: ashby,           identifier: phantom,      display_name: "Phantom",       enabled: true }
+  - { type: ashby,           identifier: photoroom,    display_name: "PhotoRoom",     enabled: true }
+  - { type: ashby,           identifier: pika,         display_name: "Pika",          enabled: true }
+  - { type: ashby,           identifier: pinecone,     display_name: "Pinecone",      enabled: true }
+  - { type: ashby,           identifier: poolside,     display_name: "Poolside",      enabled: true }
+  - { type: ashby,           identifier: prefect,      display_name: "Prefect",       enabled: true }
+  - { type: ashby,           identifier: quicknode,    display_name: "QuickNode",     enabled: true }
+  - { type: ashby,           identifier: railway,      display_name: "Railway",       enabled: true }
+  - { type: ashby,           identifier: ramp,         display_name: "Ramp",          enabled: true }
+  - { type: ashby,           identifier: readme,       display_name: "ReadMe",        enabled: true }
+  - { type: ashby,           identifier: reflectionai, display_name: "Reflection AI", enabled: true }
+  - { type: ashby,           identifier: render,       display_name: "Render",        enabled: true }
+  - { type: ashby,           identifier: replit,       display_name: "Replit",        enabled: true }
+  - { type: ashby,           identifier: resend,       display_name: "Resend",        enabled: true }
+  - { type: ashby,           identifier: rilla,        display_name: "Rilla",         enabled: true }
+  - { type: ashby,           identifier: rillet,       display_name: "Rillet",        enabled: true }
+  - { type: ashby,           identifier: robin-ai,     display_name: "Robin AI",      enabled: true }
+  - { type: ashby,           identifier: rogo,         display_name: "Rogo",          enabled: true }
+  - { type: ashby,           identifier: runway,       display_name: "Runway",        enabled: true }
+  - { type: ashby,           identifier: sardine,      display_name: "Sardine",       enabled: true }
+  - { type: ashby,           identifier: speak,        display_name: "Speak",         enabled: true }
+  - { type: ashby,           identifier: speakeasy,    display_name: "Speakeasy",     enabled: true }
+  - { type: ashby,           identifier: sphere,       display_name: "Sphere",        enabled: true }
+  - { type: ashby,           identifier: statsig,      display_name: "Statsig",       enabled: true }
+  - { type: ashby,           identifier: stigg,        display_name: "Stigg",         enabled: true }
+  - { type: ashby,           identifier: stytch,       display_name: "Stytch",        enabled: true }
+  - { type: ashby,           identifier: succinct,     display_name: "Succinct",      enabled: true }
+  - { type: ashby,           identifier: suno,         display_name: "Suno",          enabled: true }
+  - { type: ashby,           identifier: supabase,     display_name: "Supabase",      enabled: true }
+  - { type: ashby,           identifier: sylvera,      display_name: "Sylvera",       enabled: true }
+  - { type: ashby,           identifier: synthesia,    display_name: "Synthesia",     enabled: true }
+  - { type: ashby,           identifier: turnkey,      display_name: "Turnkey",       enabled: true }
+  - { type: ashby,           identifier: unify,        display_name: "Unify",         enabled: true }
+  - { type: ashby,           identifier: vanta,        display_name: "Vanta",         enabled: true }
+  - { type: ashby,           identifier: vapi,         display_name: "Vapi",          enabled: true }
+  - { type: ashby,           identifier: watershed,    display_name: "Watershed",     enabled: true }
+  - { type: ashby,           identifier: windmill,     display_name: "Windmill",      enabled: true }
+  - { type: ashby,           identifier: workos,       display_name: "WorkOS",        enabled: true }
+  - { type: ashby,           identifier: writer,       display_name: "Writer",        enabled: true }
+  - { type: ashby,           identifier: zapier,       display_name: "Zapier",        enabled: true }
+  - { type: ashby,           identifier: zed,          display_name: "Zed",           enabled: true }
+  # Lever (11)
+  - { type: lever,           identifier: anchorage,  display_name: "Anchorage",   enabled: true }
+  - { type: lever,           identifier: highspot,   display_name: "Highspot",    enabled: true }
+  - { type: lever,           identifier: kavak,      display_name: "Kavak",       enabled: true }
+  - { type: lever,           identifier: ledger,     display_name: "Ledger",      enabled: true }
+  - { type: lever,           identifier: matchgroup, display_name: "Match Group", enabled: true }
+  - { type: lever,           identifier: mistral,    display_name: "Mistral AI",  enabled: true }
+  - { type: lever,           identifier: palantir,   display_name: "Palantir",    enabled: true }
+  - { type: lever,           identifier: qonto,      display_name: "Qonto",       enabled: true }
+  - { type: lever,           identifier: ro,         display_name: "Ro",          enabled: true }
+  - { type: lever,           identifier: spotify,    display_name: "Spotify",     enabled: true }
+  - { type: lever,           identifier: toptal,     display_name: "Toptal",      enabled: true }
+  # Recruitee (7)
+  - { type: recruitee,       identifier: bunq,           display_name: "bunq",            enabled: true }
+  - { type: recruitee,       identifier: channable,      display_name: "Channable",       enabled: true }
+  - { type: recruitee,       identifier: floryn,         display_name: "Floryn",          enabled: true }
+  - { type: recruitee,       identifier: intigriti,      display_name: "Intigriti",       enabled: true }
+  - { type: recruitee,       identifier: nmbrs,          display_name: "Nmbrs",           enabled: true }
+  - { type: recruitee,       identifier: onlinedialogue, display_name: "Online Dialogue", enabled: true }
+  - { type: recruitee,       identifier: vandebron,      display_name: "Vandebron",       enabled: true }
+  # SmartRecruiters (7)
+  - { type: smartrecruiters, identifier: BoschGroup,  display_name: "Bosch Group", enabled: true }
+  - { type: smartrecruiters, identifier: Continental, display_name: "Continental", enabled: true }
+  - { type: smartrecruiters, identifier: Experian,    display_name: "Experian",    enabled: true }
+  - { type: smartrecruiters, identifier: LVMH,        display_name: "LVMH",        enabled: true }
+  - { type: smartrecruiters, identifier: NielsenIQ,   display_name: "NielsenIQ",   enabled: true }
+  - { type: smartrecruiters, identifier: Visa,        display_name: "Visa",        enabled: true }
+  - { type: smartrecruiters, identifier: Wise,        display_name: "Wise",        enabled: true }
+  # Personio (9)
+  - { type: personio,        identifier: clark,     display_name: "CLARK",     enabled: true }
+  - { type: personio,        identifier: everphone, display_name: "Everphone", enabled: true }
+  - { type: personio,        identifier: getquin,   display_name: "getquin",   enabled: true }
+  - { type: personio,        identifier: ottonova,  display_name: "ottonova",  enabled: true }
+  - { type: personio,        identifier: penta,     display_name: "Penta",     enabled: true }
+  - { type: personio,        identifier: personio,  display_name: "Personio",  enabled: true }
+  - { type: personio,        identifier: pitch,     display_name: "Pitch",     enabled: true }
+  - { type: personio,        identifier: userlane,  display_name: "Userlane",  enabled: true }
+  - { type: personio,        identifier: workpath,  display_name: "Workpath",  enabled: true }
+  # Workable (4)
+  - { type: workable,        identifier: epignosis, display_name: "Epignosis", enabled: true }
+  - { type: workable,        identifier: kahoot,    display_name: "Kahoot",    enabled: true }
+  - { type: workable,        identifier: persado,   display_name: "Persado",   enabled: true }
+  - { type: workable,        identifier: skroutz,   display_name: "Skroutz",   enabled: true }
   # Keyword-global aggregators — the role/keyword drives the query; no per-company slug.
-  - { type: remoteok,   identifier: remoteok,           display_name: "RemoteOK (remote)",   enabled: true }
-  - { type: arbeitnow,  identifier: arbeitnow,          display_name: "Arbeitnow (EU)",      enabled: true }
-  - { type: himalayas,  identifier: himalayas,          display_name: "Himalayas (remote)",  enabled: true }
+  - { type: remoteok,   identifier: remoteok,   display_name: "RemoteOK (remote)",  enabled: true }
+  - { type: arbeitnow,  identifier: arbeitnow,  display_name: "Arbeitnow (EU)",     enabled: true }
+  - { type: himalayas,  identifier: himalayas,  display_name: "Himalayas (remote)", enabled: true }

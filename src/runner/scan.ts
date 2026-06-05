@@ -116,17 +116,18 @@ function findFuzzyDuplicate(job: Job): FuzzyCandidateRow | null {
   const normCo = normalizeCompany(job.company);
   if (!normCo) return null;
 
-  // Iterate over jobs from the same human-readable company. SQLite's LOWER
-  // collation is good enough as a coarse prefilter — the JS-side
-  // normalizeCompany check below handles "Inc/Ltd/etc" stripping.
+  // Prefilter on the indexed company_norm column (written by upsertJob with the
+  // same normalizeCompany) so we only load rows from the same normalized
+  // company instead of the whole jobs table — the difference between O(n) and
+  // O(matches) per insert, which matters once the seed list is hundreds of
+  // boards. The role-similarity check stays in JS over that small candidate set.
   const candidates = db
-    .query<FuzzyCandidateRow, []>(
-      'SELECT id, title, company, url, duplicate_urls FROM jobs'
+    .query<FuzzyCandidateRow, [string]>(
+      'SELECT id, title, company, url, duplicate_urls FROM jobs WHERE company_norm = ?'
     )
-    .all();
+    .all(normCo);
 
   for (const c of candidates) {
-    if (normalizeCompany(c.company) !== normCo) continue;
     if (!rolesMatch(c.title, job.title)) continue;
     return c;
   }
@@ -175,16 +176,17 @@ function upsertJob(
 
   db.run(
     `INSERT INTO jobs (
-      source_id, external_id, url, title, company, location, remote,
+      source_id, external_id, url, title, company, company_norm, location, remote,
       salary_min_usd, salary_max_usd, posted_at, jd_text, content_hash,
       first_seen, last_seen, l1_pass, l1_reasons
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.source_id,
       row.external_id,
       row.url,
       row.title,
       row.company,
+      normalizeCompany(job.company),
       row.location,
       row.remote,
       row.salary_min_usd,
