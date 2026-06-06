@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 
 const ASHBY_ALLOWED_HOSTS = ['api.ashbyhq.com'];
 
@@ -11,6 +12,7 @@ export function parseAshby(json: unknown, company: string): Job[] {
       | Record<string, unknown>
       | undefined;
     const loc = job['location'];
+    const jd = htmlToText((job['descriptionPlain'] as string) || (job['descriptionHtml'] as string));
     return {
       external_id: String(job['id'] ?? ''),
       title: (job['title'] as string) ?? '',
@@ -22,6 +24,7 @@ export function parseAshby(json: unknown, company: string): Job[] {
           : ((loc as Record<string, unknown>)?.['name'] as string) ?? '',
       salary_min_usd: (comp?.['min'] as number) ?? null,
       salary_max_usd: (comp?.['max'] as number) ?? null,
+      jd_text: jd || undefined,
       posted_at: job['publishedAt']
         ? new Date(job['publishedAt'] as string).getTime()
         : null,

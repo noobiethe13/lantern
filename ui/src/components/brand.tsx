@@ -83,7 +83,7 @@ function Blob({ d, fill, style }: { d: string; fill: string; style: CSSPropertie
 export function PageBackdrop() {
   return (
     <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
-      <Blob d={BLOB_A} fill="var(--blob-1)" style={{ top: -180, right: -120, width: 560, height: 560, filter: 'blur(48px)', animation: 'drift-a 38s ease-in-out infinite' }} />
+      <Blob d={BLOB_A} fill="var(--blob-1)" style={{ top: -180, left: -120, width: 560, height: 560, filter: 'blur(48px)', animation: 'drift-a 38s ease-in-out infinite' }} />
       <Blob d={BLOB_B} fill="var(--blob-2)" style={{ bottom: -200, left: '16%', width: 520, height: 520, filter: 'blur(54px)', transform: 'rotate(40deg)', animation: 'drift-b 46s ease-in-out infinite' }} />
       <Blob d={BLOB_B} fill="var(--blob-1)" style={{ top: '44%', right: -80, width: 380, height: 380, filter: 'blur(44px)', transform: 'rotate(-20deg)', animation: 'drift-a 32s ease-in-out infinite reverse' }} />
     </div>

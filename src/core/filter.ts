@@ -28,13 +28,31 @@ export function l1Filter(job: Job, c: Criteria): L1Result {
     if (negHit) reasons.push(`title has negative keyword "${negHit}"`);
   }
 
-  if (c.location?.remote_required) {
+  if (c.location) {
     const loc = lower(job.location);
     const isRemote =
       job.remote === true ||
       /\b(remote|distributed|anywhere|worldwide)\b/.test(loc);
     const isOnsite = /\b(onsite|on-?site|hybrid)\b/.test(loc);
-    if (isOnsite && !isRemote) reasons.push(`location not remote: "${job.location}"`);
+
+    if (c.location.remote_required && isOnsite && !isRemote) {
+      reasons.push(`location not remote: "${job.location}"`);
+    }
+
+    // Allow-list: when the user named specific places, a non-remote job must
+    // match one of them. Mirrors sibling-tool' buildLocationFilter — a missing or
+    // empty location passes (don't penalize sparse provider data), and remote
+    // roles bypass the list (a remote job is location-agnostic; L2 can still
+    // judge timezone fit). Without this, "jobs in the UK" filtered nothing.
+    const allowed = (c.location.allowed ?? []).map((k) => k.toLowerCase());
+    if (
+      allowed.length > 0 &&
+      loc.trim() !== '' &&
+      !isRemote &&
+      !allowed.some((k) => loc.includes(k))
+    ) {
+      reasons.push(`location "${job.location}" not in allowed list`);
+    }
   }
 
   if (

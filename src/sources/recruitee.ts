@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 
 /**
  * Recruitee exposes a public per-tenant offers API at
@@ -43,12 +44,19 @@ export function parseRecruitee(json: unknown, company: string, host: string): Jo
     const location =
       (offer['location'] as string) || [city, country, remote].filter(Boolean).join(', ');
 
+    const jd = htmlToText(
+      [offer['description'] as string, offer['requirements'] as string]
+        .filter(Boolean)
+        .join('\n\n')
+    );
+
     jobs.push({
       external_id: String(offer['id'] ?? ''),
       title,
       url,
       company,
       location,
+      jd_text: jd || undefined,
       posted_at: offer['published_at']
         ? new Date(offer['published_at'] as string).getTime()
         : null,

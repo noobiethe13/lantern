@@ -4,77 +4,114 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**lantern** is a local-first, single-machine job-search harness. Scans
-Greenhouse / Ashby / Lever public APIs + HN "Who's Hiring" (Algolia) +
-arbitrary user-supplied URLs. Filters via deterministic L1 YAML rules +
-LLM L2 verdicts. SQLite store. Local web UI at `localhost:3000`. UI-only —
-no user-facing CLI surface.
+**lantern** is a local-first, single-machine, **query-driven** job-search
+harness. The search box is the sole entry point: the user types a role in plain
+English ("senior backend engineer, remote in Europe, $120k+, no crypto") and
+Claude (`nl-filter`) converts it into the structured criteria (title + location +
+salary + seniority + exclusions) on every search. lantern then finds matching
+jobs across per-company ATS boards (Greenhouse / Ashby / Lever / Recruitee /
+SmartRecruiters / Workable / Personio public APIs, from a large maintained
+default seed list) **and** keyword-global aggregators (RemoteOK / Arbeitnow /
+Himalayas, where the keyword drives the query). Filters via deterministic L1
+rules + LLM L2 verdicts; results are scoped to the current search and ranked by
+fit. SQLite store. Local web UI at `localhost:3000`. UI-only — no user-facing CLI
+surface. No headless browser.
+
+Criteria is a **derived artifact**, not user-managed: the search endpoint
+generates it from the query and writes the single `criteria` row (id=1) that the
+runner reads. There is no criteria editor and no `/api/criteria` route.
 
 ## Stack
 
 - **Bun** (runtime, not Node) — native TS, `bun:sqlite`, builtin fetch.
 - **Hono** (HTTP server, with SSE for run progress).
 - **bun:sqlite** (DB at `data/data.db`).
-- **cheerio** (HTML parsing), **Playwright** chromium (headless browser).
-- **LLM** via pluggable provider abstraction at `src/llm/` — interface in
-  `src/llm/provider.ts`, factory + `llm` singleton in `src/llm/index.ts`,
-  backends under `src/llm/providers/` (`gemini-api`, `anthropic-api`,
-  `claude-code`, `ollama`, `antigravity-cli` stub). Default backend: Gemini
-  API SDK (`@google/generative-ai`)
-  using `gemini-2.5-pro` (HTML extract, verdict) and `gemini-2.5-flash`
-  (NL→filter, lightweight extract). Provider + per-task overrides + Ollama
-  baseUrl + API keys live in the `settings` KV table, editable via Settings UI.
+- **cheerio** (HTML / XML parsing). No Playwright, no headless browser.
+- **LLM**: **Claude Code is the only provider**. Interface in
+  `src/llm/provider.ts`, `llm` singleton in `src/llm/index.ts`, the single
+  backend at `src/llm/providers/claude-code.ts` (spawns the `claude` CLI in
+  headless `-p --output-format json --json-schema` mode over OAuth). Two tasks
+  only: `verdict` (L2) and `nl-filter` (NL→filter). Per-task model overrides
+  live in the `settings` KV table (`llm` row), editable via Settings UI. No
+  provider switcher, no API keys, no baseUrl. See `src/llm/providers/claude-code.ts`
+  for the `--bare`-auth gotcha (it breaks subscription OAuth — do not re-add it).
 - **Vite + React 19 + TailwindCSS 4 + shadcn/ui** for the SPA.
 - **zod** for every LLM output and adapter contract.
 - TypeScript everywhere (strict). English-only UI.
 
 ## Architecture
 
-- **Backend**: Hono on Bun serves `/api/*` routes (jobs, runs, criteria,
-  sources, attachments, health) and the built UI from `ui/dist`. SSE drives
+- **Backend**: Hono on Bun serves `/api/*` routes (jobs, runs, sources,
+  attachments, health, settings) and the built UI from `ui/dist`. SSE drives
   live scan progress.
+- **Search flow**: `POST /api/runs/scan {query}` interprets the NL query via
+  Claude (`nl-filter`) → writes the derived `criteria` row → invalidates prior
+  L2 verdicts → runs the scan (which reads that criteria for L1/L2). The endpoint
+  also returns the parsed criteria so the UI can show "here's what Lantern
+  understood". A no-query body does a plain re-scan of the existing criteria.
+  `GET /api/runs/recent-queries` backs the search-box history dropdown.
 - **Source adapters** (`src/sources/*`) are async iterables conforming to
   `SourceAdapter` so the runner can stream `Job` objects into SQLite and
-  emit progress without buffering. Registry at `src/sources/index.ts`.
-- **Two-tier filter**: L1 deterministic YAML rules (`src/core/filter.ts`)
-  runs inline during scan and kills ~80% with zero LLM cost. L2 LLM
-  verdict runs as a separate sequential pass over L1 survivors; verdicts
-  are stored per job and invalidated whenever criteria are saved.
+  emit progress without buffering. Registry at `src/sources/index.ts`. Two
+  kinds: **per-company boards** (need a slug; ignore the keyword) and
+  **keyword-global aggregators** (no slug; read the role keyword from
+  `SourceContext.keywords`, populated by `scan.ts` from
+  `criteria.title.positive`). Aggregators yield nothing when keywords are empty.
+  Per-company adapters MUST populate `jd_text` (description) — L2 grades on it;
+  five do (greenhouse via `?content=true`, lever/ashby/recruitee/personio from
+  their existing payloads). SmartRecruiters + Workable JD are deferred TODOs.
+- **Two-tier filter**: L1 deterministic rules (`src/core/filter.ts`) run inline
+  during scan and kill ~80% with zero LLM cost — title (uniform across sources),
+  location allow-list (+ remote), salary floor, company excludes. L2 LLM verdict
+  runs as a separate **sequential** pass over L1 survivors **scoped to the run**
+  (`last_run_id`); verdicts (+ denormalized `l2_score`/`l2_fit`) are stored per
+  job and invalidated whenever criteria change. (L2 is sequential + one
+  subprocess per job = slow/costly at volume — batching is a known optimization.)
+- **Run scoping & ranking**: `upsertJob` stamps `last_run_id` on every job a run
+  surfaces; the Jobs API filters `?run=latest|<id>` and `?fit=1` and orders fit/L2
+  views by `l2_score DESC`. So each search shows its own ranked result set.
+- **Progress events** (`src/runner/progress.ts`): `scan_done` marks the L1→L2
+  handoff and is **non-terminal** (the SSE stream stays open for L2 events);
+  `l2_done` is terminal. `runs.finished_at` is set only after L2 (in `runFull`),
+  never at L1-end — otherwise the run looks complete while L2 is still scoring.
 - **Liveness** (`src/core/liveness.ts`) is deferred from scan time — runs
-  only on shortlisted jobs, hybrid fetch-then-Playwright fallback.
-- **Frontend** (`ui/src/`): three pages — `/settings`, `/run`, `/jobs`.
+  only on shortlisted jobs, **fetch-only** (HTTP + cheerio; no browser fallback).
+- **Dedup**: `findFuzzyDuplicate` (`src/runner/scan.ts`) prefilters on the
+  indexed `company_norm` column (written by `upsertJob`) — do NOT reintroduce
+  a full-table scan; at 300+ sources that is O(n²).
+- **Frontend** (`ui/src/`): three pages — `/` (Search: NL hero + recent-query
+  dropdown + "understood as" chips + live progress), `/jobs` (triage list +
+  right-side detail panel), `/settings` (sources roster + LLM panel + health).
 
 ## Critical rules
 
 1. **NEVER edit `data/`** — that's user data (`data.db`, `attachments/`).
    Schema changes go through `src/db/migrate.ts`
    (idempotent — `CREATE ... IF NOT EXISTS`).
-2. **NEVER call any LLM HTTP API directly** — always via the `llm` singleton
-   from `src/llm/index.ts`.
-3. **Playwright is sequential.** One tab at a time. The liveness Playwright
-   fallback must not run concurrently with any other Playwright code.
-4. **All LLM outputs go through zod** (`src/llm/schemas.ts`). On parse
+2. **NEVER call the `claude` CLI (or any LLM) directly** — always via the `llm`
+   singleton from `src/llm/index.ts`.
+3. **All LLM outputs go through zod** (`src/llm/schemas.ts`). On parse
    failure, retry once with a stricter "ONLY JSON, no prose, no markdown"
-   addendum; on second failure, log and skip. Every provider's `call()`
-   honors this contract; keep new providers symmetric.
-5. **Source adapters are async iterables** so the runner can stream.
-6. **L1 runs inline during scan, no LLM.** L2 is a separate pass.
-7. **Liveness only runs on shortlisted jobs**, not at scan time.
-8. **Bind the local server to `localhost` only**, never `0.0.0.0`.
-9. **HTML / scraped content fed to LLMs is an injection vector** — cap
-   length (~16–32KB) and sanitize before substitution into prompts.
-10. **`chromium.launchPersistentContext` is banned in lantern.** Always use
-    `chromium.launch()` + `browser.newContext()`. The persistent profile
-    concept was removed with x-grok (MAC-3). `data/browser-profile/` can be
-    safely deleted.
-11. **Attachment uploads** (resume / cover-letter PDFs) need
+   addendum; on second failure, log and skip. The provider's `call()`
+   honors this contract.
+4. **Source adapters are async iterables** so the runner can stream.
+5. **L1 runs inline during scan, no LLM.** L2 is a separate pass.
+6. **Liveness only runs on shortlisted jobs**, not at scan time, and is
+   **fetch-only** — never add a headless browser anywhere in lantern.
+7. **Bind the local server to `localhost` only**, never `0.0.0.0`.
+8. **Scraped/aggregator content fed to LLMs is an injection vector** — cap
+   length (the `verdict` prompt slices ~4KB; `htmlToText` caps ~8KB) and
+   sanitize before substitution into prompts.
+9. **Every source adapter must keep its SSRF guard** — `assertValidSlug` +
+   `assertSafeHttpUrl` / host allowlist + `redirect:'error'` via
+   `src/core/fetch.ts` (`fetchJson` / `fetchText`). Match the existing adapters.
+10. **Attachment uploads** (resume / cover-letter PDFs) need
     path-traversal-safe filename handling and content-type checks.
 
 ## Common commands
 
 ```bash
 bun install
-bunx playwright install chromium
 bun run dev              # concurrently runs server (watch) + Vite dev
 bun start                # build UI then serve on localhost:3000
 bun test                 # bun's test runner
@@ -84,15 +121,28 @@ bun test --test-name-pattern "..."        # single test by name
 
 ## Common tasks
 
-- **Add a Greenhouse / Ashby / Lever company**: edit
-  `src/config/seed-sources.yml`, restart.
+- **Add a per-company board** (Greenhouse / Ashby / Lever / Recruitee /
+  SmartRecruiters / Workable / Personio): add the slug to
+  `src/config/seed-sources.yml`, restart. The seed list is the maintained
+  default the user never edits; sources seed lazily on the first scan.
 - **Add a new source type**: implement `SourceAdapter` in `src/sources/`,
-  register in `src/sources/index.ts`, add type to the enum in
-  `src/core/job.ts` and the `sources.type` CHECK in `src/db/schema.sql`.
+  register in `src/sources/index.ts`, add the type to the `SourceType` union in
+  `src/core/job.ts`, the `sources.type` CHECK in `src/db/schema.sql`,
+  `SOURCE_TYPES` (+ `AGGREGATOR_TYPES` if keyword-global) in
+  `src/routes/sources.ts`, and the UI mirrors in `ui/src/lib/api.ts` +
+  `ui/src/pages/Settings.tsx`. Keep the SSRF guard (Critical rule §9). Populate
+  `jd_text` (run HTML through `aggregator-util.htmlToText`) so L2 has a
+  description to grade.
 - **Change a prompt**: edit `src/llm/prompts.ts`. Outputs validated by
   `src/llm/schemas.ts` — update both together.
 - **Schema change**: add idempotent SQL to `src/db/schema.sql`
-  (`CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN` guarded).
+  (`CREATE ... IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN` guarded). Keep
+  comments **semicolon-free** — `migrate.ts` splits on `;` before stripping
+  comments, so a `;` in a comment breaks init. Indexes on
+  migration-added columns go in `migrate.ts`, not `schema.sql`.
+- **Run anything that hits the LLM**: the `claude` CLI must be on `PATH`. On
+  this machine it ships only inside the VSCode extension's `native-binary/`
+  dir — prepend that to `PATH` first.
 
 ## Lessons Learned
 
@@ -112,19 +162,45 @@ internal types — convert at the boundary in src/api/client.ts" -->
 - When refactoring a cross-cutting symbol (LLM call, db helper, prompt
   template), grep across `src/`, `ui/`, and test files — not just
   the module itself.
+- Scan progress has two phases. `runScan` emits `scan_done` (NON-terminal) at the
+  L1→L2 handoff; the SSE stream + `useSSE` hook stay open and only close on
+  `l2_done`/`done`/`error`. `runs.finished_at` is set after L2 in `runFull`, never
+  at L1-end. Emitting `done` or setting `finished_at` early makes the UI look
+  complete / stuck while L2 is still scoring (the original bug).
+- Per-company adapters must map the description into `jd_text`, or L2 grades the
+  job on title alone. The body is usually already in the fetched payload
+  (lever `descriptionPlain`, ashby `descriptionPlain`/`descriptionHtml`, recruitee
+  `description`, personio `<jobDescription>`); greenhouse needs `?content=true`
+  and its `content` is entity-encoded HTML → `htmlToText(htmlToText(...))`.
+- Criteria is derived from the NL query, not user-edited. `POST /api/runs/scan`
+  runs `nl-filter` → writes the `criteria` id=1 row → invalidates L2 verdicts
+  (`l2_verdict_json`/`l2_score`/`l2_fit`). There is no `/api/criteria` route and no
+  Settings criteria editor — don't reintroduce them.
+- L2 is a sequential loop spawning one `claude` subprocess per job; each cold
+  start re-sends ~15K tokens of system/tool context that can't cache across
+  invocations. At scale this dominates cost. Batching jobs per call is the
+  intended fix — keep it in mind before adding more per-job L2 calls.
 - Importing `src/llm/index.ts` (and anything that transitively pulls in
   `src/db/client.ts`) runs `createDb()` and all migrations at module
   load. Tests and standalone tools that import the `llm` singleton pay
   filesystem cost up-front; if they don't need the DB, stub it.
-- All Playwright code must use ephemeral `chromium.launch()` +
-  `browser.newContext()`. `chromium.launchPersistentContext` is banned
-  everywhere; the test in `src/runner/liveness.test.ts` enforces this.
-- Provider-construction inputs live in the `settings` KV table
-  (`key`, `value_json`, `updated_at`). When adding a new
-  provider-specific setting (e.g. Ollama baseUrl, API key), extend the
-  cache key in `constructionKey()` in `src/llm/index.ts` so edits trigger
-  reconstruction. `per_task_overrides` is intentionally NOT part of the
-  cache key — it's re-read every call.
+- Playwright / any headless browser is banned everywhere in lantern (removed
+  in Phase 8). Liveness is fetch-only; `src/runner/liveness.test.ts` asserts
+  Playwright is not imported anywhere.
+- Claude Code is the only LLM provider; there is no provider switcher or
+  `constructionKey()` cache (removed in Phase 1 — the provider takes no
+  construction inputs, so a single lazy instance is reused). Per-task model
+  overrides live in the `settings` KV `llm` row and are re-read every `call()`.
+- `claude --bare` breaks subscription / OAuth auth (it reads only
+  `ANTHROPIC_API_KEY`). The provider must NOT use it; it isolates context via
+  `--system-prompt` + `--setting-sources ''` + `--strict-mcp-config
+  --mcp-config '{"mcpServers":{}}'` + a throwaway cwd instead. See
+  `src/llm/providers/claude-code.ts`.
+- `migrate.ts` splits `schema.sql` on `;` before stripping comments, so any
+  `;` inside a SQL comment breaks fresh-DB init. Keep schema.sql comments
+  semicolon-free. Migrations are not test-covered (no test imports
+  `db/client`) — verify migration changes by running `runMigrations` on a
+  `:memory:` DB.
 
 ## Architectural notes — work with these, not against them
 

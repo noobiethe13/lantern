@@ -65,4 +65,23 @@ describe('parseRecruitee', () => {
     expect(parseRecruitee({}, 'Acme', HOST)).toEqual([]);
     expect(parseRecruitee(null, 'Acme', HOST)).toEqual([]);
   });
+
+  test('extracts jd_text from description + requirements (HTML stripped)', () => {
+    const json = {
+      offers: [{
+        id: 1, title: 'X', url: 'https://acme.recruitee.com/o/x',
+        description: '<p>Build <b>things</b></p>',
+        requirements: '<ul><li>5y Node</li></ul>',
+      }],
+    };
+    const jd = parseRecruitee(json, 'Acme', HOST)[0].jd_text;
+    expect(jd).toContain('Build things');
+    expect(jd).toContain('5y Node');
+    expect(jd).not.toContain('<');
+  });
+
+  test('leaves jd_text undefined when no description fields', () => {
+    const json = { offers: [{ id: 1, title: 'X', url: 'https://acme.recruitee.com/o/x' }] };
+    expect(parseRecruitee(json, 'Acme', HOST)[0].jd_text).toBeUndefined();
+  });
 });

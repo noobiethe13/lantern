@@ -37,6 +37,8 @@ export function parseWorkableMarkdown(text: string, company: string): Job[] {
       continue;
     }
 
+    // TODO(jd_text deferred): the public markdown feed carries no description
+    // body, only the row fields — so Workable jobs reach L2 without jd_text.
     jobs.push({ title, url, company, location });
   }
   return jobs;

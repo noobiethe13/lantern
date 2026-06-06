@@ -1,20 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import yaml from 'js-yaml';
 import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
-  BarChart3,
+  BarChart3, Clock,
 } from 'lucide-react';
-import { api, type Run, type Criteria } from '@/lib/api';
+import { api, type Run, type InterpretedCriteria } from '@/lib/api';
 import { useSSE, type ScanEvent } from '@/lib/sse';
-import { Button, Spinner } from '@/components/ui';
+import { Button, Spinner, Badge } from '@/components/ui';
 import { EmptyLantern, Embers } from '@/components/brand';
 
 function eventColor(type: ScanEvent['type']): string {
   switch (type) {
     case 'source_done': case 'l2_done': case 'done': return 'var(--success)';
     case 'source_error': case 'error': return 'var(--danger)';
-    case 'l2_progress': case 'l2_start': return 'var(--accent-text)';
+    case 'l2_progress': case 'l2_start': case 'scan_done': return 'var(--accent-text)';
     default: return 'var(--text-faint)';
   }
 }
@@ -25,7 +24,7 @@ function EventIcon({ type }: { type: ScanEvent['type'] }) {
     case 'source_done': return <CheckCircle2 {...p} />;
     case 'source_error': case 'error': return <XCircle {...p} />;
     case 'l2_progress': return <Sparkles {...p} />;
-    case 'l2_start': case 'l2_done': return <BarChart3 {...p} />;
+    case 'l2_start': case 'l2_done': case 'scan_done': return <BarChart3 {...p} />;
     case 'done': return <Flag {...p} />;
     default: return <Circle {...p} />;
   }
@@ -107,18 +106,42 @@ function Ignition() {
   );
 }
 
+// "Here's what Lantern understood" — the structured criteria Claude parsed from
+// the natural-language search, so the interpretation is transparent.
+function InterpretedChips({ c }: { c: InterpretedCriteria }) {
+  const hasAny =
+    c.title.positive.length || c.location.remote_required || c.location.allowed.length ||
+    c.salary_min_usd || c.seniority.allowed.length || c.title.negative.length ||
+    c.exclude_companies.length;
+  if (!hasAny) return null;
+  return (
+    <div style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', animation: 'fadeIn 220ms ease' }}>
+      <span style={{ fontSize: '12px', color: 'var(--text-faint)', marginRight: 2 }}>Understood as</span>
+      {c.title.positive.slice(0, 4).map(k => <Badge key={`p-${k}`} tone="accent">{k}</Badge>)}
+      {c.location.remote_required && <Badge tone="blue">remote</Badge>}
+      {c.location.allowed.slice(0, 3).map(l => <Badge key={`l-${l}`} tone="neutral">{l}</Badge>)}
+      {c.salary_min_usd ? <Badge tone="success">≥ ${c.salary_min_usd.toLocaleString()}</Badge> : null}
+      {c.seniority.allowed.map(s => <Badge key={`s-${s}`} tone="violet">{s}</Badge>)}
+      {c.title.negative.slice(0, 3).map(n => <Badge key={`n-${n}`} tone="danger">no {n}</Badge>)}
+      {c.exclude_companies.slice(0, 3).map(x => <Badge key={`x-${x}`} tone="danger">not {x}</Badge>)}
+    </div>
+  );
+}
+
 export default function SearchPage() {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState('');
   const [focused, setFocused] = useState(false);
   const [igniteAt, setIgniteAt] = useState(0);
-  const [criteriaLoaded, setCriteriaLoaded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [lastResult, setLastResult] = useState<Run | null>(null);
+  const [interpreted, setInterpreted] = useState<InterpretedCriteria | null>(null);
+  const [recent, setRecent] = useState<string[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
   const logCounter = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -127,26 +150,37 @@ export default function SearchPage() {
     const res = await api.runs.list(10);
     setRuns(res.runs);
     setLoadingRuns(false);
+    return res.runs;
   }, []);
 
+  const loadRecent = useCallback(async () => {
+    try {
+      const { queries } = await api.runs.recentQueries();
+      setRecent(queries);
+    } catch { /* dropdown just stays empty */ }
+  }, []);
+
+  // On mount, reconnect to an in-progress scan if one is running (e.g. the user
+  // navigated away and came back) so live progress resumes instead of the page
+  // looking idle/complete. A run is in-progress while finished_at is null.
   useEffect(() => {
-    loadRuns();
-    api.criteria.get().then((c: Criteria) => {
-      try {
-        const parsed = (yaml.load(c.yaml) ?? {}) as { title?: { positive?: string[] } };
-        const pos = parsed.title?.positive ?? [];
-        if (pos.length) setKeyword(pos.join(', '));
-      } catch { /* keep blank on malformed yaml */ }
-      setCriteriaLoaded(true);
-    }).catch(() => setCriteriaLoaded(true));
-  }, [loadRuns]);
+    loadRuns().then(rs => {
+      const active = rs.find(r => !r.finished_at);
+      if (active) { setActiveRunId(active.id); setScanning(true); }
+    });
+    loadRecent();
+  }, [loadRuns, loadRecent]);
 
   useSSE(activeRunId, (event: ScanEvent) => {
     setLog(prev => [...prev, { id: logCounter.current++, event, ts: Date.now() }]);
-    if (event.type === 'done' || event.type === 'l2_done') {
+    // 'scan_done' is the L1→L2 handoff (not terminal); keep showing progress.
+    // The run is finished only on 'l2_done' (or 'done' for an already-finished
+    // run, or 'error').
+    if (event.type === 'l2_done' || event.type === 'done' || event.type === 'error') {
       loadRuns().then(() => {
         api.runs.list(1).then(r => setLastResult(r.runs[0] ?? null));
       });
+      loadRecent();
       setScanning(false);
     }
   });
@@ -155,28 +189,23 @@ export default function SearchPage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
-  // Persist the role into criteria.title.positive (the title-driven search term)
-  // before scanning, preserving the rest of the criteria document.
-  const persistKeyword = async () => {
-    const kws = keyword.split(',').map(s => s.trim()).filter(Boolean);
-    const current = await api.criteria.get();
-    let doc: Record<string, unknown> = {};
-    try { doc = (yaml.load(current.yaml) ?? {}) as Record<string, unknown>; } catch { doc = {}; }
-    const title = (doc.title ?? {}) as { positive?: string[]; negative?: string[] };
-    doc.title = { positive: kws, negative: title.negative ?? [] };
-    await api.criteria.save(yaml.dump(doc));
-  };
-
+  // The raw query drives the search. The backend interprets it into criteria via
+  // Claude (location, salary, seniority, exclusions — all from the sentence), so
+  // there's nothing to persist client-side.
   const handleScan = async () => {
     if (scanning) return;
+    const query = keyword.trim();
+    if (!query) return;
+    setShowRecent(false);
     setIgniteAt(Date.now());
     setScanning(true);
     setLog([]);
     setLastResult(null);
+    setInterpreted(null);
     setActiveRunId(null);
     try {
-      if (keyword.trim()) await persistKeyword();
-      await api.runs.startScan();
+      const res = await api.runs.startScan(query);
+      setInterpreted(res.criteria);
       let retries = 12;
       while (retries-- > 0) {
         await new Promise(r => setTimeout(r, 600));
@@ -188,6 +217,11 @@ export default function SearchPage() {
       setLog(prev => [...prev, { id: logCounter.current++, event: { runId: 0, type: 'error', msg: String(err) }, ts: Date.now() }]);
     }
   };
+
+  const suggestions = recent
+    .filter(q => q.toLowerCase() !== keyword.trim().toLowerCase())
+    .filter(q => keyword.trim() === '' || q.toLowerCase().includes(keyword.trim().toLowerCase()))
+    .slice(0, 5);
 
   return (
     <div style={{ position: 'relative', padding: 'var(--space-3xl) var(--space-xl)', maxWidth: 740, margin: '0 auto' }}>
@@ -211,31 +245,54 @@ export default function SearchPage() {
         <h1 style={{ margin: '0 0 var(--space-md)', fontSize: 'clamp(36px, 5.6vw, 60px)', fontWeight: 500, color: 'var(--text)', lineHeight: 1.04, letterSpacing: '-0.015em', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) both' }}>
           What <em style={{ fontStyle: 'italic', color: 'var(--accent-2)', fontWeight: 500 }}>role</em> are you looking for?
         </h1>
-        <p style={{ margin: 0, fontSize: '16px', color: 'var(--text-muted)', maxWidth: '50ch', lineHeight: 1.55, fontFamily: 'var(--font-ui)', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 90ms both' }}>
-          Lantern searches 300+ company boards and live aggregators for your title,
-          then filters and scores the matches.
+        <p style={{ margin: 0, fontSize: '16px', color: 'var(--text-muted)', maxWidth: '52ch', lineHeight: 1.55, fontFamily: 'var(--font-ui)', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 90ms both' }}>
+          Describe it in plain English. Lantern searches 300+ company boards and
+          live aggregators, then filters and scores the matches.
         </p>
       </header>
 
       <div style={{ position: 'relative', display: 'flex', gap: 'var(--space-sm)', alignItems: 'stretch', animation: 'rise 500ms cubic-bezier(0.22,1,0.36,1) 160ms both' }}>
         {igniteAt > 0 && <Ignition key={igniteAt} />}
-        <input
-          ref={inputRef}
-          aria-label="Role or job title to search for"
-          value={keyword}
-          onChange={e => setKeyword(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onKeyDown={e => { if (e.key === 'Enter') handleScan(); }}
-          placeholder={criteriaLoaded ? 'e.g. Node Developer, Backend Engineer' : 'Loading…'}
-          disabled={!criteriaLoaded || scanning}
-          autoFocus
-          className="hero-input"
-        />
+        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          <input
+            ref={inputRef}
+            aria-label="Describe the role you want"
+            value={keyword}
+            onChange={e => { setKeyword(e.target.value); setShowRecent(true); }}
+            onFocus={() => { setFocused(true); setShowRecent(true); }}
+            onBlur={() => { setFocused(false); window.setTimeout(() => setShowRecent(false), 150); }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleScan();
+              else if (e.key === 'Escape') setShowRecent(false);
+            }}
+            placeholder="e.g. Senior backend engineer, remote in Europe, $120k+"
+            disabled={scanning}
+            autoFocus
+            className="hero-input"
+            style={{ width: '100%' }}
+          />
+          {showRecent && suggestions.length > 0 && (
+            <div role="listbox" aria-label="Recent searches" className="recent-pop">
+              {suggestions.map((q, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className="recent-item"
+                  onMouseDown={e => { e.preventDefault(); setKeyword(q); setShowRecent(false); inputRef.current?.focus(); }}
+                >
+                  <Clock size={13} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <Button
           size="md"
-          onClick={handleScan}
-          disabled={scanning || !criteriaLoaded}
+          onClick={() => handleScan()}
+          disabled={scanning || !keyword.trim()}
           loading={scanning}
           style={{ padding: '0 24px', fontSize: '15px', flexShrink: 0, height: 'auto', alignSelf: 'stretch', borderRadius: 'var(--radius-lg)' }}
         >
@@ -244,7 +301,6 @@ export default function SearchPage() {
         </Button>
         <style>{`
           .hero-input {
-            flex: 1; min-width: 0;
             background: var(--surface);
             border: 1px solid var(--border);
             border-radius: var(--radius-lg);
@@ -258,12 +314,26 @@ export default function SearchPage() {
           .hero-input::placeholder { color: var(--text-faint); }
           .hero-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
           .hero-input:disabled { opacity: 0.6; }
+          .recent-pop {
+            position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 5;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+            padding: 4px; overflow: hidden;
+          }
+          .recent-item {
+            display: flex; align-items: center; gap: 9px; width: 100%;
+            padding: 9px 12px; background: none; border: none;
+            border-radius: var(--radius-md); cursor: pointer;
+            color: var(--text); font-family: var(--font-ui); font-size: 14px; text-align: left;
+          }
+          .recent-item:hover { background: var(--surface-2); }
         `}</style>
       </div>
       <p style={{ margin: 'var(--space-sm) 0 0', fontSize: '12.5px', color: 'var(--text-faint)' }}>
-        Separate multiple titles with commas. Fine-tune locations, salary, and exclusions in{' '}
-        <button onClick={() => navigate('/settings')} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent-text)', cursor: 'pointer', font: 'inherit' }}>Settings</button>.
+        Plain English works — Lantern reads the role, location, salary, and exclusions from your search.
       </p>
+
+      {interpreted && <InterpretedChips c={interpreted} />}
 
       {scanning && (
         <div style={{ marginTop: 'var(--space-lg)' }}>
@@ -297,7 +367,7 @@ export default function SearchPage() {
             <strong className="tnum">{lastResult.jobs_new.toLocaleString()}</strong> new ·{' '}
             <span className="tnum" style={{ color: 'var(--text-muted)' }}>L1 {lastResult.jobs_l1_pass.toLocaleString()} · L2 {lastResult.jobs_l2_pass.toLocaleString()}</span>
           </span>
-          <Button size="sm" variant="outline" onClick={() => navigate('/jobs?l2=1')}>
+          <Button size="sm" variant="outline" onClick={() => navigate('/jobs?fit=1&run=latest')}>
             View matches <ArrowRight size={14} />
           </Button>
         </div>
@@ -313,8 +383,8 @@ export default function SearchPage() {
         <div style={{ marginTop: 'var(--space-2xl)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '32px 0', textAlign: 'center', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 240ms both' }}>
           <EmptyLantern size={120} dim />
           <p style={{ color: 'var(--text)', fontSize: '15px', margin: 0, fontFamily: 'var(--font-serif)' }}>Nothing scanned <em style={{ color: 'var(--accent-2)' }}>yet</em></p>
-          <p style={{ color: 'var(--text-faint)', fontSize: '13px', margin: 0, maxWidth: '38ch' }}>
-            Name a role above and Lantern will light up matching jobs across every board.
+          <p style={{ color: 'var(--text-faint)', fontSize: '13px', margin: 0, maxWidth: '40ch' }}>
+            Describe a role above and Lantern will light up matching jobs across every board.
           </p>
         </div>
       )}

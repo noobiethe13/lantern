@@ -51,4 +51,20 @@ describe('parsePersonioXml', () => {
     expect(parsePersonioXml('', 'Acme', HOST)).toEqual([]);
     expect(parsePersonioXml(undefined as unknown as string, 'Acme', HOST)).toEqual([]);
   });
+
+  test('extracts jd_text from jobDescription values (HTML stripped)', () => {
+    const xml = `<workzag-jobs>
+      <position>
+        <id>9</id><name>Platform Engineer</name>
+        <jobDescriptions>
+          <jobDescription><name>Role</name><value><![CDATA[<p>Own the <b>platform</b></p>]]></value></jobDescription>
+          <jobDescription><name>Requirements</name><value><![CDATA[<ul><li>Kubernetes</li></ul>]]></value></jobDescription>
+        </jobDescriptions>
+      </position>
+    </workzag-jobs>`;
+    const jd = parsePersonioXml(xml, 'Acme', HOST)[0].jd_text;
+    expect(jd).toContain('Own the platform');
+    expect(jd).toContain('Kubernetes');
+    expect(jd).not.toContain('<');
+  });
 });

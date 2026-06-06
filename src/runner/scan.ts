@@ -137,6 +137,7 @@ function findFuzzyDuplicate(job: Job): FuzzyCandidateRow | null {
 function upsertJob(
   job: Job,
   sourceId: number,
+  runId: number,
   l1Pass: boolean,
   l1Reasons: string[]
 ): 'new' | 'seen' {
@@ -150,26 +151,27 @@ function upsertJob(
 
   if (existing) {
     db.run(
-      'UPDATE jobs SET last_seen = ?, l1_pass = ?, l1_reasons = ? WHERE url = ?',
-      [now, l1Pass ? 1 : 0, l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null, job.url]
+      'UPDATE jobs SET last_seen = ?, last_run_id = ?, l1_pass = ?, l1_reasons = ? WHERE url = ?',
+      [now, runId, l1Pass ? 1 : 0, l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null, job.url]
     );
     return 'seen';
   }
 
   // Fuzzy dedup: same normalized company + matching role tokens. The canonical
   // row keeps its original URL; the new URL is appended to duplicate_urls so we
-  // don't lose the link from the second board.
+  // don't lose the link from the second board. The current run claims the row so
+  // a job surfaced again this scan stays in scope.
   const fuzzy = findFuzzyDuplicate(job);
   if (fuzzy) {
     const dupes: string[] = fuzzy.duplicate_urls ? JSON.parse(fuzzy.duplicate_urls) : [];
     if (job.url !== fuzzy.url && !dupes.includes(job.url)) {
       dupes.push(job.url);
       db.run(
-        'UPDATE jobs SET last_seen = ?, duplicate_urls = ? WHERE id = ?',
-        [now, JSON.stringify(dupes), fuzzy.id]
+        'UPDATE jobs SET last_seen = ?, last_run_id = ?, duplicate_urls = ? WHERE id = ?',
+        [now, runId, JSON.stringify(dupes), fuzzy.id]
       );
     } else {
-      db.run('UPDATE jobs SET last_seen = ? WHERE id = ?', [now, fuzzy.id]);
+      db.run('UPDATE jobs SET last_seen = ?, last_run_id = ? WHERE id = ?', [now, runId, fuzzy.id]);
     }
     return 'seen';
   }
@@ -178,8 +180,8 @@ function upsertJob(
     `INSERT INTO jobs (
       source_id, external_id, url, title, company, company_norm, location, remote,
       salary_min_usd, salary_max_usd, posted_at, jd_text, content_hash,
-      first_seen, last_seen, l1_pass, l1_reasons
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      first_seen, last_seen, last_run_id, l1_pass, l1_reasons
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.source_id,
       row.external_id,
@@ -196,6 +198,7 @@ function upsertJob(
       row.content_hash,
       now,
       now,
+      runId,
       l1Pass ? 1 : 0,
       l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null,
     ]
@@ -205,7 +208,7 @@ function upsertJob(
 
 const CONCURRENCY = 10;
 
-export async function runScan(): Promise<number> {
+export async function runScan(query?: string): Promise<number> {
   console.log('lantern — starting scan');
 
   seedSources();
@@ -220,10 +223,10 @@ export async function runScan(): Promise<number> {
   console.log(`Sources enabled: ${sources.length}`);
 
   const runId = db
-    .query<{ id: number }, [number, number]>(
-      'INSERT INTO runs (started_at, sources_total) VALUES (?, ?) RETURNING id'
+    .query<{ id: number }, [number, number, string | null]>(
+      'INSERT INTO runs (started_at, sources_total, query) VALUES (?, ?, ?) RETURNING id'
     )
-    .get(Date.now(), sources.length)!.id;
+    .get(Date.now(), sources.length, query ?? null)!.id;
 
   // Emit start once with the actual runId so subscribers can attach.
   // Pre-INSERT progress lines stay as console logs only — there's no real
@@ -277,7 +280,7 @@ export async function runScan(): Promise<number> {
           for await (const job of adapter.fetch(ctx)) {
             if (abort.signal.aborted) break;
             const { pass, reasons } = l1Filter(job, criteria);
-            const status = upsertJob(job, source.id, pass, reasons);
+            const status = upsertJob(job, source.id, runId, pass, reasons);
             jobsFound++;
             sourceJobCount++;
             if (status === 'new') jobsNew++;
@@ -314,11 +317,13 @@ export async function runScan(): Promise<number> {
     }
   }
 
+  // NOTE: finished_at is intentionally NOT set here. The run isn't done until L2
+  // finishes (runFull sets finished_at after runL2Pass). Setting it at L1-end made
+  // the run look complete while L2 was still scoring.
   db.run(
-    `UPDATE runs SET finished_at = ?, jobs_found = ?, jobs_new = ?, jobs_l1_pass = ?, errors_json = ?
+    `UPDATE runs SET jobs_found = ?, jobs_new = ?, jobs_l1_pass = ?, errors_json = ?
      WHERE id = ?`,
     [
-      Date.now(),
       jobsFound,
       jobsNew,
       jobsL1Pass,
@@ -338,19 +343,24 @@ export async function runScan(): Promise<number> {
   }
   console.log('─────────────────────────────────────────\n');
 
-  bus.emit({ runId, type: 'done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, errors: runErrors.length } });
+  // Phase event, NOT terminal — the SSE stream stays open so the L2 events that
+  // follow reach the client. The terminal event is 'l2_done' (from runL2Pass).
+  bus.emit({ runId, type: 'scan_done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, errors: runErrors.length } });
 
   return runId;
 }
 
 export async function runL2Pass(runId: number, criteriaYaml: string): Promise<void> {
+  // Scope to jobs this run surfaced (upsertJob stamped last_run_id = runId on
+  // every job it touched). Keeps L2 from re-scoring out-of-scope jobs from
+  // earlier searches and aligns with the scope-to-current-search model.
   const jobs = db
-    .query<L2JobRow, []>(
+    .query<L2JobRow, [number]>(
       `SELECT id, title, company, location, jd_text
        FROM jobs
-       WHERE l1_pass = 1 AND l2_verdict_json IS NULL`
+       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND last_run_id = ?`
     )
-    .all();
+    .all(runId);
 
   if (jobs.length === 0) {
     console.log('L2: no pending jobs');
@@ -382,8 +392,10 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
 
     try {
       const verdict = await llm.call({ task: 'verdict', prompt }, VerdictShape);
-      db.run('UPDATE jobs SET l2_verdict_json = ? WHERE id = ?', [
+      db.run('UPDATE jobs SET l2_verdict_json = ?, l2_score = ?, l2_fit = ? WHERE id = ?', [
         JSON.stringify(verdict),
+        verdict.score,
+        verdict.fit ? 1 : 0,
         job.id,
       ]);
       if (verdict.fit) l2Pass++;
@@ -427,14 +439,17 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
   bus.emit({ runId, type: 'l2_done', msg: doneMsg, data: { l2Pass, errors: errors.length } });
 }
 
-export async function runFull(): Promise<number> {
+export async function runFull(query?: string): Promise<number> {
   if (!tryAcquireScanLock()) {
     throw new Error('A scan is already running');
   }
   try {
-    const runId = await runScan();
+    const runId = await runScan(query);
     const criteriaYaml = loadCriteriaRaw();
     await runL2Pass(runId, criteriaYaml);
+    // The run is complete only now (after L2). Covers all runL2Pass exit paths
+    // (normal, no-pending-jobs early return, abort).
+    db.run('UPDATE runs SET finished_at = ? WHERE id = ?', [Date.now(), runId]);
     return runId;
   } finally {
     releaseScanLock();

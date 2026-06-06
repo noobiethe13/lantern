@@ -1,6 +1,7 @@
 import { load as cheerioLoad } from 'cheerio';
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchText } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 
 /**
  * Parse Personio's public recruiting XML feed. Each tenant exposes its open
@@ -28,12 +29,22 @@ export function parsePersonioXml(xml: string, company: string, host: string): Jo
     const createdAt = pos.find('createdAt').first().text().trim();
     const posted = createdAt ? Date.parse(createdAt) : NaN;
 
+    // Each <jobDescription> carries a <name> heading + <value> (HTML, often in
+    // CDATA). Concatenate the sections into the job description text.
+    const descParts: string[] = [];
+    pos.find('jobDescription').each((_j, d) => {
+      const value = $(d).find('value').first().text().trim();
+      if (value) descParts.push(value);
+    });
+    const jd = htmlToText(descParts.join('\n\n'));
+
     jobs.push({
       external_id: id,
       title,
       url: `https://${host}/job/${encodeURIComponent(id)}?language=en`,
       company,
       location,
+      jd_text: jd || undefined,
       posted_at: Number.isNaN(posted) ? null : posted,
     });
   });

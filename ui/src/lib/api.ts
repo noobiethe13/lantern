@@ -102,12 +102,17 @@ export interface Run {
   jobs_l2_pass: number;
   errors: { source: string; error: string }[];
   trigger: string;
+  query: string | null;
 }
 
-export interface Criteria {
-  yaml: string;
-  source_text: string | null;
-  updated_at: number | null;
+// What Claude parsed the natural-language search into — surfaced as the
+// "here's what Lantern understood" chips on the Search page.
+export interface InterpretedCriteria {
+  title: { positive: string[]; negative: string[] };
+  location: { remote_required: boolean; allowed: string[] };
+  seniority: { allowed: string[] };
+  salary_min_usd: number | null;
+  exclude_companies: string[];
 }
 
 export interface HealthCheck {
@@ -144,6 +149,8 @@ export const api = {
       status?: string;
       l1?: '1';
       l2?: '1';
+      fit?: '1';
+      run?: string;
       q?: string;
       limit?: number;
       offset?: number;
@@ -152,6 +159,8 @@ export const api = {
       if (params?.status) qs.set('status', params.status);
       if (params?.l1) qs.set('l1', params.l1);
       if (params?.l2) qs.set('l2', params.l2);
+      if (params?.fit) qs.set('fit', params.fit);
+      if (params?.run) qs.set('run', params.run);
       if (params?.q) qs.set('q', params.q);
       if (params?.limit) qs.set('limit', String(params.limit));
       if (params?.offset) qs.set('offset', String(params.offset));
@@ -186,21 +195,17 @@ export const api = {
     delete: (id: number) => request<{ ok: boolean }>(`/sources/${id}`, { method: 'DELETE' }),
   },
 
-  criteria: {
-    get: () => request<Criteria>('/criteria'),
-    save: (yamlStr: string) =>
-      request<{ ok: boolean }>('/criteria', { method: 'PUT', body: JSON.stringify({ yaml: yamlStr }) }),
-    fromNL: (text: string) =>
-      request<{ yaml: string; parsed: unknown }>('/criteria/from-nl', {
-        method: 'POST',
-        body: JSON.stringify({ text }),
-      }),
-  },
-
   runs: {
     list: (limit = 20) => request<{ runs: Run[] }>(`/runs?limit=${limit}`),
     get: (id: number) => request<Run>(`/runs/${id}`),
-    startScan: () => request<{ ok: boolean; msg: string }>('/runs/scan', { method: 'POST' }),
+    // A natural-language query drives the search; the backend interprets it into
+    // criteria via Claude before scanning. Omitted = plain re-scan of current criteria.
+    startScan: (query?: string) =>
+      request<{ ok: boolean; msg: string; criteria: InterpretedCriteria | null }>('/runs/scan', {
+        method: 'POST',
+        body: JSON.stringify(query ? { query } : {}),
+      }),
+    recentQueries: () => request<{ queries: string[] }>('/runs/recent-queries'),
   },
 
   health: {

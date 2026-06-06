@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 
 const LEVER_ALLOWED_HOSTS = ['api.lever.co'];
 
@@ -8,12 +9,14 @@ export function parseLever(json: unknown, company: string): Job[] {
   return json.map((j: unknown) => {
     const job = j as Record<string, unknown>;
     const cats = job['categories'] as Record<string, unknown> | undefined;
+    const jd = htmlToText((job['descriptionPlain'] as string) || (job['description'] as string));
     return {
       external_id: String(job['id'] ?? ''),
       title: (job['text'] as string) ?? '',
       url: (job['hostedUrl'] as string) ?? '',
       company,
       location: (cats?.['location'] as string) ?? '',
+      jd_text: jd || undefined,
       posted_at: (job['createdAt'] as number) ?? null,
     };
   });

@@ -4,7 +4,6 @@ import { cors } from 'hono/cors';
 import { health } from './routes/health';
 import { jobs } from './routes/jobs';
 import { sources } from './routes/sources';
-import { criteria } from './routes/criteria';
 import { runs } from './routes/runs';
 import { attachments } from './routes/attachments';
 import { admin } from './routes/admin';
@@ -21,7 +20,6 @@ app.use('/api/*', cors({ origin: ['http://localhost:5173', 'http://localhost:300
 app.route('/api/health', health);
 app.route('/api/jobs', jobs);
 app.route('/api/sources', sources);
-app.route('/api/criteria', criteria);
 app.route('/api/runs', runs);
 app.route('/api/attachments', attachments);
 app.route('/api/admin', admin);

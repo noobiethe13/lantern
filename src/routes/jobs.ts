@@ -11,6 +11,8 @@ jobs.get('/', c => {
   const status = c.req.query('status');
   const l1 = c.req.query('l1');
   const l2 = c.req.query('l2');
+  const fit = c.req.query('fit');
+  const run = c.req.query('run');
   const q = c.req.query('q');
   const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
   const offset = Number(c.req.query('offset') ?? 0);
@@ -28,6 +30,14 @@ jobs.get('/', c => {
   }
   if (l1 === '1') conditions.push('j.l1_pass = 1');
   if (l2 === '1') conditions.push('j.l2_verdict_json IS NOT NULL');
+  if (fit === '1') conditions.push('j.l2_fit = 1');
+  // Scope to a search: `latest` = the most recent run, or an explicit run id.
+  if (run === 'latest') {
+    conditions.push('j.last_run_id = (SELECT MAX(id) FROM runs)');
+  } else if (run && /^\d+$/.test(run)) {
+    conditions.push('j.last_run_id = ?');
+    params.push(Number(run));
+  }
   if (q) {
     conditions.push('(j.title LIKE ? OR j.company LIKE ?)');
     params.push(`%${q}%`, `%${q}%`);
@@ -35,12 +45,17 @@ jobs.get('/', c => {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+  // Rank fit / L2 views by verdict score (nulls last); default chronological.
+  const orderBy = fit === '1' || l2 === '1'
+    ? 'ORDER BY (j.l2_score IS NULL), j.l2_score DESC, j.first_seen DESC'
+    : 'ORDER BY j.first_seen DESC';
+
   const rows = db.query<Record<string, unknown>, Binding[]>(
     `SELECT j.*, s.display_name AS source_name, s.type AS source_type
      FROM jobs j
      LEFT JOIN sources s ON s.id = j.source_id
      ${where}
-     ORDER BY j.first_seen DESC
+     ${orderBy}
      LIMIT ? OFFSET ?`
   ).all(...params, limit, offset);
 

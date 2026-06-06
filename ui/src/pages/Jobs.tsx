@@ -4,7 +4,7 @@ import {
   ExternalLink, Search, MapPin, Globe, X,
 } from 'lucide-react';
 import { api, type Job, type JobStatus } from '@/lib/api';
-import { Input, Textarea, Spinner } from '@/components/ui';
+import { Textarea, Spinner } from '@/components/ui';
 import { StatusPill } from '@/components/StatusPill';
 import { ScoreBar, ScoreRing } from '@/components/ScoreBar';
 import { EmptyLantern } from '@/components/brand';
@@ -87,12 +87,19 @@ function FilterBar({
 
       <div style={{ marginLeft: 'auto', position: 'relative', minWidth: 230 }}>
         <Search size={14} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)', pointerEvents: 'none' }} />
-        <Input
+        <input
           aria-label="Filter jobs by title or company"
           placeholder="Filter title, company…"
           value={inputVal}
           onChange={e => handleSearch(e.target.value)}
-          style={{ paddingLeft: 32, height: 34, fontSize: '13px' }}
+          onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--accent-ring)'; }}
+          onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.boxShadow = 'none'; }}
+          style={{
+            width: '100%', height: 34, paddingLeft: 32, paddingRight: 11, fontSize: '13px',
+            background: 'transparent', border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)', color: 'var(--text)', fontFamily: 'inherit',
+            outline: 'none', transition: 'border-color 150ms ease, box-shadow 150ms ease',
+          }}
         />
         {inputVal && (
           <button aria-label="Clear filter" onClick={() => { setInputVal(''); onQ(''); }} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)', padding: 0, display: 'flex' }}>

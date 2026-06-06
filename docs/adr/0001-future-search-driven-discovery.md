@@ -1,9 +1,21 @@
 # ADR 0001 — Future: search-driven discovery
 
-- **Status**: Proposed (placeholder, no design commitment)
+- **Status**: Partially realized — see 2026-06-05 update below
 - **Date**: 2026-05-28
 - **Context source**: Phase 7 modernization (F18 in
   `C:\Users\Debayan\.claude\plans\review-this-repo-d-dev-sibling-tool-bright-book.md`)
+
+> **Update (2026-06-05, Phase 8):** the keyword-driven discovery idea was
+> partially realized via a different mechanism than this ADR's "search the SERP"
+> proposal. lantern is now **title-driven**: the role keyword drives the query
+> against three keyword-global **aggregators** (RemoteOK, Arbeitnow, Himalayas)
+> that expose their own search/listing APIs — no general web-search backend or
+> LLM SERP-parsing was adopted (Open Questions 1–6 below are therefore moot for
+> this path). The per-company seeded tier remains the precision tier and was
+> expanded to a ~320-board maintained default list. The `generic-url`,
+> `local-parser`, and `hn-whos-hiring` sources referenced in the Context below
+> were **removed** in Phase 8 — the text below is preserved as the original
+> 2026-05-28 record, not the current source surface.
 
 ## Context
 

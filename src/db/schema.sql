@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   l1_pass              INTEGER NOT NULL DEFAULT 0,
   l1_reasons           TEXT,
   l2_verdict_json      TEXT,
+  -- denormalized verdict fields for sortable/filterable presentation, written
+  -- by runL2Pass alongside l2_verdict_json. l2_fit is 0 or 1.
+  l2_score             REAL,
+  l2_fit               INTEGER,
+  -- the run that most recently surfaced this job. Jobs are scoped to the latest
+  -- search via this column (see runScan upsertJob).
+  last_run_id          INTEGER,
   duplicate_urls       TEXT,
   status               TEXT NOT NULL DEFAULT 'new'
                        CHECK (status IN ('new','shortlist','applied','interview',
@@ -57,6 +64,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_source       ON jobs(source_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_l1           ON jobs(l1_pass);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen   ON jobs(first_seen DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_run     ON jobs(last_run_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_l2_score     ON jobs(l2_score DESC);
 
 -- ── attachments ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS attachments (
@@ -81,7 +90,10 @@ CREATE TABLE IF NOT EXISTS runs (
   jobs_l1_pass    INTEGER NOT NULL DEFAULT 0,
   jobs_l2_pass    INTEGER NOT NULL DEFAULT 0,
   errors_json     TEXT,
-  trigger         TEXT NOT NULL DEFAULT 'manual'
+  trigger         TEXT NOT NULL DEFAULT 'manual',
+  -- the raw natural-language query that drove this run (null for legacy/no-query
+  -- runs). Powers the recent-searches dropdown and result scoping.
+  query           TEXT
 );
 
 -- ── criteria ────────────────────────────────────────────────────────

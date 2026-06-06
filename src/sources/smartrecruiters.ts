@@ -60,6 +60,10 @@ export function parseSmartRecruiters(json: unknown, company: string): Job[] {
     }
     if (!title || !url) continue;
 
+    // TODO(jd_text deferred): the postings list endpoint has no description; the
+    // full jobAd needs a per-posting fetch (`/postings/{id}`). Deferred to avoid
+    // N extra requests per company — so SmartRecruiters jobs reach L2 without a
+    // description. Revisit if SR boards become a meaningful share of results.
     jobs.push({
       external_id: String(j['id'] ?? ''),
       title,

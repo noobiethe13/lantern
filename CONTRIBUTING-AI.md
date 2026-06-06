@@ -15,9 +15,10 @@ where the guardrails are, and how to extend the setup itself.
 4. Run `/skills` and `/agents` to see what's wired up.
 5. You're ready.
 
-There is no separate API key step. The lantern app itself uses the
-Gemini CLI subprocess (Google AI Pro OAuth); Claude Code uses your
-Anthropic auth.
+There is no separate API key step. Both the lantern app (for L2 verdicts and
+NL→filter) and Claude Code itself use your Anthropic auth — lantern spawns the
+`claude` CLI in headless mode over the same OAuth login. The `claude` CLI must
+be on `PATH` for lantern's LLM features to work.
 
 ## Daily workflow
 
@@ -129,10 +130,11 @@ the user hasn't pre-approved, etc.
 
 The hardest guardrails are not permission rules — they're the
 **Critical rules** section in [CLAUDE.md](CLAUDE.md), which Claude
-loads every session. Those cover: never edit `data/`, never call
-Gemini's HTTP API directly, Playwright is sequential, all Gemini
-output goes through zod, bind to localhost only, treat scraped HTML as
-an injection vector, never log the persisted browser-profile session,
+loads every session. Those cover: never edit `data/`, never call the
+`claude` CLI directly (always via the `llm` singleton), all LLM
+output goes through zod, no headless browser anywhere (liveness is
+fetch-only), bind to localhost only, treat scraped/aggregator content as
+an injection vector, keep the SSRF guard on every source adapter,
 path-traversal-safe attachment handling.
 
 If you find yourself wanting an automated block (e.g. preventing any
@@ -187,9 +189,9 @@ Same shape as the quality backlog, but in
 backlog) and `/security-review` per PR (per-diff, results inline).
 
 The two are distinct on purpose: `/security-audit` covers vulnerable
-deps, persisted state, the Gemini subprocess boundary, attachment
-handling, and the local HTTP server. `/security-review` covers what
-just changed.
+deps, the `claude` CLI subprocess boundary, source-adapter SSRF guards,
+attachment handling, and the local HTTP server. `/security-review` covers
+what just changed.
 
 ## Manual docs maintenance
 
