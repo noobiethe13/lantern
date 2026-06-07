@@ -38,3 +38,24 @@ Add new entries at the bottom; never renumber existing IDs.
 - **File**: `src/db/migrate.ts`
 - **Description**: `runMigrations()` splits the entire `schema.sql` on `;`, then strips lines beginning with `--` from each chunk. Any `;` *inside* a comment or a string literal splits mid-statement: the fragment after the `;` on the same physical line is no longer recognised as a comment (its leading `--` was on the previous chunk) and leaks into the next statement. Surfaced in Phase 8 when the DB was purged for a fresh start — a `;` in the `scan_locks` comment produced `SQLiteError: near "concurrent"`. The pre-existing `data.db` predated that comment, so the bug had been latent. Worked around by removing the `;` from the comment, but the splitter remains fragile for future schema edits.
 - **Fix direction**: Either strip comments before splitting (remove `--` to end-of-line first, then split), or run the whole file via a single `db.exec(sql)` (bun:sqlite supports executing multiple statements), which sidesteps manual splitting entirely. Prefer `db.exec` if the one-time ADD COLUMN guard can be sequenced around it.
+
+## KI-005 — LLM per-task model-override editor is unwired in the UI (dead client + doc drift)
+- **State**: open
+- **Severity**: low
+- **Files**: `ui/src/lib/api.ts` (`llmSettings.get`/`save`, `LlmSettingsResponse`), `src/routes/llm-settings.ts` (`GET`/`PUT /settings/llm`), `CLAUDE.md`
+- **Description**: CLAUDE.md states per-task model overrides are "editable via Settings UI", but no component imports `api.llmSettings.get`/`save` — the only UI reference was the now-removed "Test connection" button (which used the separate `health` method, deleted in optimize-l2-and-jobs-triage). The `GET`/`PUT /settings/llm` routes still exist and `llm.call()` still honors `per_task_overrides` from the `settings` KV row, so the backend works; there is simply no editor. Result: the model override is reachable only by hand-editing the DB, and CLAUDE.md overstates what the UI offers.
+- **Fix direction**: Either (a) build the model-override panel in `Settings.tsx`'s `LlmProviderSection` (wire `llmSettings.get`/`save`, one select per task), or (b) drop the unused client methods + routes and correct the CLAUDE.md wording to "settings KV row (no UI editor yet)". Decide based on whether per-task override is a wanted user feature.
+
+## KI-006 — `hidden` and `archived` job statuses are behaviorally identical
+- **State**: fixed (2026-06-07 — removed `archived`; kept `hidden` as a label/filter only, no actual hiding, per user)
+- **Severity**: low
+- **Files**: `src/routes/jobs.ts` (JOB_STATUSES), `ui/src/components/StatusPill.tsx`, `ui/src/pages/Jobs.tsx`
+- **Description**: Both statuses exist in the enum and are selectable, but nothing treats them differently — neither is excluded from the default `/jobs` list, and they rendered identically (both faint) until the triage pass gave `archived` a distinct tone. Semantically a user expects "hidden" = dismissed-from-view and "archived" = closed/old-but-kept, yet the default Jobs list shows both like any `new` job.
+- **Fix direction**: Either (a) make them functionally distinct — e.g. exclude `hidden` (and maybe `archived`) from the default "All" view unless explicitly filtered, so hiding a job actually removes it from the triage stream; or (b) drop one status to remove the redundancy. Decide the intended workflow first.
+
+## KI-007 — nl-filter (keyword interpretation) latency is dominated by `claude` subprocess cold-start
+- **State**: open
+- **Severity**: medium
+- **Files**: `src/llm/providers/claude-code.ts`, `src/routes/runs.ts` (POST /scan awaits nl-filter before returning)
+- **Description**: After submitting a search, the user waits several seconds before the scan visibly starts. The cost is small (a single short call), so the pain is *latency*, not tokens. The latency is structural: every `llm.call` spawns a fresh `claude -p` subprocess that re-initializes the CLI runtime on each invocation; for a single call that startup dominates wall-clock. A schema-parse miss makes it worse — the provider retries with a second cold-start subprocess (2× latency). Note: nl-filter now runs on **sonnet** (raised from haiku for accuracy, since a wrong interpretation wastes the whole scan), so per-call inference is a touch slower too — but cold-start remains the dominant term.
+- **Fix direction**: The durable fix is a warm/persistent `claude` process (a long-lived headless session the provider talks to, or a daemon) so calls skip cold-start — this is the same deferred lever noted for L2 (see `.claude/session/optimize-l2-and-jobs-triage/context.md`, "persistent session rejected for L2" — the trade-offs differ for a single nl-filter call and may be worth it there). Cheaper interim: surface an immediate "Interpreting your search…" state so the wait is legible, and verify nl-filter isn't frequently hitting the retry path.

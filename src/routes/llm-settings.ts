@@ -49,15 +49,3 @@ llmSettings.put('/', async c => {
   resetLlmCache();
   return c.json({ ok: true, settings: parsed.data });
 });
-
-llmSettings.get('/health', async c => {
-  try {
-    const result = await llm.healthcheck();
-    return c.json({ provider: llm.providerName, ...result }, result.ok ? 200 : 503);
-  } catch (err) {
-    return c.json(
-      { provider: llm.providerName, ok: false, detail: String(err) },
-      503,
-    );
-  }
-});

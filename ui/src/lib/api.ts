@@ -23,7 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export type JobStatus =
   | 'new' | 'shortlist' | 'applied' | 'interview'
-  | 'offer' | 'rejected' | 'hidden' | 'archived';
+  | 'offer' | 'rejected' | 'hidden';
 
 export type Liveness = 'active' | 'expired' | 'uncertain' | 'unchecked';
 
@@ -134,13 +134,6 @@ export interface LlmSettingsResponse {
   tasks: LlmTask[];
 }
 
-export interface LlmHealth {
-  provider: LlmProviderName;
-  ok: boolean;
-  detail: string;
-  deprecation?: string;
-}
-
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -150,6 +143,8 @@ export const api = {
       l1?: '1';
       l2?: '1';
       fit?: '1';
+      remote?: '1';
+      source_type?: string;
       run?: string;
       q?: string;
       limit?: number;
@@ -160,6 +155,8 @@ export const api = {
       if (params?.l1) qs.set('l1', params.l1);
       if (params?.l2) qs.set('l2', params.l2);
       if (params?.fit) qs.set('fit', params.fit);
+      if (params?.remote) qs.set('remote', params.remote);
+      if (params?.source_type) qs.set('source_type', params.source_type);
       if (params?.run) qs.set('run', params.run);
       if (params?.q) qs.set('q', params.q);
       if (params?.limit) qs.set('limit', String(params.limit));
@@ -231,7 +228,6 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(settings),
       }),
-    health: () => request<LlmHealth>('/settings/llm/health'),
   },
 
   attachments: {

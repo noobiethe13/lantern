@@ -5,13 +5,15 @@ import { runLivenessCheck } from '../runner/liveness';
 
 export const jobs = new Hono();
 
-const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden', 'archived'] as const;
+const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'] as const;
 
 jobs.get('/', c => {
   const status = c.req.query('status');
   const l1 = c.req.query('l1');
   const l2 = c.req.query('l2');
   const fit = c.req.query('fit');
+  const remote = c.req.query('remote');
+  const sourceType = c.req.query('source_type');
   const run = c.req.query('run');
   const q = c.req.query('q');
   const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
@@ -31,6 +33,15 @@ jobs.get('/', c => {
   if (l1 === '1') conditions.push('j.l1_pass = 1');
   if (l2 === '1') conditions.push('j.l2_verdict_json IS NOT NULL');
   if (fit === '1') conditions.push('j.l2_fit = 1');
+  if (remote === '1') conditions.push('j.remote = 1');
+  if (sourceType) {
+    // Comma-separated list → s.type IN (...). Supports multi-select source filter.
+    const types = sourceType.split(',').map(s => s.trim()).filter(Boolean);
+    if (types.length > 0) {
+      conditions.push(`s.type IN (${types.map(() => '?').join(',')})`);
+      params.push(...types);
+    }
+  }
   // Scope to a search: `latest` = the most recent run, or an explicit run id.
   if (run === 'latest') {
     conditions.push('j.last_run_id = (SELECT MAX(id) FROM runs)');
@@ -59,8 +70,10 @@ jobs.get('/', c => {
      LIMIT ? OFFSET ?`
   ).all(...params, limit, offset);
 
+  // LEFT JOIN sources so a source_type filter (which references s.type) resolves
+  // here too — the WHERE clause is shared with the rows query above.
   const total = db.query<{ n: number }, Binding[]>(
-    `SELECT COUNT(*) AS n FROM jobs j ${where}`
+    `SELECT COUNT(*) AS n FROM jobs j LEFT JOIN sources s ON s.id = j.source_id ${where}`
   ).get(...params)?.n ?? 0;
 
   return c.json({ jobs: rows.map(parseJobRow), total, limit, offset });

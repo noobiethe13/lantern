@@ -189,6 +189,25 @@ export default function SearchPage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
+  // Polling backstop: the SSE stream is the primary signal, but if it drops and
+  // can't recover we'd be stuck showing "Scanning" forever. While scanning, poll
+  // the latest run; once it has a finished_at, finalize regardless of SSE.
+  useEffect(() => {
+    if (!scanning) return;
+    const iv = setInterval(async () => {
+      try {
+        const { runs: fresh } = await api.runs.list(1);
+        if (fresh[0]?.finished_at) {
+          setLastResult(fresh[0]);
+          setScanning(false);
+          loadRuns();
+          loadRecent();
+        }
+      } catch { /* transient — try again next tick */ }
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [scanning, loadRuns, loadRecent]);
+
   // The raw query drives the search. The backend interprets it into criteria via
   // Claude (location, salary, seniority, exclusions — all from the sentence), so
   // there's nothing to persist client-side.
@@ -271,7 +290,7 @@ export default function SearchPage() {
             className="hero-input"
             style={{ width: '100%' }}
           />
-          {showRecent && suggestions.length > 0 && (
+          {showRecent && !scanning && suggestions.length > 0 && (
             <div role="listbox" aria-label="Recent searches" className="recent-pop">
               {suggestions.map((q, i) => (
                 <button
@@ -312,7 +331,7 @@ export default function SearchPage() {
             transition: border-color 150ms ease, box-shadow 150ms ease;
           }
           .hero-input::placeholder { color: var(--text-faint); }
-          .hero-input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); }
+          .hero-input:focus { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 28%, transparent), 0 14px 40px -16px color-mix(in oklch, var(--accent) 65%, transparent); }
           .hero-input:disabled { opacity: 0.6; }
           .recent-pop {
             position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 5;

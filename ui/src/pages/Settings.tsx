@@ -237,15 +237,8 @@ function SourcesSection() {
 }
 
 function LlmProviderSection() {
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
-
-  const handleTest = async () => {
-    setTesting(true); setTestResult(null);
-    try { const res = await api.llmSettings.health(); setTestResult({ ok: res.ok, detail: res.detail }); }
-    catch (e) { setTestResult({ ok: false, detail: String(e) }); } finally { setTesting(false); }
-  };
-
+  // No "test connection" here — the Health section already probes the LLM
+  // (`/api/health`), so a second button just duplicated that check.
   return (
     <section>
       <SectionHeading title={<>LLM <em>provider</em></>} desc="L2 scoring and NL-to-criteria run through the Claude Code CLI." />
@@ -259,15 +252,6 @@ function LlmProviderSection() {
           Requires the <code style={{ fontFamily: 'var(--font-mono)' }}>claude</code> CLI on your PATH.{' '}
           <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)' }}>Install Claude Code</a>.
         </p>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Button variant="outline" onClick={handleTest} loading={testing}>Test connection</Button>
-          {testResult && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '12.5px', color: testResult.ok ? 'var(--success)' : 'var(--danger)' }}>
-              {testResult.ok ? <CheckCircle2 size={12} /> : <XCircle size={12} />}{testResult.detail.slice(0, 80)}
-            </span>
-          )}
-        </div>
       </div>
     </section>
   );

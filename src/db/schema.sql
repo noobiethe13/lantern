@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   duplicate_urls       TEXT,
   status               TEXT NOT NULL DEFAULT 'new'
                        CHECK (status IN ('new','shortlist','applied','interview',
-                                          'offer','rejected','hidden','archived')),
+                                          'offer','rejected','hidden')),
   applied_at           INTEGER,
   notes                TEXT
 );

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { Search, LayoutList, Settings as SettingsIcon, Sun, Moon } from 'lucide-react';
+import { Search, LayoutList, Settings as SettingsIcon } from 'lucide-react';
 import Jobs from './pages/Jobs';
 import SearchPage from './pages/Search';
 import Settings from './pages/Settings';
@@ -97,14 +97,26 @@ function Sidebar() {
         ))}
       </nav>
 
+      {/* Theme toggle is the lantern itself: dark theme lights it (amber core +
+          glow + flicker), light theme puts it out (cool, hollow core). No labels —
+          the flame state + tooltip carry the meaning. */}
       <button
         onClick={toggle}
-        title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
-        className="theme-toggle"
+        title={theme === 'dark' ? 'Put out the lantern — switch to light' : 'Light the lantern — switch to dark'}
+        aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        className="lantern-toggle"
+        data-lit={theme === 'dark'}
         style={{ position: 'relative', zIndex: 1 }}
       >
-        {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        <span className="theme-label">{theme === 'dark' ? 'Light' : 'Dark'}</span>
+        <svg className="lt-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden style={{ overflow: 'visible', display: 'block', flexShrink: 0 }}>
+          <circle className="lt-halo" cx="12" cy="12.2" r="6.5" fill="var(--accent)" />
+          <path d="M9.4 4.1c0-1.43 1.16-2.6 2.6-2.6s2.6 1.17 2.6 2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <rect x="7.3" y="4.4" width="9.4" height="2.4" rx="1.2" fill="currentColor" />
+          <path d="M8.1 7.4h7.8l-.62 9.0c-.05.74-.66 1.3-1.4 1.3H10.1c-.74 0-1.35-.56-1.4-1.3L8.1 7.4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+          <rect x="9.1" y="17.9" width="5.8" height="2.2" rx="1.1" fill="currentColor" />
+          <circle className="lt-core" cx="12" cy="11.9" r="2.5" />
+        </svg>
+        <span className="lt-label">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</span>
       </button>
 
       <style>{`
@@ -118,15 +130,20 @@ function Sidebar() {
         .nav-link:hover { color: var(--text); background: var(--surface-2); }
         .nav-link-active { color: var(--accent-text); background: var(--accent-muted); }
         .nav-link-active:hover { color: var(--accent-text); background: var(--accent-muted); }
-        .theme-toggle {
-          display: flex; align-items: center; gap: 9px;
+        .lantern-toggle {
+          display: flex; align-items: center; gap: 10px; width: 100%;
           padding: 8px 11px; border-radius: var(--radius-md);
-          background: none; border: none; cursor: pointer;
-          color: var(--text-muted); font-size: 13px; font-weight: 500;
-          font-family: inherit; width: 100%;
-          transition: color 150ms ease, background 150ms ease;
+          background: none; border: 1px solid transparent; cursor: pointer;
+          color: var(--text-muted); font-family: inherit; font-size: 13.5px; font-weight: 500;
+          transition: background 160ms ease, color 160ms ease;
         }
-        .theme-toggle:hover { color: var(--text); background: var(--surface-2); }
+        .lantern-toggle:hover { background: var(--surface-2); color: var(--text); }
+        .lt-label { line-height: 1; }
+        .lt-halo { opacity: 0; filter: blur(3px); transform-origin: center; transition: opacity 360ms ease; }
+        .lt-core { fill: var(--text-faint); transform-origin: center; transition: fill 360ms ease; }
+        .lantern-toggle[data-lit="true"] .lt-icon { color: var(--accent-text); }
+        .lantern-toggle[data-lit="true"] .lt-halo { opacity: 0.24; animation: flicker 4.5s ease-in-out infinite; }
+        .lantern-toggle[data-lit="true"] .lt-core { fill: var(--accent); animation: flicker 4.5s ease-in-out infinite; }
       `}</style>
     </aside>
   );
