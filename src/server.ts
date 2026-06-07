@@ -32,5 +32,10 @@ app.use('/*', serveStatic({ path: './ui/dist/index.html' }));
 export default {
   port: 3000,
   hostname: 'localhost',
+  // SSE scan-progress streams stay open for the whole run and can idle between
+  // batched-L2 bursts; the default 10s idleTimeout would drop them mid-scan.
+  // The stream also sends a 10s comment heartbeat (see routes/runs.ts) — this is
+  // the backstop. (Bun caps idleTimeout at 255s.)
+  idleTimeout: 255,
   fetch: app.fetch,
 };

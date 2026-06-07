@@ -11,7 +11,9 @@ type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
 
 const TASK_MODELS: Record<LlmTask, ClaudeModel> = {
   verdict: 'claude-sonnet-4-6',
-  'nl-filter': 'claude-haiku-4-5',
+  // nl-filter drives the entire search — getting the criteria wrong wastes the
+  // whole scan — so it runs on sonnet despite being a single short call.
+  'nl-filter': 'claude-sonnet-4-6',
 };
 
 const STRICT_SUFFIX =

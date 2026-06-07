@@ -9,8 +9,8 @@ import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
 import { llm } from '../llm';
 import { LlmError } from '../llm/provider';
-import { VerdictShape } from '../llm/schemas';
-import { verdictPrompt } from '../llm/prompts';
+import { BatchVerdictShape } from '../llm/schemas';
+import { batchVerdictPrompt } from '../llm/prompts';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 
@@ -208,6 +208,12 @@ function upsertJob(
 
 const CONCURRENCY = 10;
 
+// L2 grades jobs in batches of this size per `claude` call to amortize the
+// per-subprocess cold-start overhead (~15K uncacheable tokens). Sequential for
+// now; timeout scales with batch size (10 jobs ≫ 1, so the default 120s is tight).
+const L2_BATCH_SIZE = 10;
+const L2_BATCH_TIMEOUT_MS = 240_000;
+
 export async function runScan(query?: string): Promise<number> {
   console.log('lantern — starting scan');
 
@@ -375,37 +381,67 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
   let l2Pass = 0;
   const errors: { id: number; error: string }[] = [];
   // Fatal LlmError (auth, missing CLI, banned model) aborts immediately.
-  // Otherwise count consecutive transient failures and bail after MAX_CONSECUTIVE_FAILURES
-  // to avoid blasting through hundreds of jobs while the provider is wedged.
+  // Otherwise count consecutive transient batch failures and bail after
+  // MAX_CONSECUTIVE_FAILURES to avoid blasting through hundreds of jobs while the
+  // provider is wedged. A batch call that succeeds (even with some job_ids
+  // missing) resets the counter — the provider is clearly responding.
   const MAX_CONSECUTIVE_FAILURES = 3;
   let consecutiveFailures = 0;
   let aborted = false;
 
-  for (const job of jobs) {
-    const prompt = verdictPrompt(
+  // Grade jobs in batches so one `claude` subprocess scores L2_BATCH_SIZE jobs,
+  // amortizing the ~15K cold-start overhead across the batch instead of paying it
+  // per job. Each batch gets a larger timeout (N jobs ≫ 1).
+  for (let i = 0; i < jobs.length; i += L2_BATCH_SIZE) {
+    const batch = jobs.slice(i, i + L2_BATCH_SIZE);
+    const prompt = batchVerdictPrompt(
       criteriaYaml,
-      job.title,
-      job.company,
-      job.location ?? '',
-      job.jd_text ?? ''
+      batch.map((j) => ({
+        id: j.id,
+        title: j.title,
+        company: j.company,
+        location: j.location ?? '',
+        jdText: j.jd_text ?? '',
+      })),
     );
 
     try {
-      const verdict = await llm.call({ task: 'verdict', prompt }, VerdictShape);
-      db.run('UPDATE jobs SET l2_verdict_json = ?, l2_score = ?, l2_fit = ? WHERE id = ?', [
-        JSON.stringify(verdict),
-        verdict.score,
-        verdict.fit ? 1 : 0,
-        job.id,
-      ]);
-      if (verdict.fit) l2Pass++;
+      const { verdicts } = await llm.call(
+        { task: 'verdict', prompt, timeoutMs: L2_BATCH_TIMEOUT_MS },
+        BatchVerdictShape,
+      );
+      const byId = new Map(verdicts.map((v) => [v.job_id, v]));
       consecutiveFailures = 0;
-      process.stdout.write('.');
-      const progressMsg = `L2: scored "${job.title}" at ${job.company}`;
-      bus.emit({ runId, type: 'l2_progress', msg: progressMsg, data: { jobId: job.id, fit: verdict.fit, score: verdict.score } });
+
+      for (const job of batch) {
+        const v = byId.get(job.id);
+        if (!v) {
+          // The model dropped this job from the array. Don't write a verdict;
+          // record it so the run summary reflects the gap (no abort — the call
+          // itself succeeded).
+          errors.push({ id: job.id, error: 'missing from batch response' });
+          process.stdout.write('?');
+          continue;
+        }
+        const { job_id: _drop, ...verdict } = v;
+        db.run('UPDATE jobs SET l2_verdict_json = ?, l2_score = ?, l2_fit = ? WHERE id = ?', [
+          JSON.stringify(verdict),
+          verdict.score,
+          verdict.fit ? 1 : 0,
+          job.id,
+        ]);
+        if (verdict.fit) l2Pass++;
+        process.stdout.write('.');
+        bus.emit({
+          runId,
+          type: 'l2_progress',
+          msg: `L2: scored "${job.title}" at ${job.company}`,
+          data: { jobId: job.id, fit: verdict.fit, score: verdict.score },
+        });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      errors.push({ id: job.id, error: msg });
+      for (const job of batch) errors.push({ id: job.id, error: msg });
       process.stdout.write('!');
 
       if (err instanceof LlmError && err.kind === 'fatal') {

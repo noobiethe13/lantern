@@ -11,6 +11,15 @@ export const VerdictShape = z.object({
 });
 export type Verdict = z.infer<typeof VerdictShape>;
 
+// Batched L2: one call grades N jobs to amortize the ~15K per-subprocess
+// cold-start overhead. Each verdict carries the job_id it grades so results map
+// back to rows. Wrapped in an object (not a bare top-level array) because
+// `--json-schema` handles object roots more reliably.
+export const BatchVerdictShape = z.object({
+  verdicts: z.array(VerdictShape.extend({ job_id: z.number().int() })),
+});
+export type BatchVerdict = z.infer<typeof BatchVerdictShape>;
+
 export const NLFilterShape = z.object({
   title: z.object({
     positive: z.array(z.string()),

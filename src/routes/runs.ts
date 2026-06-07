@@ -68,28 +68,42 @@ runs.get('/:id/stream', c => {
     }
 
     await new Promise<void>(resolve => {
+      let finished = false;
+      let heartbeat: ReturnType<typeof setInterval>;
+      let safety: ReturnType<typeof setTimeout>;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearInterval(heartbeat);
+        clearTimeout(safety);
+        unsub();
+        resolve();
+      };
+
+      // SSE comment heartbeat. Batched L2 emits events in bursts (one per ~10-job
+      // claude call), so the stream can sit idle for tens of seconds between
+      // batches — long enough to trip the server idleTimeout and drop the
+      // connection mid-scan. A periodic comment line (ignored by EventSource)
+      // keeps the socket alive without surfacing as a client event.
+      heartbeat = setInterval(() => {
+        stream.write(': heartbeat\n\n').catch(() => finish());
+      }, 10_000);
+
       const unsub = bus.subscribe(runId, async (event: ScanEvent) => {
         await stream.writeSSE({
           data: JSON.stringify(event),
           event: 'message',
         });
         if (event.type === 'done' || event.type === 'error' || event.type === 'l2_done') {
-          unsub();
-          resolve();
+          finish();
         }
       });
 
       // Clean up if the client disconnects
-      stream.onAbort(() => {
-        unsub();
-        resolve();
-      });
+      stream.onAbort(finish);
 
       // Safety timeout — 30 min max
-      setTimeout(() => {
-        unsub();
-        resolve();
-      }, 30 * 60 * 1000);
+      safety = setTimeout(finish, 30 * 60 * 1000);
     });
   });
 });

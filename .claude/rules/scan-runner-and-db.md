@@ -30,6 +30,9 @@ paths:
   comments **semicolon-free** — `migrate.ts` splits on `;` before stripping
   comments. Migrations aren't test-covered: verify changes with `runMigrations`
   on a `:memory:` DB. Indexes on migration-added columns go in `migrate.ts`.
-- **L2 cost.** L2 is a sequential per-job `claude` subprocess loop; each cold
-  start re-sends ~15K uncacheable tokens. Batching is the intended optimization —
-  don't add more per-job L2 calls without considering it.
+- **L2 cost.** `runL2Pass` grades jobs in **batches of `L2_BATCH_SIZE` (10)** per
+  `claude` call to amortize the ~15K uncacheable cold-start tokens each subprocess
+  re-sends. Batches are **sequential**; each call uses `BatchVerdictShape`
+  (`{verdicts:[{job_id,...}]}`) and maps results back by `job_id` (an id missing
+  from a successful response is a per-job error, not an abort). Fatal-abort +
+  consecutive-failure guards operate per-batch. Don't revert to per-job L2 calls.
