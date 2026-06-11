@@ -2,7 +2,12 @@ import type { Job } from './job';
 
 export interface Criteria {
   title?: { positive: string[]; negative: string[] };
-  location?: { remote_required: boolean; allowed: string[] };
+  location?: {
+    remote_required: boolean;
+    allowed: string[];
+    block?: string[];
+    always_allow?: string[];
+  };
   seniority?: { allowed: ('junior' | 'mid' | 'senior' | 'staff' | 'principal')[] };
   salary_min_usd?: number | null;
   exclude_companies?: string[];
@@ -39,19 +44,32 @@ export function l1Filter(job: Job, c: Criteria): L1Result {
       reasons.push(`location not remote: "${job.location}"`);
     }
 
-    // Allow-list: when the user named specific places, a non-remote job must
-    // match one of them. Mirrors sibling-tool' buildLocationFilter — a missing or
-    // empty location passes (don't penalize sparse provider data), and remote
-    // roles bypass the list (a remote job is location-agnostic; L2 can still
-    // judge timezone fit). Without this, "jobs in the UK" filtered nothing.
+    // Location tiers, precedence always_allow > block > allowed. A missing or
+    // empty job location always passes (don't penalize sparse provider data).
+    // always_allow rescues a multi-region string that also names a blocked
+    // region (e.g. "Remote, NY or India" passes on NY even if India is blocked).
+    // block is an explicit exclusion that applies even to remote roles — it
+    // catches geo-restricted remote listings like "Remote (US only)". The
+    // allowed list only constrains non-remote roles, since a remote job is
+    // otherwise location-agnostic (L2 can still judge timezone fit). Without the
+    // allowed tier, "jobs in the UK" filtered nothing.
+    const alwaysAllow = (c.location.always_allow ?? []).map((k) => k.toLowerCase());
+    const block = (c.location.block ?? []).map((k) => k.toLowerCase());
     const allowed = (c.location.allowed ?? []).map((k) => k.toLowerCase());
-    if (
-      allowed.length > 0 &&
-      loc.trim() !== '' &&
-      !isRemote &&
-      !allowed.some((k) => loc.includes(k))
-    ) {
-      reasons.push(`location "${job.location}" not in allowed list`);
+    const hasLoc = loc.trim() !== '';
+    const rescued = hasLoc && alwaysAllow.some((k) => loc.includes(k));
+
+    if (hasLoc && !rescued) {
+      const blockHit = block.find((k) => loc.includes(k));
+      if (blockHit) {
+        reasons.push(`location "${job.location}" blocked by "${blockHit}"`);
+      } else if (
+        allowed.length > 0 &&
+        !isRemote &&
+        !allowed.some((k) => loc.includes(k))
+      ) {
+        reasons.push(`location "${job.location}" not in allowed list`);
+      }
     }
   }
 

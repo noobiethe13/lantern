@@ -45,7 +45,7 @@ User search: "${userText}"
 Output ONLY this JSON (no markdown, no commentary):
 {
   "title": {"positive": ["..."], "negative": ["..."]},
-  "location": {"remote_required": <bool>, "allowed": ["..."]},
+  "location": {"remote_required": <bool>, "allowed": ["..."], "block": ["..."], "always_allow": ["..."]},
   "seniority": {"allowed": ["junior","mid","senior","staff","principal"]},
   "salary_min_usd": <int|null>,
   "exclude_companies": ["..."]
@@ -59,6 +59,13 @@ Extraction rules:
 - title.negative: roles to exclude. "no management" -> ["manager","lead","head of"].
 - location.allowed: places the user named, with common variants. "in the UK" ->
   ["uk","united kingdom","england","london"]. Empty array if none named.
+- location.block: regions the user wants to EXCLUDE, with common variants.
+  "nothing US-based" / "not in the US" -> ["united states","usa","us"]. This also
+  catches geo-restricted remote roles. Empty array if none named.
+- location.always_allow: the user's own region that must pass even when it shares
+  a listing with a blocked region — typically their home base, and usually only
+  when they also block elsewhere ("remote anywhere, I'm in India" with a US block
+  -> ["india"]). Empty array if not stated. Don't invent one.
 - location.remote_required: true only if the user requires remote ("remote",
   "work from home", "wfh"). Naming a city does NOT set this.
 - seniority.allowed: levels implied. "senior SRE" -> ["senior"]; "staff or

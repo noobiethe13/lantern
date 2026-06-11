@@ -109,7 +109,7 @@ export interface Run {
 // "here's what Lantern understood" chips on the Search page.
 export interface InterpretedCriteria {
   title: { positive: string[]; negative: string[] };
-  location: { remote_required: boolean; allowed: string[] };
+  location: { remote_required: boolean; allowed: string[]; block?: string[]; always_allow?: string[] };
   seniority: { allowed: string[] };
   salary_min_usd: number | null;
   exclude_companies: string[];

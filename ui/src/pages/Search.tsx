@@ -111,6 +111,7 @@ function Ignition() {
 function InterpretedChips({ c }: { c: InterpretedCriteria }) {
   const hasAny =
     c.title.positive.length || c.location.remote_required || c.location.allowed.length ||
+    c.location.block?.length || c.location.always_allow?.length ||
     c.salary_min_usd || c.seniority.allowed.length || c.title.negative.length ||
     c.exclude_companies.length;
   if (!hasAny) return null;
@@ -120,6 +121,8 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
       {c.title.positive.slice(0, 4).map(k => <Badge key={`p-${k}`} tone="accent">{k}</Badge>)}
       {c.location.remote_required && <Badge tone="blue">remote</Badge>}
       {c.location.allowed.slice(0, 3).map(l => <Badge key={`l-${l}`} tone="neutral">{l}</Badge>)}
+      {(c.location.always_allow ?? []).slice(0, 2).map(l => <Badge key={`aa-${l}`} tone="neutral">always {l}</Badge>)}
+      {(c.location.block ?? []).slice(0, 3).map(l => <Badge key={`bl-${l}`} tone="danger">not {l}</Badge>)}
       {c.salary_min_usd ? <Badge tone="success">≥ ${c.salary_min_usd.toLocaleString()}</Badge> : null}
       {c.seniority.allowed.map(s => <Badge key={`s-${s}`} tone="violet">{s}</Badge>)}
       {c.title.negative.slice(0, 3).map(n => <Badge key={`n-${n}`} tone="danger">no {n}</Badge>)}

@@ -28,6 +28,8 @@ export const NLFilterShape = z.object({
   location: z.object({
     remote_required: z.boolean(),
     allowed: z.array(z.string()),
+    block: z.array(z.string()),
+    always_allow: z.array(z.string()),
   }),
   seniority: z.object({
     allowed: z.array(z.enum(['junior', 'mid', 'senior', 'staff', 'principal'])),

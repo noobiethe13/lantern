@@ -62,6 +62,47 @@ describe('l1Filter — location allow-list', () => {
   });
 });
 
+describe('l1Filter — location block / always_allow tiers', () => {
+  const c: Criteria = {
+    location: { remote_required: false, allowed: [], block: ['united states', 'usa'] },
+  };
+
+  test('block rejects a matching location', () => {
+    const r = l1Filter(job({ location: 'New York, United States' }), c);
+    expect(r.pass).toBe(false);
+    expect(r.reasons.join()).toContain('blocked by');
+  });
+
+  test('block applies even to geo-restricted remote roles', () => {
+    expect(l1Filter(job({ location: 'Remote (USA only)', remote: true }), c).pass).toBe(false);
+  });
+
+  test('block leaves non-matching locations alone', () => {
+    expect(l1Filter(job({ location: 'London, UK' }), c).pass).toBe(true);
+  });
+
+  test('empty/missing location passes despite a block list', () => {
+    expect(l1Filter(job({ location: '' }), c).pass).toBe(true);
+    expect(l1Filter(job({ location: undefined }), c).pass).toBe(true);
+  });
+
+  test('always_allow overrides block on a multi-region string', () => {
+    const home: Criteria = {
+      location: { remote_required: false, allowed: [], block: ['india'], always_allow: ['new york'] },
+    };
+    expect(l1Filter(job({ location: 'Remote — New York or India' }), home).pass).toBe(true);
+    // …but a string naming only the blocked region is still rejected.
+    expect(l1Filter(job({ location: 'Bengaluru, India' }), home).pass).toBe(false);
+  });
+
+  test('always_allow also rescues from the allowed-list constraint', () => {
+    const both: Criteria = {
+      location: { remote_required: false, allowed: ['uk'], always_allow: ['india'] },
+    };
+    expect(l1Filter(job({ location: 'Bengaluru, India' }), both).pass).toBe(true);
+  });
+});
+
 describe('l1Filter — remote_required', () => {
   const c: Criteria = { location: { remote_required: true, allowed: [] } };
 
