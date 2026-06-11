@@ -202,6 +202,14 @@ internal types — convert at the boundary in src/api/client.ts" -->
   semicolon-free. Migrations are not test-covered (no test imports
   `db/client`) — verify migration changes by running `runMigrations` on a
   `:memory:` DB.
+- Ashby salary lives in `job.compensation.summaryComponents[]` (find the
+  `compensationType:'Salary'` entry with `interval:'1 YEAR'`, read
+  `minValue`/`maxValue`/`currencyCode`), NOT `job.compensationTierSummary`
+  (that's a formatted display string). Needs `?includeCompensation=true`.
+- Job salary is native-currency: amounts in `salary_min_usd`/`salary_max_usd`
+  (the `_usd` suffix is legacy) are tagged by `salary_currency`. L1's salary
+  floor only fires when the job and criteria currencies are both known and
+  equal — mismatched/unknown currency passes and defers to L2 (no FX in lantern).
 
 ## Architectural notes — work with these, not against them
 
