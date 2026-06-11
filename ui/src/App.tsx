@@ -9,6 +9,9 @@ import { LanternMark, PageBackdrop } from './components/brand';
 
 function useTheme() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    // ?theme=dark|light overrides (and then persists) — lets a link force a theme.
+    const fromUrl = new URLSearchParams(window.location.search).get('theme');
+    if (fromUrl === 'dark' || fromUrl === 'light') return fromUrl;
     if (typeof localStorage !== 'undefined') {
       return (localStorage.getItem('lantern-theme') as 'dark' | 'light') ?? 'light';
     }

@@ -511,6 +511,7 @@ export default function Jobs() {
   const l2 = params.get('l2') === '1';
   const fit = params.get('fit') === '1';
   const remote = params.get('remote') === '1';
+  const run = params.get('run') ?? '';
   const sourceTypeRaw = params.get('source_type') ?? '';
   const sourceTypes = sourceTypeRaw.split(',').filter(Boolean);
   const q = params.get('q') ?? '';
@@ -532,7 +533,7 @@ export default function Jobs() {
     if (cur.size) p.set('source_type', [...cur].join(',')); else p.delete('source_type');
   });
 
-  const clearFilters = () => mutate(p => { for (const k of ['fit', 'remote', 'l1', 'l2', 'source_type']) p.delete(k); });
+  const clearFilters = () => mutate(p => { for (const k of ['fit', 'remote', 'l1', 'l2', 'source_type', 'run']) p.delete(k); });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -543,6 +544,7 @@ export default function Jobs() {
         l2: l2 ? '1' : undefined,
         fit: fit ? '1' : undefined,
         remote: remote ? '1' : undefined,
+        run: run || undefined,
         source_type: sourceTypeRaw || undefined,
         q: q || undefined,
         limit: PAGE_LIMIT,
@@ -552,7 +554,7 @@ export default function Jobs() {
     } finally {
       setLoading(false);
     }
-  }, [status, l1, l2, fit, remote, sourceTypeRaw, q]);
+  }, [status, l1, l2, fit, remote, run, sourceTypeRaw, q]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -589,7 +591,7 @@ export default function Jobs() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const hasFilters = !!(status || l1 || l2 || fit || remote || sourceTypeRaw || q);
+  const hasFilters = !!(status || l1 || l2 || fit || remote || run || sourceTypeRaw || q);
 
   return (
     <div className="jobs-main" style={{ position: 'relative', padding: 'var(--space-xl)', maxWidth: 1100, margin: '0 auto', marginRight: selected ? 'min(480px, 94vw)' : 'auto', transition: 'margin-right 220ms cubic-bezier(0.22,1,0.36,1)' }}>
@@ -618,7 +620,20 @@ export default function Jobs() {
           Sticky so triage filters stay reachable while scrolling a long list. */}
       <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
         <StatusNav status={status} onStatus={v => setParam('status', v)} />
-        <div style={{ paddingBottom: 7 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 7 }}>
+          {/* Run scope — set by "View matches" / the Recent-runs table on Search. */}
+          {run && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 6px 4px 11px', borderRadius: 'var(--radius-full)', background: 'var(--accent-muted)', color: 'var(--accent-text)', fontSize: '12px', fontWeight: 550, whiteSpace: 'nowrap' }}>
+              {run === 'latest' ? 'Latest search' : `Search #${run}`}
+              <button
+                onClick={() => setParam('run', '')}
+                aria-label="Show all searches"
+                style={{ display: 'flex', padding: 2, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: 0.75 }}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
           <RefineControl
             fit={fit} remote={remote} l1={l1} l2={l2} sourceTypes={sourceTypes}
             onFit={v => setParam('fit', v ? '1' : '')}

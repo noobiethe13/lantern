@@ -60,22 +60,37 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-function RecentRuns({ runs, onView }: { runs: Run[]; onView: () => void }) {
+function RecentRuns({ runs, onView, onOpenRun }: { runs: Run[]; onView: () => void; onOpenRun: (id: number) => void }) {
   if (runs.length === 0) return null;
-  const cols = '1fr 60px 60px 56px 56px 60px 56px';
+  const cols = 'minmax(0,1fr) 60px 60px 56px 56px 60px 56px';
   return (
     <section style={{ marginTop: 'var(--space-3xl)' }}>
       <h2 style={{ margin: '0 0 var(--space-md)', fontSize: '13px', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-ui)' }}>
         Recent runs
       </h2>
       <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '0 4px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
-        {['When', 'Found', 'New', 'L1', 'L2', 'Time', 'Errors'].map(h => (
+        {['Run', 'Found', 'New', 'L1', 'L2', 'Time', 'Errors'].map(h => (
           <span key={h} style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
         ))}
       </div>
       {runs.slice(0, 10).map(run => (
-        <div key={run.id} style={{ display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '10px 4px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>{timeAgo(run.started_at)}</span>
+        <div
+          key={run.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpenRun(run.id)}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenRun(run.id); } }}
+          title="View this run's matches"
+          className="run-row"
+          style={{ display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '10px 4px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center', cursor: 'pointer', transition: 'background 140ms ease' }}
+        >
+          {/* two-line lead cell (query over age) — same pattern as job rows */}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '12.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {run.query || <span style={{ color: 'var(--text-muted)' }}>Re-scan of previous criteria</span>}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>{timeAgo(run.started_at)}</div>
+          </div>
           {[run.jobs_found, run.jobs_new, run.jobs_l1_pass, run.jobs_l2_pass].map((n, j) => (
             <span key={j} className="tnum" style={{ fontSize: '12.5px', color: 'var(--text)' }}>{n.toLocaleString()}</span>
           ))}
@@ -87,7 +102,7 @@ function RecentRuns({ runs, onView }: { runs: Run[]; onView: () => void }) {
       ))}
       <button onClick={onView} className="text-link" style={{ marginTop: 'var(--space-md)' }}>
         View all matches <ArrowRight size={14} />
-        <style>{`.text-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--accent-text);font-family:inherit;font-size:13px;font-weight:550;padding:0;}.text-link:hover{text-decoration:underline;}`}</style>
+        <style>{`.text-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--accent-text);font-family:inherit;font-size:13px;font-weight:550;padding:0;}.text-link:hover{text-decoration:underline;}.run-row:hover{background:var(--surface-2);}`}</style>
       </button>
     </section>
   );
@@ -281,7 +296,8 @@ export default function SearchPage() {
             aria-label="Describe the role you want"
             value={keyword}
             onChange={e => { setKeyword(e.target.value); setShowRecent(true); }}
-            onFocus={() => { setFocused(true); setShowRecent(true); }}
+            onFocus={() => setFocused(true)}
+            onClick={() => setShowRecent(true)}
             onBlur={() => { setFocused(false); window.setTimeout(() => setShowRecent(false), 150); }}
             onKeyDown={e => {
               if (e.key === 'Enter') handleScan();
@@ -398,7 +414,11 @@ export default function SearchPage() {
       {loadingRuns ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}><Spinner /></div>
       ) : (
-        <RecentRuns runs={runs} onView={() => navigate('/jobs')} />
+        <RecentRuns
+          runs={runs}
+          onView={() => navigate('/jobs')}
+          onOpenRun={id => navigate(`/jobs?run=${id}`)}
+        />
       )}
 
       {!loadingRuns && runs.length === 0 && !scanning && log.length === 0 && (
