@@ -10,6 +10,7 @@ export interface DbJobRow {
   remote: number | null;
   salary_min_usd: number | null;
   salary_max_usd: number | null;
+  salary_currency: string | null;
   posted_at: number | null;
   jd_text: string | null;
   content_hash: string;
@@ -26,6 +27,7 @@ export function toDbRow(job: Job, sourceId: number, hash: string): DbJobRow {
     remote: job.remote == null ? null : job.remote ? 1 : 0,
     salary_min_usd: job.salary_min_usd ?? null,
     salary_max_usd: job.salary_max_usd ?? null,
+    salary_currency: job.salary_currency ?? null,
     posted_at: job.posted_at ?? null,
     jd_text: job.jd_text ?? null,
     content_hash: hash,

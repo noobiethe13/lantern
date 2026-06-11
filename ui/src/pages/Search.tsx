@@ -4,7 +4,7 @@ import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
   BarChart3, Clock,
 } from 'lucide-react';
-import { api, type Run, type InterpretedCriteria } from '@/lib/api';
+import { api, formatMoney, type Run, type InterpretedCriteria } from '@/lib/api';
 import { useSSE, type ScanEvent } from '@/lib/sse';
 import { Button, Spinner, Badge } from '@/components/ui';
 import { EmptyLantern, Embers } from '@/components/brand';
@@ -123,7 +123,7 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
       {c.location.allowed.slice(0, 3).map(l => <Badge key={`l-${l}`} tone="neutral">{l}</Badge>)}
       {(c.location.always_allow ?? []).slice(0, 2).map(l => <Badge key={`aa-${l}`} tone="neutral">always {l}</Badge>)}
       {(c.location.block ?? []).slice(0, 3).map(l => <Badge key={`bl-${l}`} tone="danger">not {l}</Badge>)}
-      {c.salary_min_usd ? <Badge tone="success">≥ ${c.salary_min_usd.toLocaleString()}</Badge> : null}
+      {c.salary_min_usd ? <Badge tone="success">≥ {formatMoney(c.salary_min_usd, c.salary_currency)}</Badge> : null}
       {c.seniority.allowed.map(s => <Badge key={`s-${s}`} tone="violet">{s}</Badge>)}
       {c.title.negative.slice(0, 3).map(n => <Badge key={`n-${n}`} tone="danger">no {n}</Badge>)}
       {c.exclude_companies.slice(0, 3).map(x => <Badge key={`x-${x}`} tone="danger">not {x}</Badge>)}

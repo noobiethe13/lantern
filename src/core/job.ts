@@ -7,8 +7,11 @@ export const JobShape = z.object({
   company: z.string().min(1),
   location: z.string().optional(),
   remote: z.boolean().optional(),
+  // Native amounts in salary_currency (the _usd suffix is legacy). salary_currency
+  // is the ISO code, or null/absent when the source reported none.
   salary_min_usd: z.number().int().nullable().optional(),
   salary_max_usd: z.number().int().nullable().optional(),
+  salary_currency: z.string().nullable().optional(),
   posted_at: z.number().int().nullable().optional(),
   jd_text: z.string().optional(),
 });

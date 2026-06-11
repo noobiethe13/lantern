@@ -179,9 +179,9 @@ function upsertJob(
   db.run(
     `INSERT INTO jobs (
       source_id, external_id, url, title, company, company_norm, location, remote,
-      salary_min_usd, salary_max_usd, posted_at, jd_text, content_hash,
+      salary_min_usd, salary_max_usd, salary_currency, posted_at, jd_text, content_hash,
       first_seen, last_seen, last_run_id, l1_pass, l1_reasons
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.source_id,
       row.external_id,
@@ -193,6 +193,7 @@ function upsertJob(
       row.remote,
       row.salary_min_usd,
       row.salary_max_usd,
+      row.salary_currency,
       row.posted_at,
       row.jd_text,
       row.content_hash,

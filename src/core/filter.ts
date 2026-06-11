@@ -10,6 +10,7 @@ export interface Criteria {
   };
   seniority?: { allowed: ('junior' | 'mid' | 'senior' | 'staff' | 'principal')[] };
   salary_min_usd?: number | null;
+  salary_currency?: string;
   exclude_companies?: string[];
 }
 
@@ -79,12 +80,22 @@ export function l1Filter(job: Job, c: Criteria): L1Result {
     reasons.push(`company excluded`);
   }
 
+  // Salary floor compares amounts only when both currencies are known and equal.
+  // Amounts are native (the _usd suffix is legacy), so cross-currency or
+  // unknown-currency salaries can't be compared deterministically — they pass and
+  // defer to L2 (mirrors the missing-data philosophy: don't drop what we can't
+  // evaluate). A criteria row predating salary_currency defaults to USD, so it
+  // still filters USD-tagged jobs.
   if (
     c.salary_min_usd &&
     job.salary_min_usd != null &&
+    job.salary_currency != null &&
+    (c.salary_currency ?? 'USD') === job.salary_currency &&
     job.salary_min_usd < c.salary_min_usd
   ) {
-    reasons.push(`salary ${job.salary_min_usd} below floor ${c.salary_min_usd}`);
+    reasons.push(
+      `salary ${job.salary_min_usd} ${job.salary_currency} below floor ${c.salary_min_usd}`
+    );
   }
 
   return { pass: reasons.length === 0, reasons };

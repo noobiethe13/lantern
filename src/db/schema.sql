@@ -32,8 +32,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   company_norm         TEXT,
   location             TEXT,
   remote               INTEGER,
+  -- salary_min_usd/max are NATIVE amounts in salary_currency, not necessarily
+  -- USD (the _usd suffix is legacy). salary_currency is the ISO code tagging
+  -- them, or NULL when the source did not report one. L1 only compares amounts
+  -- when the job and floor currencies match (see l1Filter).
   salary_min_usd       INTEGER,
   salary_max_usd       INTEGER,
+  salary_currency      TEXT,
   posted_at            INTEGER,
   jd_text              TEXT,
   content_hash         TEXT NOT NULL,

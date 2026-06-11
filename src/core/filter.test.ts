@@ -118,14 +118,34 @@ describe('l1Filter — remote_required', () => {
 });
 
 describe('l1Filter — salary + excludes', () => {
-  test('fails when a reported salary is below the floor', () => {
+  test('fails when a same-currency salary is below the floor', () => {
+    const c: Criteria = { salary_min_usd: 120000, salary_currency: 'USD' };
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'USD' }), c).pass).toBe(false);
+  });
+
+  test('floor currency defaults to USD when the criteria omits it', () => {
     const c: Criteria = { salary_min_usd: 120000 };
-    expect(l1Filter(job({ salary_min_usd: 90000 }), c).pass).toBe(false);
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'USD' }), c).pass).toBe(false);
   });
 
   test('passes when salary is unknown (floor only filters reported pay)', () => {
-    const c: Criteria = { salary_min_usd: 120000 };
+    const c: Criteria = { salary_min_usd: 120000, salary_currency: 'USD' };
     expect(l1Filter(job({ salary_min_usd: null }), c).pass).toBe(true);
+  });
+
+  test('passes when the job amount has no currency tag (cannot compare)', () => {
+    const c: Criteria = { salary_min_usd: 120000, salary_currency: 'USD' };
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: null }), c).pass).toBe(true);
+  });
+
+  test('passes a below-floor amount in a different currency (defers to L2)', () => {
+    const c: Criteria = { salary_min_usd: 120000, salary_currency: 'USD' };
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'EUR' }), c).pass).toBe(true);
+  });
+
+  test('fails a below-floor amount when both sides share a non-USD currency', () => {
+    const c: Criteria = { salary_min_usd: 100000, salary_currency: 'EUR' };
+    expect(l1Filter(job({ salary_min_usd: 80000, salary_currency: 'EUR' }), c).pass).toBe(false);
   });
 
   test('fails an excluded company', () => {

@@ -33,6 +33,12 @@ export function runMigrations(db: Database): void {
     db.run('ALTER TABLE jobs ADD COLUMN duplicate_urls TEXT');
   }
 
+  // salary_currency: ISO code tagging the (native) salary_min_usd/max amounts.
+  // Pre-existing rows get NULL, so they are not amount-filtered until re-scanned.
+  if (!jobsCols.includes('salary_currency')) {
+    db.run('ALTER TABLE jobs ADD COLUMN salary_currency TEXT');
+  }
+
   // company_norm: indexed prefilter for the fuzzy-dedup candidate lookup in
   // scan.ts. Add the column on existing DBs (CREATE TABLE covers fresh ones),
   // backfill any NULL rows with normalizeCompany(), then index it. The index

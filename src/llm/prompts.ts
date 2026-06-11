@@ -48,6 +48,7 @@ Output ONLY this JSON (no markdown, no commentary):
   "location": {"remote_required": <bool>, "allowed": ["..."], "block": ["..."], "always_allow": ["..."]},
   "seniority": {"allowed": ["junior","mid","senior","staff","principal"]},
   "salary_min_usd": <int|null>,
+  "salary_currency": "<ISO code, e.g. USD/EUR/GBP/INR>",
   "exclude_companies": ["..."]
 }
 
@@ -72,9 +73,13 @@ Extraction rules:
   principal" -> ["staff","principal"]. A year-of-experience range maps to every
   level it spans, not just the lowest: "1-3 YoE" -> ["junior","mid"]; "3-6 years"
   -> ["mid","senior"]; "5+ years" -> ["senior","staff"]. Empty if unstated.
-- salary_min_usd: numeric USD floor if stated ("$100k" -> 100000, "120k+" ->
-  120000); convert k/m suffixes and approximate other currencies to USD. null if
-  unstated.
+- salary_min_usd: the numeric salary floor if stated, in the currency the user
+  used — do NOT convert between currencies. Expand k/m suffixes ("100k" -> 100000,
+  "1.2m" -> 1200000). null if unstated. (The _usd suffix is legacy; the amount is
+  native to salary_currency.)
+- salary_currency: the ISO 4217 code for that floor. "$" or a bare number -> "USD";
+  "€90k" -> "EUR"; "£80k" -> "GBP"; "₹20L"/"20 lakh" -> "INR" (and 20 lakh = 2000000).
+  Default "USD" when no salary is stated or the currency is ambiguous.
 - exclude_companies: companies to avoid ("not Meta" -> ["meta"]). Empty if none.
 - Ignore anything you cannot map to a field. Never invent constraints.`;
 }

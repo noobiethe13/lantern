@@ -10,5 +10,6 @@ location:
   always_allow: []   # home region that always passes, e.g. ["India"]
 seniority:
   allowed: []    # junior | mid | senior | staff | principal
-salary_min_usd: null
+salary_min_usd: null      # native amount in salary_currency (the _usd suffix is legacy)
+salary_currency: USD       # ISO code of the floor; L1 only filters jobs tagged the same
 exclude_companies: []

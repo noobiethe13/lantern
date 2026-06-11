@@ -38,6 +38,8 @@ export function parseRemoteOk(json: unknown, keywords: string[]): Job[] {
       remote: true,
       salary_min_usd: typeof salaryMin === 'number' && salaryMin > 0 ? Math.round(salaryMin) : null,
       salary_max_usd: typeof salaryMax === 'number' && salaryMax > 0 ? Math.round(salaryMax) : null,
+      salary_currency: 'USD', // RemoteOK lists compensation in USD
+
       posted_at: toMillis(j['epoch'] ?? j['date']),
       jd_text: htmlToText(j['description'] as string),
     });

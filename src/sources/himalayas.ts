@@ -27,7 +27,7 @@ export function parseHimalayas(json: unknown): Job[] {
     const company = (j['companyName'] as string)?.trim() ?? '';
     if (!title || !url || !company) continue;
 
-    const usd = j['currency'] === 'USD';
+    const currency = typeof j['currency'] === 'string' ? (j['currency'] as string) : null;
     const minSalary = j['minSalary'];
     const maxSalary = j['maxSalary'];
     const locations = j['locationRestrictions'];
@@ -39,8 +39,11 @@ export function parseHimalayas(json: unknown): Job[] {
       company,
       location: Array.isArray(locations) ? locations.join(', ') : '',
       remote: true,
-      salary_min_usd: usd && typeof minSalary === 'number' ? Math.round(minSalary) : null,
-      salary_max_usd: usd && typeof maxSalary === 'number' ? Math.round(maxSalary) : null,
+      // Keep the native amount + its currency tag rather than dropping non-USD
+      // pay (L1 only compares like-for-like currencies; the rest defers to L2).
+      salary_min_usd: typeof minSalary === 'number' ? Math.round(minSalary) : null,
+      salary_max_usd: typeof maxSalary === 'number' ? Math.round(maxSalary) : null,
+      salary_currency: currency,
       posted_at: toMillis(j['pubDate']),
       jd_text: htmlToText(j['description'] as string),
     });

@@ -50,6 +50,7 @@ export interface Job {
   remote: number | null;
   salary_min_usd: number | null;
   salary_max_usd: number | null;
+  salary_currency: string | null;
   posted_at: number | null;
   jd_text: string | null;
   content_hash: string;
@@ -112,7 +113,23 @@ export interface InterpretedCriteria {
   location: { remote_required: boolean; allowed: string[]; block?: string[]; always_allow?: string[] };
   seniority: { allowed: string[] };
   salary_min_usd: number | null;
+  salary_currency?: string;
   exclude_companies: string[];
+}
+
+// Format a salary amount in its native currency. Falls back to a "CODE amount"
+// string for codes Intl doesn't recognize. Null currency renders as USD.
+export function formatMoney(amount: number, currency?: string | null): string {
+  const code = (currency ?? 'USD').toUpperCase();
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${code} ${amount.toLocaleString()}`;
+  }
 }
 
 export interface HealthCheck {

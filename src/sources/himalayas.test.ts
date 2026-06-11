@@ -35,7 +35,7 @@ describe('parseHimalayas', () => {
     expect(jobs[0].posted_at).toBe(1780540143000);
   });
 
-  test('ignores salary when currency is not USD', () => {
+  test('keeps non-USD salary with its native currency tag', () => {
     const json = {
       jobs: [
         {
@@ -50,8 +50,9 @@ describe('parseHimalayas', () => {
       ],
     };
     const job = parseHimalayas(json)[0];
-    expect(job.salary_min_usd).toBeNull();
-    expect(job.salary_max_usd).toBeNull();
+    expect(job.salary_min_usd).toBe(50000);
+    expect(job.salary_max_usd).toBe(70000);
+    expect(job.salary_currency).toBe('EUR');
   });
 
   test('drops entries missing title, applicationLink, or company', () => {

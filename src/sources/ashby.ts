@@ -4,13 +4,42 @@ import { htmlToText } from './aggregator-util';
 
 const ASHBY_ALLOWED_HOSTS = ['api.ashbyhq.com'];
 
+interface AshbySalary {
+  min: number | null;
+  max: number | null;
+  currency: string | null;
+}
+
+/**
+ * Pull the annual base-salary range + its native currency out of an Ashby
+ * `compensation` object (present with `includeCompensation=true`). Salary lives
+ * in `summaryComponents[]` as `{compensationType, interval, currencyCode,
+ * minValue, maxValue}`; we take the `Salary` component billed per year and
+ * ignore equity/bonus/hourly so we never compare an hourly rate against an
+ * annual floor. Returns nulls when no annual salary component is present.
+ */
+function extractAshbySalary(compensation: unknown): AshbySalary {
+  const none: AshbySalary = { min: null, max: null, currency: null };
+  const comp = compensation as { summaryComponents?: unknown[] } | undefined;
+  const components = Array.isArray(comp?.summaryComponents) ? comp!.summaryComponents! : [];
+  const salary = components
+    .map((c) => c as Record<string, unknown>)
+    .find((c) => c['compensationType'] === 'Salary' && c['interval'] === '1 YEAR');
+  if (!salary) return none;
+  const minV = salary['minValue'];
+  const maxV = salary['maxValue'];
+  return {
+    min: typeof minV === 'number' ? Math.round(minV) : null,
+    max: typeof maxV === 'number' ? Math.round(maxV) : null,
+    currency: typeof salary['currencyCode'] === 'string' ? (salary['currencyCode'] as string) : null,
+  };
+}
+
 export function parseAshby(json: unknown, company: string): Job[] {
   const data = json as { jobs?: unknown[] };
   return (data.jobs ?? []).map((j: unknown) => {
     const job = j as Record<string, unknown>;
-    const comp = job['compensationTierSummary'] as
-      | Record<string, unknown>
-      | undefined;
+    const salary = extractAshbySalary(job['compensation']);
     const loc = job['location'];
     const jd = htmlToText((job['descriptionPlain'] as string) || (job['descriptionHtml'] as string));
     return {
@@ -22,8 +51,9 @@ export function parseAshby(json: unknown, company: string): Job[] {
         typeof loc === 'string'
           ? loc
           : ((loc as Record<string, unknown>)?.['name'] as string) ?? '',
-      salary_min_usd: (comp?.['min'] as number) ?? null,
-      salary_max_usd: (comp?.['max'] as number) ?? null,
+      salary_min_usd: salary.min,
+      salary_max_usd: salary.max,
+      salary_currency: salary.currency,
       jd_text: jd || undefined,
       posted_at: job['publishedAt']
         ? new Date(job['publishedAt'] as string).getTime()

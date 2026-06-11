@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
 } from 'lucide-react';
-import { api, type Job, type JobStatus } from '@/lib/api';
+import { api, formatMoney, type Job, type JobStatus } from '@/lib/api';
 import { Textarea, Spinner } from '@/components/ui';
 import { StatusPill } from '@/components/StatusPill';
 import { scoreColor } from '@/components/score';
@@ -334,6 +334,9 @@ function DetailPanel({ job, onClose, onStatusChange }: {
 
   const v = job.l2_verdict;
   const salary = job.salary_min_usd ?? v?.salary_min_usd;
+  // Currency tags the job's own amount; the L2 estimate fallback has no currency
+  // tag, so it renders as USD.
+  const salaryCurrency = job.salary_min_usd != null ? job.salary_currency : null;
   const locationValue = job.remote === 1 ? 'Remote' : job.location || '—';
   // Drop empty/whitespace reasons so a verdict with no real reason text doesn't
   // render an empty "why it matched" section.
@@ -346,7 +349,7 @@ function DetailPanel({ job, onClose, onStatusChange }: {
   if (salary != null) {
     cells.push({
       icon: <Banknote size={12} />, label: 'Salary',
-      value: <span className="tnum">${salary.toLocaleString()}{job.salary_max_usd ? `–$${job.salary_max_usd.toLocaleString()}` : '+'}</span>,
+      value: <span className="tnum">{formatMoney(salary, salaryCurrency)}{job.salary_max_usd ? `–${formatMoney(job.salary_max_usd, salaryCurrency)}` : '+'}</span>,
     });
   }
   if (v?.seniority) {

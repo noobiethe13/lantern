@@ -35,6 +35,10 @@ export const NLFilterShape = z.object({
     allowed: z.array(z.enum(['junior', 'mid', 'senior', 'staff', 'principal'])),
   }),
   salary_min_usd: z.number().int().nullable(),
+  // ISO code the salary floor is expressed in (the _usd suffix above is legacy —
+  // the amount is native to this currency). 'USD' when the user gave $ or a bare
+  // number. L1 only applies the floor to jobs tagged with the same currency.
+  salary_currency: z.string(),
   exclude_companies: z.array(z.string()),
 });
 export type NLFilter = z.infer<typeof NLFilterShape>;
