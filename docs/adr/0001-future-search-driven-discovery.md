@@ -2,8 +2,7 @@
 
 - **Status**: Partially realized — see 2026-06-05 update below
 - **Date**: 2026-05-28
-- **Context source**: Phase 7 modernization (F18 in
-  `C:\Users\Debayan\.claude\plans\review-this-repo-d-dev-sibling-tool-bright-book.md`)
+- **Context source**: Phase 7 modernization (F18)
 
 > **Update (2026-06-05, Phase 8):** the keyword-driven discovery idea was
 > partially realized via a different mechanism than this ADR's "search the SERP"
@@ -23,10 +22,10 @@ lantern's current discovery surface is a fixed registry of source adapters
 (`greenhouse`, `ashby`, `lever`, `hn-whos-hiring`, `generic-url`, `local-parser`).
 Users seed companies by name; lantern fetches each board on a scan.
 
-sibling-tool takes a different posture in the same space: it issues web searches
-("$ROLE jobs at $COMPANY", "remote $STACK $YEAR") and parses the SERP via the
-LLM. This surfaces companies that aren't yet seeded, including the long tail of
-roles posted on bespoke ATSes lantern doesn't have an adapter for.
+A search-driven posture would take a different approach in the same space:
+issue web searches ("$ROLE jobs at $COMPANY", "remote $STACK $YEAR") and parse
+the SERP via the LLM. This surfaces companies that aren't yet seeded, including
+the long tail of roles posted on bespoke ATSes lantern doesn't have an adapter for.
 
 The two approaches are complementary, not mutually exclusive:
 
