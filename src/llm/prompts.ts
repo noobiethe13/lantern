@@ -1,4 +1,7 @@
 const JD_PREVIEW_CHARS = 4096;
+// Resume text is user-typed (not scraped), but cap it anyway — it bounds cost
+// and keeps the prompt-size contract predictable across batches.
+const RESUME_PREVIEW_CHARS = 8192;
 
 export interface BatchVerdictJob {
   id: number;
@@ -11,7 +14,14 @@ export interface BatchVerdictJob {
 // Grades many jobs in one call against the same criteria. The per-job
 // description is the bulk of the input, so it's capped per job (JD_PREVIEW_CHARS)
 // — both to bound cost and as the injection-length guard (Critical rule §8).
-export function batchVerdictPrompt(criteriaYaml: string, jobs: BatchVerdictJob[]): string {
+// When resumeText is given, each verdict additionally grades background fit
+// against it (sub-score + gaps) WITHOUT changing how the criteria score is
+// judged — the criteria-only output must stay comparable across both modes.
+export function batchVerdictPrompt(
+  criteriaYaml: string,
+  jobs: BatchVerdictJob[],
+  resumeText?: string,
+): string {
   const jobBlocks = jobs
     .map(
       (j) => `--- job_id: ${j.id}
@@ -22,8 +32,20 @@ description (first 4KB): ${j.jdText.slice(0, JD_PREVIEW_CHARS)}`,
     )
     .join('\n\n');
 
+  const resumeBlock = resumeText
+    ? `
+
+Candidate resume (for background_fit/gaps ONLY — it must not influence fit/score,
+which are judged against the criteria exactly as if no resume were given):
+${resumeText.slice(0, RESUME_PREVIEW_CHARS)}`
+    : '';
+
+  const resumeFields = resumeText
+    ? `,"background_fit":<0..1 how well the candidate's background matches this job's requirements>,"gaps":["0-4 short missing-qualification notes"]`
+    : '';
+
   return `Score each job below against the user's criteria. Grade every job
-independently — judge each only on its own title/company/location/description.
+independently — judge each only on its own title/company/location/description.${resumeBlock}
 
 Criteria:
 ${criteriaYaml}
@@ -32,7 +54,7 @@ Jobs (${jobs.length}):
 ${jobBlocks}
 
 Return ONLY this JSON, with one entry per job, echoing each job_id exactly:
-{"verdicts":[{"job_id":<int>,"fit":<bool>,"score":<0..1>,"seniority":"junior|mid|senior|staff|principal|unknown","stack_match":["..."],"remote_confirmed":<bool>,"salary_min_usd":<int|null>,"reasons":["1-3 short reasons"]}]}`;
+{"verdicts":[{"job_id":<int>,"fit":<bool>,"score":<0..1>,"seniority":"junior|mid|senior|staff|principal|unknown","stack_match":["..."],"remote_confirmed":<bool>,"salary_min_usd":<int|null>,"reasons":["1-3 short reasons"]${resumeFields}}]}`;
 }
 
 export function nlFilterPrompt(userText: string): string {

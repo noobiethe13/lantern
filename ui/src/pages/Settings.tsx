@@ -1,15 +1,15 @@
 import {
-  useState, useEffect, useCallback,
+  useState, useEffect, useCallback, useRef,
   type ReactNode, type CSSProperties, type Dispatch, type SetStateAction,
 } from 'react';
 import {
   CheckCircle2, XCircle, Circle, Trash2, Plus,
-  RefreshCw, ChevronDown, ChevronRight, Search as SearchIcon,
+  RefreshCw, ChevronDown, ChevronRight, Search as SearchIcon, FileUp,
 } from 'lucide-react';
 import {
-  api, type Source, type SourceType, type HealthCheck,
+  api, type Source, type SourceType, type HealthCheck, type ResumeSettings,
 } from '@/lib/api';
-import { Button, Input, Badge, Spinner, useToast } from '@/components/ui';
+import { Button, Input, Badge, Spinner, Textarea, useToast } from '@/components/ui';
 
 type BadgeTone = 'neutral' | 'accent' | 'blue' | 'violet' | 'success' | 'warning' | 'danger' | 'dim';
 
@@ -280,6 +280,108 @@ function SourcesSection({ sources, loading, setSources, reload }: {
   );
 }
 
+// Master resume for triage scoring. One form, one Save: the toggle and the
+// text are a single settings object, so they save together (a toggle that
+// applies instantly while the text waits on Save would race itself).
+function ResumeSection() {
+  const toast = useToast();
+  const [saved, setSaved] = useState<ResumeSettings | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.resume.get().then(res => {
+      setSaved(res.settings);
+      setEnabled(res.settings.enabled);
+      setText(res.settings.text);
+    }).catch(() => setSaved({ enabled: false, text: '' }));
+  }, []);
+
+  const dirty = saved !== null && (enabled !== saved.enabled || text !== saved.text);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.resume.save({ enabled, text });
+      setSaved(res.settings);
+      toast(enabled
+        ? 'Resume saved — new scans will grade background fit.'
+        : 'Resume saved.', 'success');
+    } catch (e) {
+      toast(`Could not save: ${String(e)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePdf = async (file: File) => {
+    setExtracting(true);
+    try {
+      const { text: extracted } = await api.resume.extract(file);
+      setText(extracted);
+      toast('Text extracted — review it below, then save.', 'success');
+    } catch (e) {
+      toast(String(e instanceof Error ? e.message : e), 'error');
+    } finally {
+      setExtracting(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  if (saved === null) {
+    return (
+      <div>
+        <SectionHeading title="Resume" desc="Score each match against your background." />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeading
+        title="Resume"
+        desc="Optionally grade every match against your background — adds a fit sub-score and gap list alongside the criteria score. Stays on this machine."
+        action={
+          <button onClick={() => setEnabled(v => !v)} aria-pressed={enabled} style={{ background: enabled ? 'var(--accent-muted)' : 'var(--surface-2)', color: enabled ? 'var(--accent-text)' : 'var(--text-faint)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 12px', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 150ms ease', whiteSpace: 'nowrap' }}>
+            {enabled ? 'On' : 'Off'}
+          </button>
+        }
+      />
+      <Textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Paste your resume as plain text, or import a PDF below…"
+        rows={9}
+        maxLength={50000}
+        aria-label="Resume text"
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/pdf"
+          style={{ display: 'none' }}
+          onChange={e => { const f = e.target.files?.[0]; if (f) handlePdf(f); }}
+        />
+        <Button size="sm" variant="ghost" onClick={() => fileRef.current?.click()} loading={extracting}>
+          <FileUp size={13} /> Import from PDF
+        </Button>
+        <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>
+          The PDF isn't stored — only the text you save.
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {dirty && <span style={{ fontSize: '11.5px', color: 'var(--warning)' }}>Unsaved changes</span>}
+          <Button size="sm" onClick={handleSave} loading={saving} disabled={!dirty}>Save</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const HEALTH_LABELS: Record<string, string> = { db: 'Database', llm: 'Claude Code' };
 const HEALTH_FIX: Record<string, string> = {
   db: 'Check that data/ is writable.',
@@ -440,6 +542,9 @@ export default function Settings() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2xl)' }}>
         <section style={strip}>
           <SourcesSection sources={sources} loading={sourcesLoading} setSources={setSources} reload={loadSources} />
+        </section>
+        <section style={strip}>
+          <ResumeSection />
         </section>
         <section style={strip}>
           <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={checkHealth} />

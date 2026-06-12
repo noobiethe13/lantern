@@ -35,6 +35,9 @@ export interface Verdict {
   remote_confirmed: boolean;
   salary_min_usd: number | null;
   reasons: string[];
+  // Present only when the job was scored with resume-aware grading enabled.
+  background_fit?: number;
+  gaps?: string[];
 }
 
 export interface Job {
@@ -151,6 +154,13 @@ export interface LlmSettingsResponse {
   tasks: LlmTask[];
 }
 
+// Master/baseline resume for triage scoring. Canonical form is TEXT — a PDF
+// can be imported via extract, but only the (user-reviewed) text is saved.
+export interface ResumeSettings {
+  enabled: boolean;
+  text: string;
+}
+
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -245,6 +255,25 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(settings),
       }),
+  },
+
+  resume: {
+    get: () => request<{ settings: ResumeSettings }>('/settings/resume'),
+    save: (settings: ResumeSettings) =>
+      request<{ ok: boolean; settings: ResumeSettings }>('/settings/resume', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
+    // Transient PDF→text: nothing is stored server-side; the result goes into
+    // the editable textarea for review before saving.
+    extract: async (file: File): Promise<{ text: string }> => {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE}/settings/resume/extract`, { method: 'POST', body: form });
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      if (!res.ok) throw new ApiError(res.status, body.error ?? res.statusText);
+      return body as { text: string };
+    },
   },
 
   attachments: {

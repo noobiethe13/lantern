@@ -20,6 +20,22 @@ export const BatchVerdictShape = z.object({
 });
 export type BatchVerdict = z.infer<typeof BatchVerdictShape>;
 
+// Resume-aware L2 (opt-in): when a master resume is provided, every verdict
+// additionally carries a background-fit sub-score + gap list. A separate shape
+// (rather than optional fields on VerdictShape) keeps `--json-schema` strict in
+// both modes — the fields are required when the resume is present, absent when
+// it is not. runL2Pass picks the shape at call time.
+export const ResumeVerdictShape = VerdictShape.extend({
+  background_fit: z.number().min(0).max(1),
+  gaps: z.array(z.string()).max(4),
+});
+export type ResumeVerdict = z.infer<typeof ResumeVerdictShape>;
+
+export const BatchVerdictWithResumeShape = z.object({
+  verdicts: z.array(ResumeVerdictShape.extend({ job_id: z.number().int() })),
+});
+export type BatchVerdictWithResume = z.infer<typeof BatchVerdictWithResumeShape>;
+
 export const NLFilterShape = z.object({
   title: z.object({
     positive: z.array(z.string()),
