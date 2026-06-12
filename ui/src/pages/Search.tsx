@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
@@ -60,50 +60,89 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+// The distillation trail: the run's own numbers narrowing toward the match
+// count, brightening as they go (found → L1 survivors → matches). Typographic,
+// so it stays honest at any magnitude — no shape to mislead.
+function DistillTrail({ run }: { run: Run }) {
+  const arrow = <span aria-hidden style={{ fontSize: '11px', color: 'var(--text-faint)', opacity: 0.7 }}>→</span>;
+  const matches = run.jobs_l2_pass;
+  return (
+    <div className="tnum" style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end', gap: 7, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+      <span className="run-trail-stages" style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7 }}>
+        <span style={{ fontSize: '12px', color: 'var(--text-faint)' }}>{run.jobs_found.toLocaleString()}</span>
+        {arrow}
+        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{run.jobs_l1_pass.toLocaleString()}</span>
+        {arrow}
+      </span>
+      <span style={{ fontSize: '17px', lineHeight: 1.15, color: matches > 0 ? 'var(--accent-text)' : 'var(--text-faint)' }}>
+        {run.finished_at ? matches.toLocaleString() : '…'}
+      </span>
+      <span style={{ fontFamily: 'var(--font-ui)', fontSize: '10px', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        {run.finished_at ? (matches === 1 ? 'match' : 'matches') : 'running'}
+      </span>
+    </div>
+  );
+}
+
+// Raw stage counts live in the tooltip; the row itself tells the distilled story.
+function runTooltip(run: Run): string {
+  const bits = [
+    `${run.jobs_found.toLocaleString()} found`,
+    `${run.jobs_new.toLocaleString()} new`,
+    `${run.jobs_l1_pass.toLocaleString()} passed L1`,
+    `${run.jobs_l2_pass.toLocaleString()} matched`,
+  ];
+  if (run.errors.length > 0) bits.push(`${run.errors.length} source error${run.errors.length === 1 ? '' : 's'}`);
+  return `${bits.join(' · ')} — view this run's matches`;
+}
+
 function RecentRuns({ runs, onView, onOpenRun }: { runs: Run[]; onView: () => void; onOpenRun: (id: number) => void }) {
   if (runs.length === 0) return null;
-  const cols = 'minmax(0,1fr) 60px 60px 56px 56px 60px 56px';
   return (
     <section style={{ marginTop: 'var(--space-3xl)' }}>
-      <h2 style={{ margin: '0 0 var(--space-md)', fontSize: '13px', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-ui)' }}>
+      <h2 style={{ margin: '0 0 var(--space-sm)', fontSize: '13px', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-ui)' }}>
         Recent runs
       </h2>
-      <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '0 4px 8px', borderBottom: '1px solid var(--border-subtle)' }}>
-        {['Run', 'Found', 'New', 'L1', 'L2', 'Time', 'Errors'].map(h => (
-          <span key={h} style={{ fontSize: '11px', color: 'var(--text-faint)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{h}</span>
+      <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
+        {/* cap at 5 rows — the home page composition shouldn't scroll; Jobs has the full history */}
+        {runs.slice(0, 5).map(run => (
+          <div
+            key={run.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpenRun(run.id)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenRun(run.id); } }}
+            title={runTooltip(run)}
+            className="run-row"
+            style={{ display: 'grid', gap: 18, padding: '12px 6px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center', cursor: 'pointer', transition: 'background 140ms ease' }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '13px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {run.query || <span style={{ color: 'var(--text-muted)' }}>Re-scan of previous criteria</span>}
+              </div>
+              <div className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>
+                {timeAgo(run.started_at)} · {duration(run)}
+                {run.errors.length > 0 && (
+                  <span style={{ color: 'var(--warning)' }}> · {run.errors.length} error{run.errors.length === 1 ? '' : 's'}</span>
+                )}
+              </div>
+            </div>
+            <DistillTrail run={run} />
+          </div>
         ))}
       </div>
-      {runs.slice(0, 10).map(run => (
-        <div
-          key={run.id}
-          role="button"
-          tabIndex={0}
-          onClick={() => onOpenRun(run.id)}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenRun(run.id); } }}
-          title="View this run's matches"
-          className="run-row"
-          style={{ display: 'grid', gridTemplateColumns: cols, gap: 16, padding: '10px 4px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center', cursor: 'pointer', transition: 'background 140ms ease' }}
-        >
-          {/* two-line lead cell (query over age) — same pattern as job rows */}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: '12.5px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {run.query || <span style={{ color: 'var(--text-muted)' }}>Re-scan of previous criteria</span>}
-            </div>
-            <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>{timeAgo(run.started_at)}</div>
-          </div>
-          {[run.jobs_found, run.jobs_new, run.jobs_l1_pass, run.jobs_l2_pass].map((n, j) => (
-            <span key={j} className="tnum" style={{ fontSize: '12.5px', color: 'var(--text)' }}>{n.toLocaleString()}</span>
-          ))}
-          <span className="tnum" style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>{duration(run)}</span>
-          <span className="tnum" style={{ fontSize: '12.5px', color: run.errors.length > 0 ? 'var(--warning)' : 'var(--text-faint)' }}>
-            {run.errors.length > 0 ? run.errors.length : '—'}
-          </span>
-        </div>
-      ))}
       <button onClick={onView} className="text-link" style={{ marginTop: 'var(--space-md)' }}>
         View all matches <ArrowRight size={14} />
-        <style>{`.text-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--accent-text);font-family:inherit;font-size:13px;font-weight:550;padding:0;}.text-link:hover{text-decoration:underline;}.run-row:hover{background:var(--surface-2);}`}</style>
       </button>
+      <style>{`
+        .text-link{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--accent-text);font-family:inherit;font-size:13px;font-weight:550;padding:0;}
+        .text-link:hover{text-decoration:underline;}
+        .run-row{grid-template-columns:minmax(0,1fr) auto;}
+        .run-row:hover{background:var(--surface-2);}
+        @media (max-width: 700px){
+          .run-trail-stages{display:none !important;}
+        }
+      `}</style>
     </section>
   );
 }
@@ -146,9 +185,19 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
   );
 }
 
+// Rotated through the hero input — for an NL-driven search the placeholder is
+// also teaching: it shows the breadth of what the parser understands.
+const PLACEHOLDERS = [
+  'e.g. Senior backend engineer, remote in Europe, $120k+',
+  'Staff platform engineer, SF or remote US, no agencies',
+  'Flutter developer, Berlin or remote EU, €70k+',
+  'ML engineer, remote, $150k+, no crypto',
+];
+
 export default function SearchPage() {
   const navigate = useNavigate();
   const [keyword, setKeyword] = useState('');
+  const [phIdx, setPhIdx] = useState(0);
   const [focused, setFocused] = useState(false);
   const [igniteAt, setIgniteAt] = useState(0);
   const [scanning, setScanning] = useState(false);
@@ -255,23 +304,35 @@ export default function SearchPage() {
     }
   };
 
+  // Cycle the example query while the input is empty (interval matches the
+  // ph-cycle keyframe duration so each example fades out before swapping).
+  useEffect(() => {
+    if (keyword) return;
+    const iv = setInterval(() => setPhIdx(i => (i + 1) % PLACEHOLDERS.length), 4200);
+    return () => clearInterval(iv);
+  }, [keyword]);
+
   const suggestions = recent
     .filter(q => q.toLowerCase() !== keyword.trim().toLowerCase())
     .filter(q => keyword.trim() === '' || q.toLowerCase().includes(keyword.trim().toLowerCase()))
     .slice(0, 5);
 
   return (
-    <div style={{ position: 'relative', padding: 'var(--space-3xl) var(--space-xl)', maxWidth: 740, margin: '0 auto' }}>
-      {/* abstract lantern-glow backdrop — drifting orbs, rotating rings, rising embers.
-          Brightens as you engage the search (focus / typing). No clip → no hard edges
-          (horizontal bleed is contained by the main's overflow-x). */}
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '100vh', maxWidth: 740, margin: '0 auto', padding: '0 var(--space-xl)' }}>
+      {/* auto vertical margins center the hero composition while content is light;
+          they collapse to 0 as the log / runs grow, restoring normal flow */}
+      <div style={{ position: 'relative', margin: 'auto 0', padding: 'var(--space-2xl) 0' }}>
+      {/* abstract lantern-glow backdrop — a single soft orb + rising embers. The
+          search bar's halo is the focal light; one quiet counterweight upper-left
+          is all the orb work this composition needs (a second top-right orb fought
+          the halo for attention). Brightens as you engage the search. */}
       <div aria-hidden style={{
-        position: 'absolute', inset: '-160px -80px auto -80px', height: 580, pointerEvents: 'none', zIndex: 0,
+        position: 'absolute', inset: '-180px -80px auto -80px', height: 580, pointerEvents: 'none', zIndex: 0,
         filter: (focused || keyword.trim()) ? 'brightness(1.22) saturate(1.1)' : 'none',
         transition: 'filter 800ms ease',
       }}>
-        <div style={{ position: 'absolute', inset: 0 }}>
-          <div style={{ position: 'absolute', top: -40, left: '46%', width: 600, height: 500, willChange: 'transform', background: 'radial-gradient(50% 50% at 50% 50%, var(--orb-1), transparent 70%)', filter: 'blur(8px)', animation: 'rise 900ms cubic-bezier(0.22,1,0.36,1) both, drift-a 17s ease-in-out 900ms infinite' }} />
+        {/* orb blends via --deco-blend (multiply on light paper) so it reads as light */}
+        <div style={{ position: 'absolute', inset: 0, mixBlendMode: 'var(--deco-blend)' as CSSProperties['mixBlendMode'] }}>
           <div style={{ position: 'absolute', top: 60, left: '12%', width: 420, height: 360, willChange: 'transform', background: 'radial-gradient(50% 50% at 50% 50%, var(--orb-2), transparent 70%)', filter: 'blur(12px)', animation: 'rise 900ms cubic-bezier(0.22,1,0.36,1) 120ms both, drift-b 21s ease-in-out 1s infinite' }} />
         </div>
         <Embers />
@@ -280,7 +341,7 @@ export default function SearchPage() {
       <div style={{ position: 'relative', zIndex: 1 }}>
       <header style={{ marginBottom: 'var(--space-xl)' }}>
         <h1 style={{ margin: '0 0 var(--space-md)', fontSize: 'clamp(36px, 5.6vw, 60px)', fontWeight: 500, color: 'var(--text)', lineHeight: 1.04, letterSpacing: '-0.015em', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) both' }}>
-          What <em style={{ fontStyle: 'italic', color: 'var(--accent-2)', fontWeight: 500 }}>role</em> are you looking for?
+          What <em style={{ fontStyle: 'italic', color: 'var(--accent-2)', fontWeight: 500 }}>role</em> are you<br />looking for?
         </h1>
         <p style={{ margin: 0, fontSize: '16px', color: 'var(--text-muted)', maxWidth: '52ch', lineHeight: 1.55, fontFamily: 'var(--font-ui)', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 90ms both' }}>
           Describe it in plain English. Lantern searches 300+ company boards and
@@ -288,9 +349,12 @@ export default function SearchPage() {
         </p>
       </header>
 
-      <div style={{ position: 'relative', display: 'flex', gap: 'var(--space-sm)', alignItems: 'stretch', animation: 'rise 500ms cubic-bezier(0.22,1,0.36,1) 160ms both' }}>
+      <div className="hero-bar" style={{ position: 'relative', display: 'flex', gap: 'var(--space-sm)', alignItems: 'stretch', animation: 'rise 500ms cubic-bezier(0.22,1,0.36,1) 160ms both' }}>
+        {/* centered ambient halo behind the whole bar — a soft layered nebula of
+            lantern light that breathes at rest and steadies awake on focus */}
+        <div className="hero-halo" aria-hidden />
         {igniteAt > 0 && <Ignition key={igniteAt} />}
-        <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+        <div className="hero-wrap" style={{ position: 'relative', flex: 1, minWidth: 0 }}>
           <input
             ref={inputRef}
             aria-label="Describe the role you want"
@@ -303,12 +367,19 @@ export default function SearchPage() {
               if (e.key === 'Enter') handleScan();
               else if (e.key === 'Escape') setShowRecent(false);
             }}
-            placeholder="e.g. Senior backend engineer, remote in Europe, $120k+"
             disabled={scanning}
             autoFocus
             className="hero-input"
             style={{ width: '100%' }}
           />
+          {/* custom placeholder layer — a native placeholder can't crossfade */}
+          {!keyword && !scanning && (
+            <span aria-hidden style={{ position: 'absolute', inset: 1, zIndex: 2, display: 'flex', alignItems: 'center', padding: '0 22px', pointerEvents: 'none', overflow: 'hidden' }}>
+              <span key={phIdx} className="ph-cycle" style={{ color: 'var(--text-faint)', fontSize: '19px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {PLACEHOLDERS[phIdx]}
+              </span>
+            </span>
+          )}
           {showRecent && !scanning && suggestions.length > 0 && (
             <div role="listbox" aria-label="Recent searches" className="recent-pop">
               {suggestions.map((q, i) => (
@@ -332,26 +403,51 @@ export default function SearchPage() {
           onClick={() => handleScan()}
           disabled={scanning || !keyword.trim()}
           loading={scanning}
-          style={{ padding: '0 24px', fontSize: '15px', flexShrink: 0, height: 'auto', alignSelf: 'stretch', borderRadius: 'var(--radius-lg)' }}
+          style={{
+            padding: '0 28px', fontSize: '16px', flexShrink: 0, height: 'auto', alignSelf: 'stretch', borderRadius: 'var(--radius-lg)',
+            // empty-query idle reads "ready when you type", not broken: dim fill, legible label
+            ...(!scanning && !keyword.trim() ? { opacity: 1, background: 'color-mix(in oklch, var(--accent) 30%, var(--surface))', color: 'var(--text-muted)' } : {}),
+          }}
         >
           {scanning ? 'Scanning' : 'Search'}
           {!scanning && <ArrowRight size={16} strokeWidth={2.25} />}
         </Button>
         <style>{`
           .hero-input {
+            position: relative;
+            z-index: 1;
             background: var(--surface);
-            border: 1px solid var(--border);
+            border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
             border-radius: var(--radius-lg);
             color: var(--text);
             font-family: var(--font-ui);
-            font-size: 17px;
-            padding: 14px 18px;
+            font-size: 19px;
+            padding: 19px 22px;
             outline: none;
             transition: border-color 150ms ease, box-shadow 150ms ease;
           }
           .hero-input::placeholder { color: var(--text-faint); }
-          .hero-input:focus { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 28%, transparent), 0 14px 40px -16px color-mix(in oklch, var(--accent) 65%, transparent); }
+          .hero-input:focus { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 28%, transparent), 0 18px 48px -18px color-mix(in oklch, var(--accent) 60%, transparent); }
           .hero-input:disabled { opacity: 0.6; }
+          .hero-halo {
+            position: absolute; left: 50%; top: 50%; z-index: 0;
+            width: calc(100% + 440px); height: 540px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            mix-blend-mode: var(--deco-blend);
+            background:
+              radial-gradient(44% 50% at 50% 52%, color-mix(in oklch, var(--accent) 32%, transparent), transparent 72%),
+              radial-gradient(78% 96% at 50% 50%, color-mix(in oklch, var(--accent-2) 15%, transparent), transparent 80%);
+            filter: blur(30px);
+            opacity: 0.6;
+            animation: halo-breathe 6.5s ease-in-out infinite;
+            transition: opacity 400ms ease;
+          }
+          .hero-bar:focus-within .hero-halo { animation: none; opacity: 1; }
+          .ph-cycle { animation: ph-cycle 4.2s ease both; }
+          @media (prefers-reduced-motion: reduce) {
+            .ph-cycle { animation: none; opacity: 1; }
+          }
           .recent-pop {
             position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 5;
             background: var(--surface); border: 1px solid var(--border);
@@ -430,6 +526,7 @@ export default function SearchPage() {
           </p>
         </div>
       )}
+      </div>
       </div>
     </div>
   );

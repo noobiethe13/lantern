@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { Search, LayoutList, Settings as SettingsIcon } from 'lucide-react';
 import Jobs from './pages/Jobs';
 import SearchPage from './pages/Search';
@@ -152,6 +152,12 @@ function Sidebar() {
   );
 }
 
+function AppBackdrop() {
+  // Data-dense pages get the quiet backdrop — blobs stay out from under the tables.
+  const { pathname } = useLocation();
+  return <PageBackdrop quiet={pathname.startsWith('/jobs') || pathname.startsWith('/settings')} />;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -159,7 +165,7 @@ export default function App() {
         <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
           <Sidebar />
           <main style={{ position: 'relative', flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', height: '100vh' }}>
-            <PageBackdrop />
+            <AppBackdrop />
             <div style={{ position: 'relative', zIndex: 1 }}>
               <Routes>
                 <Route path="/" element={<SearchPage />} />

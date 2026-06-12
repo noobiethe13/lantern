@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
+  ChevronUp, ChevronDown,
 } from 'lucide-react';
 import { api, formatMoney, type Job, type JobStatus } from '@/lib/api';
 import { Textarea, Spinner } from '@/components/ui';
@@ -19,10 +20,12 @@ function fitLabel(score: number): string {
 function FitMeter({ score }: { score: number }) {
   const pct = Math.round(score * 100);
   const color = scoreColor(score);
+  // Strong fits glow — the halo is reserved for scores that earn it.
+  const halo = score >= 0.7 ? '0 0 18px color-mix(in oklch, var(--score-hot) 50%, transparent)' : undefined;
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, marginBottom: 9 }}>
-        <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '34px', fontWeight: 600, color, lineHeight: 1, letterSpacing: '-0.02em' }}>
+        <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '34px', fontWeight: 600, color, lineHeight: 1, letterSpacing: '-0.02em', textShadow: halo }}>
           {pct}<span style={{ fontSize: '16px', marginLeft: 1 }}>%</span>
         </span>
         <span style={{ fontSize: '10.5px', color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.14em' }}>fit</span>
@@ -120,8 +123,8 @@ function StatusNav({ status, onStatus }: { status: string; onStatus: (v: string)
       <style>{`
         .status-nav { display: flex; flex-wrap: wrap; align-items: center; }
         .snav { position: relative; padding: 9px 0; margin-right: 20px; background: none; border: none; cursor: pointer;
-          font-family: var(--font-ui); font-size: 13px; color: var(--text-faint); transition: color 160ms ease; }
-        .snav:hover { color: var(--text-muted); }
+          font-family: var(--font-ui); font-size: 13px; color: var(--text-muted); transition: color 160ms ease; }
+        .snav:hover { color: var(--text); }
         .snav.active { color: var(--text); font-weight: 550; }
         .snav.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); }
       `}</style>
@@ -205,17 +208,22 @@ function RefineControl({
       )}
 
       <style>{`
-        .refine-btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: var(--radius-md);
-          background: transparent; border: 1px solid var(--border); cursor: pointer; font-family: var(--font-ui);
-          font-size: 13px; font-weight: 500; color: var(--text-muted); transition: all 160ms ease; }
-        .refine-btn:hover { color: var(--text); border-color: var(--border-strong, var(--text-faint)); }
-        .refine-btn[data-active="true"] { color: var(--accent-text); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: var(--accent-muted); }
-        .refine-badge { min-width: 17px; height: 17px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center;
-          font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; border-radius: var(--radius-full);
+        /* Quiet text affordance in the same editorial register as the status
+           tabs — no box. It earns amber only when filters are actually active. */
+        .refine-btn { display: inline-flex; align-items: center; gap: 7px; padding: 9px 10px; border-radius: var(--radius-md);
+          background: transparent; border: none; cursor: pointer; font-family: var(--font-ui);
+          font-size: 13px; font-weight: 500; color: var(--text-muted); transition: color 160ms ease, background 160ms ease; }
+        .refine-btn:hover { color: var(--text); background: color-mix(in oklch, var(--surface-2) 70%, transparent); }
+        .refine-btn[aria-expanded="true"] { color: var(--text); }
+        .refine-btn[data-active="true"] { color: var(--accent-text); font-weight: 550; }
+        .refine-badge { min-width: 16px; height: 16px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center;
+          font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; border-radius: var(--radius-full);
           background: var(--accent); color: var(--accent-ink); }
-        .refine-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 264px; padding: 14px;
-          background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
-          animation: fadeIn 140ms cubic-bezier(0.22,1,0.36,1); }
+        .refine-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: 268px; padding: 14px;
+          background: color-mix(in oklch, var(--surface) 96%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+          border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-md);
+          transform-origin: top right; animation: refine-in 170ms cubic-bezier(0.22,1,0.36,1); }
+        @keyframes refine-in { from { opacity: 0; transform: scale(0.97) translateY(-3px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .refine-sec-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint); margin-bottom: 4px; }
         .refine-divider { height: 1px; background: var(--border-subtle); margin: 12px 0; }
         .switch-row { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 0;
@@ -231,6 +239,9 @@ function RefineControl({
     </div>
   );
 }
+
+// Statuses the user has actively assigned — these earn a labeled pill in the list.
+const TRIAGED_STATUSES: JobStatus[] = ['shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'];
 
 function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolean; index: number; onSelect: () => void }) {
   const daysAgo = Math.floor((Date.now() - job.first_seen) / 86400000);
@@ -255,10 +266,11 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
         animationDelay: `${Math.min(index * 12, 180)}ms`,
       }}
     >
-      {/* Fit numeral — the ranking spine; warm score-ramp color carries the signal. */}
+      {/* Fit numeral — the ranking spine. Heat ramp: weak scores cool to ash,
+          strong fits glow gold with a halo (visual energy ∝ relevance). */}
       <div style={{ alignSelf: 'center' }}>
         {v
-          ? <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 600, color: scoreColor(v.score), letterSpacing: '-0.02em', lineHeight: 1 }}>{Math.round(v.score * 100)}</span>
+          ? <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 600, color: scoreColor(v.score), letterSpacing: '-0.02em', lineHeight: 1, textShadow: v.score >= 0.7 ? '0 0 14px color-mix(in oklch, var(--score-hot) 55%, transparent)' : undefined }}>{Math.round(v.score * 100)}</span>
           : <span style={{ fontSize: '12px', color: 'var(--text-faint)' }}>{job.l1_pass === 1 ? 'L1' : '—'}</span>}
       </div>
 
@@ -272,19 +284,27 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
         </div>
       </div>
 
+      {/* Default values render near-silent so non-defaults pop by contrast:
+          Remote (the norm) is faint, a real city is the signal. */}
       <div className="col-location" style={{ alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 6, fontSize: '12.5px', color: 'var(--text-muted)', minWidth: 0 }}>
         {job.remote === 1
-          ? <><Globe size={12} style={{ flexShrink: 0 }} /><span>Remote</span></>
+          ? <><Globe size={12} style={{ flexShrink: 0, color: 'var(--text-faint)', opacity: 0.7 }} /><span style={{ color: 'var(--text-faint)' }}>Remote</span></>
           : job.location
           ? <><MapPin size={12} style={{ flexShrink: 0, color: 'var(--text-faint)' }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.location}</span></>
           : <span style={{ color: 'var(--text-faint)' }}>—</span>}
       </div>
 
+      {/* "New" (or anything unrecognized, which StatusPill would render as New)
+          is the default state — a bare faint dot; named statuses keep the pill. */}
       <div style={{ alignSelf: 'center' }}>
-        <StatusPill status={job.status as JobStatus} />
+        {TRIAGED_STATUSES.includes(job.status as JobStatus)
+          ? <StatusPill status={job.status as JobStatus} />
+          : <span title="New" aria-label="Status: new" style={{ display: 'inline-flex', padding: '0 1px' }}>
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--text-faint)', opacity: 0.45 }} />
+            </span>}
       </div>
 
-      <span className="col-seen tnum" style={{ alignSelf: 'center', fontSize: '11.5px', color: 'var(--text-faint)', textAlign: 'right' }}>{seen}</span>
+      <span className="col-seen tnum" style={{ alignSelf: 'center', fontSize: '11.5px', color: daysAgo === 0 ? 'var(--accent-text)' : 'var(--text-faint)', fontWeight: daysAgo === 0 ? 600 : 400, textAlign: 'right' }}>{seen}</span>
     </div>
   );
 }
@@ -312,8 +332,9 @@ function MetaCell({ icon, label, value }: { icon: React.ReactNode; label: string
   );
 }
 
-function DetailPanel({ job, onClose, onStatusChange }: {
+function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   job: Job; onClose: () => void; onStatusChange: (s: JobStatus) => void;
+  onPrev?: () => void; onNext?: () => void;
 }) {
   const [notes, setNotes] = useState(job.notes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
@@ -375,12 +396,25 @@ function DetailPanel({ job, onClose, onStatusChange }: {
           own overflow:hidden contains the glow. zIndex keeps the header — and the
           dropdown it hosts — above the scrolling body below. */}
       <div style={{ position: 'relative', zIndex: 2, padding: '24px 22px 20px', borderBottom: '1px solid var(--border)' }}>
-        <div aria-hidden style={{ position: 'absolute', top: -120, right: -60, width: 300, height: 240, pointerEvents: 'none', background: 'radial-gradient(50% 50% at 50% 50%, color-mix(in oklch, var(--accent) 22%, transparent), transparent 70%)', animation: 'breathe 8s ease-in-out infinite' }} />
-        <button onClick={onClose} aria-label="Close details" style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, background: 'var(--surface-2)', border: '1px solid var(--border-subtle)', cursor: 'pointer', color: 'var(--text-muted)', padding: 7, borderRadius: 'var(--radius-md)', display: 'flex' }}>
-          <X size={16} />
-        </button>
+        {/* the glow carries the verdict: tinted by score heat, so an 85 breathes
+            gold and a 12 stays ashen before you read a single word */}
+        <div aria-hidden style={{ position: 'absolute', top: -120, right: -60, width: 300, height: 240, pointerEvents: 'none', background: `radial-gradient(50% 50% at 50% 50%, color-mix(in oklch, ${v ? scoreColor(v.score) : 'var(--accent)'} 24%, transparent), transparent 70%)`, animation: 'breathe 8s ease-in-out infinite' }} />
 
-        <div style={{ position: 'relative', zIndex: 1, paddingRight: 36 }}>
+        {/* triage cluster: walk the list without leaving the panel (j/k also works) */}
+        <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span aria-hidden title="Keyboard: j next · k previous" style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-faint)', letterSpacing: '0.08em', marginRight: 2 }}>j·k</span>
+          <button onClick={onPrev} disabled={!onPrev} aria-label="Previous job (k)" title="Previous (k)" className="panel-nav-btn"><ChevronUp size={15} /></button>
+          <button onClick={onNext} disabled={!onNext} aria-label="Next job (j)" title="Next (j)" className="panel-nav-btn"><ChevronDown size={15} /></button>
+          <button onClick={onClose} aria-label="Close details" className="panel-nav-btn"><X size={15} /></button>
+        </div>
+        <style>{`
+          .panel-nav-btn { display: flex; padding: 7px; background: var(--surface-2); border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md); cursor: pointer; color: var(--text-muted); transition: color 140ms ease, background 140ms ease; }
+          .panel-nav-btn:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+          .panel-nav-btn:disabled { opacity: 0.35; cursor: default; }
+        `}</style>
+
+        <div style={{ position: 'relative', zIndex: 1, paddingRight: 120 }}>
           <h2 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: '23px', fontWeight: 580, color: 'var(--text)', lineHeight: 1.16, letterSpacing: '-0.01em' }}>{job.title}</h2>
           <div style={{ fontSize: '13.5px', color: 'var(--text-muted)', marginTop: 5 }}>
             <span style={{ fontWeight: 500, color: 'var(--text)' }}>{job.company}</span>
@@ -593,6 +627,19 @@ export default function Jobs() {
 
   const hasFilters = !!(status || l1 || l2 || fit || remote || run || sourceTypeRaw || q);
 
+  // The control bar is transparent at rest (so it never dims the ambient field
+  // into a visible seam) and frosts only while actually stuck over scrolling
+  // rows. The sentinel sits just above it; when it scrolls out, the bar is stuck.
+  const [barStuck, setBarStuck] = useState(false);
+  const barSentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = barSentinel.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([entry]) => setBarStuck(!entry.isIntersecting));
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   return (
     <div className="jobs-main" style={{ position: 'relative', padding: 'var(--space-xl)', maxWidth: 1100, margin: '0 auto', marginRight: selected ? 'min(480px, 94vw)' : 'auto', transition: 'margin-right 220ms cubic-bezier(0.22,1,0.36,1)' }}>
       {/* Ambient warmth — a soft lantern glow in the top-right corner. Kept high so
@@ -618,7 +665,15 @@ export default function Jobs() {
 
       {/* Control bar: status section-nav (primary) + one Refine popover (secondary).
           Sticky so triage filters stay reachable while scrolling a long list. */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 20, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+      <div ref={barSentinel} aria-hidden style={{ height: 1, marginBottom: -1 }} />
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 20,
+        background: barStuck ? 'color-mix(in oklch, var(--bg) 85%, transparent)' : 'transparent',
+        backdropFilter: barStuck ? 'blur(14px)' : 'none',
+        WebkitBackdropFilter: barStuck ? 'blur(14px)' : 'none',
+        transition: 'background 220ms ease',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, borderBottom: '1px solid var(--border)', marginBottom: 6,
+      }}>
         <StatusNav status={status} onStatus={v => setParam('status', v)} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingBottom: 7 }}>
           {/* Run scope — set by "View matches" / the Recent-runs table on Search. */}
@@ -669,13 +724,18 @@ export default function Jobs() {
       )}
       </div>
 
-      {selected && (
-        <DetailPanel
-          job={selected}
-          onClose={() => setSelectedId(null)}
-          onStatusChange={s => handleStatusChange(selected, s)}
-        />
-      )}
+      {selected && (() => {
+        const idx = jobs.findIndex(j => j.id === selected.id);
+        return (
+          <DetailPanel
+            job={selected}
+            onClose={() => setSelectedId(null)}
+            onStatusChange={s => handleStatusChange(selected, s)}
+            onPrev={idx > 0 ? () => setSelectedId(jobs[idx - 1].id) : undefined}
+            onNext={idx >= 0 && idx < jobs.length - 1 ? () => setSelectedId(jobs[idx + 1].id) : undefined}
+          />
+        );
+      })()}
     </div>
   );
 }

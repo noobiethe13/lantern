@@ -56,10 +56,9 @@ jobs.get('/', c => {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Rank fit / L2 views by verdict score (nulls last); default chronological.
-  const orderBy = fit === '1' || l2 === '1'
-    ? 'ORDER BY (j.l2_score IS NULL), j.l2_score DESC, j.first_seen DESC'
-    : 'ORDER BY j.first_seen DESC';
+  // The UI masthead promises "ranked by fit" — honor it in every view:
+  // L2-scored first (best leading), then L1 survivors, then the rest by recency.
+  const orderBy = 'ORDER BY (j.l2_score IS NULL), j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC';
 
   const rows = db.query<Record<string, unknown>, Binding[]>(
     `SELECT j.*, s.display_name AS source_name, s.type AS source_type

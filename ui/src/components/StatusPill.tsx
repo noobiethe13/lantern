@@ -63,8 +63,8 @@ export function StatusPill({ status, interactive, onChange }: StatusPillProps) {
         onClick={() => setOpen(o => !o)}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 7,
-          fontSize: '12.5px', fontWeight: 550, color: cfg.color,
-          padding: '5px 9px 5px 11px', borderRadius: 'var(--radius-md)',
+          fontSize: '13px', fontWeight: 550, color: cfg.color,
+          padding: '6px 10px 6px 13px', borderRadius: 'var(--radius-md)',
           background: `color-mix(in oklch, ${cfg.color} 14%, transparent)`,
           border: `1px solid color-mix(in oklch, ${cfg.color} 30%, transparent)`,
           cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',

@@ -28,19 +28,21 @@ export function LanternMark({ size = 22, glow = true, animate = false }: { size?
 }
 
 /**
- * Warm light motes drifting up from the lantern — pure-CSS ambient particles for
- * the hero backdrop. Cheap (a handful of dots, transform/opacity only) and
- * disabled under prefers-reduced-motion via the global reset.
+ * Warm sparks rising from the lantern — pure-CSS ambient particles for the hero
+ * backdrop. Two nested elements per ember: the outer rises and fades (cooling as
+ * it climbs), the inner sways side-to-side and twinkles, so each spark traces an
+ * organic S-curve instead of a straight diagonal. Still cheap (transform/opacity
+ * only) and disabled under prefers-reduced-motion via the global reset.
  */
 const EMBERS = [
-  { left: '10%', size: 6, delay: 0.0, dur: 12, x: 26, o: 0.85 },
-  { left: '22%', size: 4, delay: 4.5, dur: 15, x: -20, o: 0.7 },
-  { left: '34%', size: 5, delay: 2.0, dur: 13, x: 16, o: 0.8 },
-  { left: '47%', size: 7, delay: 6.5, dur: 16, x: -28, o: 0.6 },
-  { left: '58%', size: 4, delay: 1.2, dur: 14, x: 22, o: 0.75 },
-  { left: '69%', size: 6, delay: 8.0, dur: 17, x: -14, o: 0.7 },
-  { left: '80%', size: 5, delay: 3.4, dur: 13, x: 20, o: 0.85 },
-  { left: '90%', size: 4, delay: 5.8, dur: 15, x: -22, o: 0.6 },
+  { left: '10%', size: 6, delay: 0.0, dur: 12, sway: 26, swayDur: 3.4, flickDur: 2.3, o: 0.85, hue: 'var(--ember)' },
+  { left: '22%', size: 4, delay: 4.5, dur: 15, sway: 20, swayDur: 2.7, flickDur: 3.1, o: 0.7, hue: 'var(--accent)' },
+  { left: '34%', size: 5, delay: 2.0, dur: 13, sway: 16, swayDur: 4.1, flickDur: 1.9, o: 0.8, hue: 'var(--ember)' },
+  { left: '47%', size: 7, delay: 6.5, dur: 16, sway: 30, swayDur: 3.0, flickDur: 2.7, o: 0.6, hue: 'var(--accent-2-soft)' },
+  { left: '58%', size: 4, delay: 1.2, dur: 14, sway: 22, swayDur: 2.5, flickDur: 3.4, o: 0.75, hue: 'var(--accent)' },
+  { left: '69%', size: 6, delay: 8.0, dur: 17, sway: 14, swayDur: 3.8, flickDur: 2.1, o: 0.7, hue: 'var(--ember)' },
+  { left: '80%', size: 5, delay: 3.4, dur: 13, sway: 24, swayDur: 2.9, flickDur: 2.9, o: 0.85, hue: 'var(--accent-2-soft)' },
+  { left: '90%', size: 4, delay: 5.8, dur: 15, sway: 18, swayDur: 3.5, flickDur: 2.4, o: 0.6, hue: 'var(--accent)' },
 ];
 
 export function Embers() {
@@ -51,13 +53,20 @@ export function Embers() {
           key={i}
           style={{
             position: 'absolute', bottom: 40, left: e.left,
-            width: e.size, height: e.size, borderRadius: '50%',
-            background: 'var(--ember)', boxShadow: '0 0 8px 1px var(--ember)', opacity: 0,
-            ['--ember-x' as string]: `${e.x}px`,
+            width: e.size, height: e.size, opacity: 0,
             ['--ember-o' as string]: e.o,
-            animation: `float-up ${e.dur}s ease-in-out ${e.delay}s infinite`,
+            animation: `ember-rise ${e.dur}s linear ${e.delay}s infinite`,
           }}
-        />
+        >
+          <span
+            style={{
+              display: 'block', width: '100%', height: '100%', borderRadius: '50%',
+              background: e.hue, boxShadow: `0 0 ${e.size + 3}px 1px ${e.hue}`,
+              ['--sway-x' as string]: `${e.sway}px`,
+              animation: `ember-sway ${e.swayDur}s ease-in-out ${e.delay}s infinite alternate, ember-flicker ${e.flickDur}s ease-in-out ${e.delay + 0.7}s infinite`,
+            }}
+          />
+        </span>
       ))}
     </div>
   );
@@ -80,12 +89,15 @@ function Blob({ d, fill, style }: { d: string; fill: string; style: CSSPropertie
   );
 }
 
-export function PageBackdrop() {
+export function PageBackdrop({ quiet = false }: { quiet?: boolean }) {
+  // `quiet` is for data-dense pages (jobs / settings): atmosphere behind a hero
+  // is mood, atmosphere under tabular data is a smudge. Keep one corner blob at
+  // reduced presence and drop the two that drift under the reading surface.
   return (
-    <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
+    <div aria-hidden style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0, overflow: 'hidden', mixBlendMode: 'var(--deco-blend)' as CSSProperties['mixBlendMode'], opacity: quiet ? 0.5 : 1, transition: 'opacity 600ms ease' }}>
       <Blob d={BLOB_A} fill="var(--blob-1)" style={{ top: -180, left: -120, width: 560, height: 560, filter: 'blur(48px)', animation: 'drift-a 38s ease-in-out infinite' }} />
-      <Blob d={BLOB_B} fill="var(--blob-2)" style={{ bottom: -200, left: '16%', width: 520, height: 520, filter: 'blur(54px)', transform: 'rotate(40deg)', animation: 'drift-b 46s ease-in-out infinite' }} />
-      <Blob d={BLOB_B} fill="var(--blob-1)" style={{ top: '44%', right: -80, width: 380, height: 380, filter: 'blur(44px)', transform: 'rotate(-20deg)', animation: 'drift-a 32s ease-in-out infinite reverse' }} />
+      {!quiet && <Blob d={BLOB_B} fill="var(--blob-2)" style={{ bottom: -200, left: '16%', width: 520, height: 520, filter: 'blur(54px)', transform: 'rotate(40deg)', animation: 'drift-b 46s ease-in-out infinite' }} />}
+      {!quiet && <Blob d={BLOB_B} fill="var(--blob-1)" style={{ top: '44%', right: -80, width: 380, height: 380, filter: 'blur(44px)', transform: 'rotate(-20deg)', animation: 'drift-a 32s ease-in-out infinite reverse' }} />}
     </div>
   );
 }

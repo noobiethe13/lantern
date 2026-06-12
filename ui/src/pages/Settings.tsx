@@ -1,4 +1,7 @@
-import { useState, useEffect, useCallback, type ReactNode, type CSSProperties } from 'react';
+import {
+  useState, useEffect, useCallback,
+  type ReactNode, type CSSProperties, type Dispatch, type SetStateAction,
+} from 'react';
 import {
   CheckCircle2, XCircle, Circle, Trash2, Plus,
   RefreshCw, ChevronDown, ChevronRight, Search as SearchIcon,
@@ -27,6 +30,14 @@ const TYPE_TONE: Record<SourceType, BadgeTone> = {
   greenhouse: 'success', ashby: 'blue', lever: 'warning', recruitee: 'violet',
   smartrecruiters: 'danger', workable: 'neutral', personio: 'neutral',
   remoteok: 'accent', arbeitnow: 'accent', himalayas: 'accent',
+};
+
+// Badge tone → concrete color, for the composition bar + legend (mirrors the
+// badge colors used on the roster rows so the encodings agree).
+const TONE_COLOR: Record<BadgeTone, string> = {
+  neutral: 'var(--text-muted)', accent: 'var(--accent-text)', blue: 'var(--tone-blue)',
+  violet: 'var(--tone-violet)', success: 'var(--success)', warning: 'var(--warning)',
+  danger: 'var(--danger)', dim: 'var(--text-faint)',
 };
 
 function timeAgo(ts: number | null): string {
@@ -151,28 +162,48 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
   );
 }
 
-function SourcesSection() {
-  const [sources, setSources] = useState<Source[]>([]);
-  const [loading, setLoading] = useState(true);
+// The shape of the field Lantern watches: one quiet stacked bar showing how the
+// roster splits across source types, colored to match the roster's type badges.
+function CompositionBar({ sources }: { sources: Source[] }) {
+  if (sources.length === 0) return null;
+  const groups = SOURCE_TYPE_OPTIONS
+    .map(o => ({ label: o.label, color: TONE_COLOR[TYPE_TONE[o.value]], n: sources.filter(s => s.type === o.value).length }))
+    .filter(g => g.n > 0);
+  return (
+    <div style={{ margin: '0 0 var(--space-md)' }}>
+      <div style={{ display: 'flex', gap: 2, height: 6, borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
+        {groups.map(g => (
+          <div key={g.label} title={`${g.label} · ${g.n}`} style={{ flex: g.n, minWidth: 3, background: g.color, opacity: 0.7, borderRadius: 2 }} />
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', marginTop: 8 }}>
+        {groups.map(g => (
+          <span key={g.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '11px', color: 'var(--text-faint)' }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: g.color, opacity: 0.7 }} />
+            {g.label} <span className="tnum" style={{ fontFamily: 'var(--font-mono)' }}>{g.n}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SourcesSection({ sources, loading, setSources, reload }: {
+  sources: Source[]; loading: boolean;
+  setSources: Dispatch<SetStateAction<Source[]>>; reload: () => void;
+}) {
   const [filter, setFilter] = useState('');
   const [expanded, setExpanded] = useState(false);
-
-  const load = useCallback(async () => {
-    const res = await api.sources.list();
-    setSources(res.sources); setLoading(false);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   const handleToggle = async (source: Source) => {
     const newEnabled = source.enabled !== 1;
     setSources(prev => prev.map(s => s.id === source.id ? { ...s, enabled: newEnabled ? 1 : 0 } : s));
-    await api.sources.update(source.id, { enabled: newEnabled }).catch(() => load());
+    await api.sources.update(source.id, { enabled: newEnabled }).catch(() => reload());
   };
 
   const handleDelete = async (id: number) => {
     setSources(prev => prev.filter(s => s.id !== id));
-    await api.sources.delete(id).catch(() => load());
+    await api.sources.delete(id).catch(() => reload());
   };
 
   const f = filter.trim().toLowerCase();
@@ -186,78 +217,70 @@ function SourcesSection() {
   const canExpand = sources.length > 0;
 
   return (
-    <section>
+    <div>
       <SectionHeading
         title="Sources"
         desc={sources.length === 0
           ? 'The default set of boards and aggregators loads on your first search.'
-          : `${sources.length} boards and aggregators · ${enabledCount} enabled.`}
+          : `${sources.length} boards and aggregators · ${enabledCount === sources.length ? 'all enabled' : `${enabledCount} enabled`}.`}
         action={
           canExpand ? (
-            <Button variant="outline" size="sm" onClick={() => setExpanded(e => !e)}>
-              {expanded ? <><ChevronDown size={13} /> Hide</> : <><ChevronRight size={13} /> Manage</>}
-            </Button>
+            <button className="manage-link" onClick={() => setExpanded(e => !e)} aria-expanded={expanded}>
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              {expanded ? 'Hide roster' : 'Manage roster'}
+              <style>{`
+                .manage-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 4px; background: none; border: none;
+                  cursor: pointer; font-family: var(--font-ui); font-size: 13px; font-weight: 500; color: var(--text-muted);
+                  transition: color 150ms ease; white-space: nowrap; }
+                .manage-link:hover { color: var(--text); }
+                .manage-link[aria-expanded="true"] { color: var(--accent-text); }
+              `}</style>
+            </button>
           ) : undefined
         }
       />
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
-      ) : expanded && canExpand ? (
-        <div style={{ animation: 'fadeIn 150ms ease' }}>
-          <div style={{ position: 'relative', marginBottom: 'var(--space-sm)' }}>
-            <SearchIcon size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)', pointerEvents: 'none' }} />
-            <Input placeholder="Filter sources…" value={filter} onChange={e => setFilter(e.target.value)} style={{ paddingLeft: 30, height: 34, fontSize: '12.5px' }} />
-          </div>
-          {/* contained scroll so a long roster never stretches the page */}
-          <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)' }}>
-            {grouped.length === 0 ? (
-              <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--text-faint)', fontSize: '13px' }}>
-                No sources match your filter.
+      ) : (
+        <>
+          <CompositionBar sources={sources} />
+          {expanded && canExpand && (
+            <div style={{ animation: 'fadeIn 150ms ease' }}>
+              <div style={{ position: 'relative', marginBottom: 'var(--space-sm)' }}>
+                <SearchIcon size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)', pointerEvents: 'none' }} />
+                <Input placeholder="Filter sources…" value={filter} onChange={e => setFilter(e.target.value)} style={{ paddingLeft: 30, height: 34, fontSize: '12.5px' }} />
               </div>
-            ) : (
-              grouped.map(group => (
-                <div key={group.value}>
-                  <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', padding: '7px 14px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <span style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{group.label}</span>
-                    <span className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{group.sources.length}</span>
+              {/* contained scroll so a long roster never stretches the page */}
+              <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)' }}>
+                {grouped.length === 0 ? (
+                  <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--text-faint)', fontSize: '13px' }}>
+                    No sources match your filter.
                   </div>
-                  {group.sources.map(source => (
-                    <SourceRow key={source.id} source={source} onToggle={() => handleToggle(source)} onDelete={() => handleDelete(source.id)} />
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-          <AddSourceForm onAdded={load} />
-        </div>
-      ) : null}
-    </section>
+                ) : (
+                  grouped.map(group => (
+                    <div key={group.value}>
+                      <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', justifyContent: 'space-between', padding: '7px 14px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <span style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{group.label}</span>
+                        <span className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)' }}>{group.sources.length}</span>
+                      </div>
+                      {group.sources.map(source => (
+                        <SourceRow key={source.id} source={source} onToggle={() => handleToggle(source)} onDelete={() => handleDelete(source.id)} />
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
+              <AddSourceForm onAdded={reload} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
-function LlmProviderSection() {
-  // No "test connection" here — the Health section already probes the LLM
-  // (`/api/health`), so a second button just duplicated that check.
-  return (
-    <section>
-      <SectionHeading title={<>LLM <em>provider</em></>} desc="L2 scoring and NL-to-criteria run through the Claude Code CLI." />
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: '14px', fontWeight: 550, color: 'var(--text)' }}>Claude Code</span>
-          <Badge tone="accent">Active</Badge>
-        </div>
-        <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-faint)' }}>
-          Requires the <code style={{ fontFamily: 'var(--font-mono)' }}>claude</code> CLI on your PATH.{' '}
-          <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)' }}>Install Claude Code</a>.
-        </p>
-      </div>
-    </section>
-  );
-}
-
-const HEALTH_LABELS: Record<string, string> = { db: 'Database', llm: 'LLM provider' };
+const HEALTH_LABELS: Record<string, string> = { db: 'Database', llm: 'Claude Code' };
 const HEALTH_FIX: Record<string, string> = {
   db: 'Check that data/ is writable.',
   llm: 'Ensure the claude CLI is installed and logged in.',
@@ -278,44 +301,39 @@ function HealthRow({ name, status }: { name: string; status: { ok: boolean; deta
         <div style={{ padding: '10px 14px 10px 38px', background: 'color-mix(in oklch, var(--danger) 5%, transparent)', borderBottom: '1px solid var(--border-subtle)', fontSize: '12px', color: 'var(--text-muted)', animation: 'fadeIn 150ms ease' }}>
           {status.detail && <div style={{ marginBottom: 4, color: 'var(--danger)', fontSize: '11.5px' }}>{status.detail}</div>}
           <code style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text)' }}>{HEALTH_FIX[name]}</code>
+          {name === 'llm' && (
+            <>
+              {' '}
+              <a href="https://claude.com/claude-code" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)', fontSize: '12px' }}>Install Claude Code</a>
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function HealthSection() {
-  const [health, setHealth] = useState<HealthCheck | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [checkedAt, setCheckedAt] = useState<number | null>(null);
-  const toast = useToast();
-
-  const check = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.health.check();
-      setHealth(res); setCheckedAt(Date.now());
-      if (!res.ok) toast('Some health checks failed.', 'error');
-    } catch (e) { toast(`Health check failed: ${String(e)}`, 'error'); } finally { setLoading(false); }
-  }, [toast]);
-
-  useEffect(() => { check(); }, [check]);
-
+// One section, one truth: the engine (Claude Code) and its checks. The old page
+// had an "LLM provider · Active" card AND a health row both saying the same
+// thing; install guidance now only surfaces when the check actually fails.
+function EngineSection({ health, loading, checkedAt, onRecheck }: {
+  health: HealthCheck | null; loading: boolean; checkedAt: number | null; onRecheck: () => void;
+}) {
   const entries = health ? Object.entries(health.checks) : [];
-  const ordered = ['db', 'llm'].map(k => {
+  const ordered = ['llm', 'db'].map(k => {
     const found = entries.find(([name]) => name === k);
     return found ?? [k, { ok: false, detail: 'not checked' }] as [string, { ok: boolean; detail?: string }];
-  }).concat(entries.filter(([name]) => !['db', 'llm'].includes(name)));
+  }).concat(entries.filter(([name]) => !['llm', 'db'].includes(name)));
 
   return (
-    <section>
+    <div>
       <SectionHeading
-        title="Health"
-        desc="Checks that Lantern is ready to run."
+        title="Engine"
+        desc="Claude Code scores matches and turns your searches into criteria."
         action={
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             {checkedAt && !loading && <span style={{ fontSize: '11px', color: 'var(--text-faint)' }}>Checked {new Date(checkedAt).toLocaleTimeString()}</span>}
-            <Button variant="ghost" size="sm" onClick={check} loading={loading}><RefreshCw size={12} /> Re-check</Button>
+            <Button variant="ghost" size="sm" onClick={onRecheck} loading={loading}><RefreshCw size={12} /> Re-check</Button>
           </div>
         }
       />
@@ -326,7 +344,7 @@ function HealthSection() {
           ordered.map(([name, status]) => <HealthRow key={name} name={name} status={status} />)
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -340,6 +358,7 @@ function DangerZone() {
     try { await api.admin.clearJobs(); setDone(true); setConfirming(false); } finally { setClearing(false); }
   };
 
+  // Deliberately the ONLY boxed element on the page — quarantined by contrast.
   return (
     <section>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24, padding: '16px 18px', border: '1px solid color-mix(in oklch, var(--danger) 22%, var(--border))', borderRadius: 'var(--radius-lg)' }}>
@@ -362,21 +381,69 @@ function DangerZone() {
   );
 }
 
-const sectionCard: CSSProperties = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border-subtle)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 'var(--space-xl)',
+// Editorial strip — sections sit on the page behind a hairline, no card boxes
+// (matching the Search/Jobs language).
+const strip: CSSProperties = {
+  borderTop: '1px solid var(--border-subtle)',
+  paddingTop: 'var(--space-lg)',
 };
 
 export default function Settings() {
+  const toast = useToast();
+
+  const [sources, setSources] = useState<Source[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(true);
+  const loadSources = useCallback(async () => {
+    const res = await api.sources.list();
+    setSources(res.sources); setSourcesLoading(false);
+  }, []);
+  useEffect(() => { loadSources(); }, [loadSources]);
+
+  const [health, setHealth] = useState<HealthCheck | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const checkHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const res = await api.health.check();
+      setHealth(res); setCheckedAt(Date.now());
+      if (!res.ok) toast('Some health checks failed.', 'error');
+    } catch (e) { toast(`Health check failed: ${String(e)}`, 'error'); } finally { setHealthLoading(false); }
+  }, [toast]);
+  useEffect(() => { checkHealth(); }, [checkHealth]);
+
+  // Masthead summary — the page's state in one line, before any section is read.
+  const enabledCount = sources.filter(s => s.enabled === 1).length;
+  const checks = health ? Object.values(health.checks) : [];
+  const failing = checks.filter(c => !c.ok).length;
+  const llmVersion = (health?.checks?.llm?.detail ?? '').match(/\d+(?:\.\d+)+/)?.[0];
+
   return (
-    <div style={{ padding: 'var(--space-2xl) var(--space-xl)', maxWidth: 820, margin: '0 auto' }}>
-      <h1 style={{ margin: '0 0 var(--space-xl)', fontSize: '26px', fontWeight: 580, color: 'var(--text)' }}>Settings</h1>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-lg)' }}>
-        <div style={sectionCard}><SourcesSection /></div>
-        <div style={sectionCard}><LlmProviderSection /></div>
-        <div style={sectionCard}><HealthSection /></div>
+    <div style={{ padding: 'var(--space-2xl) var(--space-xl) var(--space-3xl)', maxWidth: 820, margin: '0 auto' }}>
+      <header style={{ marginBottom: 'var(--space-xl)' }}>
+        <h1 style={{ margin: 0, fontFamily: 'var(--font-serif)', fontSize: 'clamp(28px, 3.4vw, 34px)', fontWeight: 500, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>Settings</h1>
+        {(!sourcesLoading || health) && (
+          <p style={{ margin: '10px 0 0', fontSize: '13.5px', color: 'var(--text-muted)' }}>
+            {sources.length > 0
+              ? <><span className="tnum" style={{ color: 'var(--text)' }}>{sources.length.toLocaleString()}</span> boards{enabledCount !== sources.length && <> · <span className="tnum">{enabledCount.toLocaleString()}</span> enabled</>}</>
+              : <>Boards load on your first search</>}
+            <span style={{ color: 'var(--text-faint)' }}> · Claude Code{llmVersion ? <span className="tnum"> {llmVersion}</span> : null}</span>
+            {health && (
+              <span style={{ color: failing === 0 ? 'var(--success)' : 'var(--danger)' }}>
+                {' '}· {failing === 0 ? 'all checks passing' : `${failing} check${failing === 1 ? '' : 's'} failing`}
+              </span>
+            )}
+          </p>
+        )}
+      </header>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2xl)' }}>
+        <section style={strip}>
+          <SourcesSection sources={sources} loading={sourcesLoading} setSources={setSources} reload={loadSources} />
+        </section>
+        <section style={strip}>
+          <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={checkHealth} />
+        </section>
         <DangerZone />
       </div>
     </div>
