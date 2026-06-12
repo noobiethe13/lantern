@@ -9,8 +9,9 @@ import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
 import { llm } from '../llm';
 import { LlmError } from '../llm/provider';
-import { BatchVerdictShape } from '../llm/schemas';
+import { BatchVerdictShape, BatchVerdictWithResumeShape } from '../llm/schemas';
 import { batchVerdictPrompt } from '../llm/prompts';
+import { activeResumeText } from '../routes/resume';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 
@@ -377,7 +378,13 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
     return;
   }
 
-  const l2Start = `L2 — scoring ${jobs.length} jobs via ${llm.providerName}...`;
+  // Opt-in resume-aware grading: when a master resume is saved + enabled, every
+  // verdict carries background_fit/gaps (stricter shape). Resolved once per pass
+  // so all batches in a run grade against the same text.
+  const resumeText = activeResumeText();
+  const verdictShape = resumeText ? BatchVerdictWithResumeShape : BatchVerdictShape;
+
+  const l2Start = `L2 — scoring ${jobs.length} jobs via ${llm.providerName}${resumeText ? ' (resume-aware)' : ''}...`;
   console.log(`\n${l2Start}`);
   bus.emit({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
 
@@ -406,12 +413,13 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
         location: j.location ?? '',
         jdText: j.jd_text ?? '',
       })),
+      resumeText ?? undefined,
     );
 
     try {
       const { verdicts } = await llm.call(
         { task: 'verdict', prompt, timeoutMs: L2_BATCH_TIMEOUT_MS },
-        BatchVerdictShape,
+        verdictShape,
       );
       const byId = new Map(verdicts.map((v) => [v.job_id, v]));
       consecutiveFailures = 0;

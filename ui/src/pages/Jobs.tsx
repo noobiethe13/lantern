@@ -362,6 +362,7 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   // Drop empty/whitespace reasons so a verdict with no real reason text doesn't
   // render an empty "why it matched" section.
   const reasons = (v?.reasons ?? []).filter(r => r.trim().length > 0);
+  const gaps = (v?.gaps ?? []).filter(g => g.trim().length > 0);
 
   // Build the meta strip cells conditionally so empty fields don't leave gaps.
   const cells: { icon: React.ReactNode; label: string; value: React.ReactNode }[] = [
@@ -462,6 +463,33 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Resume fit — present only when the job was scored with resume-aware
+            grading on. A quieter sibling of the headline criteria score: how the
+            job matches *you*, with the gaps named. */}
+        {v?.background_fit != null && (
+          <div>
+            <SectionLabel>Resume fit</SectionLabel>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: gaps.length > 0 ? 12 : 0 }}>
+              <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 600, color: scoreColor(v.background_fit), letterSpacing: '-0.02em', lineHeight: 1 }}>
+                {Math.round(v.background_fit * 100)}<span style={{ fontSize: '12px', marginLeft: 1 }}>%</span>
+              </span>
+              <div style={{ flex: 1, position: 'relative', height: 5, borderRadius: 'var(--radius-full)', background: 'var(--surface-2)', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: `${Math.round(v.background_fit * 100)}%`, background: scoreColor(v.background_fit), borderRadius: 'var(--radius-full)', transition: 'width 600ms cubic-bezier(0.22,1,0.36,1)' }} />
+              </div>
+            </div>
+            {gaps.length > 0 && (
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                {gaps.map((g, i) => (
+                  <li key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
+                    <span aria-hidden style={{ color: 'var(--warning)', fontFamily: 'var(--font-mono)', fontSize: '12px', flexShrink: 0, marginTop: 1 }}>–</span>
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.55 }}>{g}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

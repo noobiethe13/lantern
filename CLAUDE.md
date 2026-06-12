@@ -210,6 +210,14 @@ internal types — convert at the boundary in src/api/client.ts" -->
   (the `_usd` suffix is legacy) are tagged by `salary_currency`. L1's salary
   floor only fires when the job and criteria currencies are both known and
   equal — mismatched/unknown currency passes and defers to L2 (no FX in lantern).
+- `fetchJson`/`fetchText` take `timeoutMs` and `retries` in `FetchOpts` (internal
+  retry loop: network errors + 429 + 5xx, `Retry-After`-aware; SSRF guard
+  rejections never retried). Adapters needing resilience use these knobs — don't
+  add a custom retry wrapper. Non-OK responses throw `HttpStatusError` carrying
+  `status` and a ≤300-char body snippet.
+- Liveness strips `nav, header, footer` before collecting apply controls AND body
+  text (nav "Apply now" links were a false-active vector). Thin content on a SPA
+  host (`SPA_HOSTS` in `core/liveness.ts`) classifies `uncertain`, never closed.
 
 ## Architectural notes — work with these, not against them
 
