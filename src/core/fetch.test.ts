@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'bun:test';
-import { assertSafeHttpUrl, assertValidSlug } from './fetch';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { assertSafeHttpUrl, assertValidSlug, fetchJson, fetchText, HttpStatusError } from './fetch';
 
 describe('assertSafeHttpUrl — private/loopback host blocking', () => {
   test('rejects localhost', () => {
@@ -140,5 +140,106 @@ describe('assertValidSlug', () => {
 
   test('accepts slugs at the 64-char boundary', () => {
     expect(() => assertValidSlug('a'.repeat(64))).not.toThrow();
+  });
+});
+
+describe('fetchJson / fetchText — retries and error snippets', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  // SSRF guard runs before fetch, so stubs must sit behind a public-looking URL.
+  const URL_ = 'https://api.example.com/jobs';
+  // Keeps backoff sub-millisecond so retry tests don't slow the suite.
+  const FAST = { retryBaseDelayMs: 0 };
+
+  function stubFetch(impl: (calls: number) => Response | Error): { calls: () => number } {
+    let n = 0;
+    globalThis.fetch = (async () => {
+      n++;
+      const out = impl(n);
+      if (out instanceof Error) throw out;
+      return out;
+    }) as unknown as typeof fetch;
+    return { calls: () => n };
+  }
+
+  test('returns parsed JSON on success', async () => {
+    stubFetch(() => new Response('{"ok":true}', { status: 200 }));
+    expect(await fetchJson(URL_)).toEqual({ ok: true });
+  });
+
+  test('non-OK error includes status and a body snippet', async () => {
+    stubFetch(() => new Response('<html>Service under maintenance, try later</html>', { status: 503 }));
+    await expect(fetchJson(URL_)).rejects.toThrow(/HTTP 503 — .*Service under maintenance/);
+  });
+
+  test('body snippet is capped at 300 chars and whitespace-collapsed', async () => {
+    stubFetch(() => new Response('a  b\n\nc' + 'x'.repeat(1000), { status: 500 }));
+    try {
+      await fetchJson(URL_);
+      throw new Error('expected rejection');
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toStartWith('HTTP 500 — a b c');
+      expect(msg.length).toBeLessThanOrEqual('HTTP 500 — '.length + 300);
+    }
+  });
+
+  test('no retries by default', async () => {
+    const stub = stubFetch(() => new Response('boom', { status: 500 }));
+    await expect(fetchJson(URL_)).rejects.toThrow(/HTTP 500/);
+    expect(stub.calls()).toBe(1);
+  });
+
+  test('retries 5xx then succeeds', async () => {
+    const stub = stubFetch(n =>
+      n < 3 ? new Response('flaky', { status: 502 }) : new Response('{"ok":1}', { status: 200 }),
+    );
+    expect(await fetchJson(URL_, { retries: 2, ...FAST })).toEqual({ ok: 1 });
+    expect(stub.calls()).toBe(3);
+  });
+
+  test('retries 429 (Retry-After honored as a delay, not a blocker)', async () => {
+    const stub = stubFetch(n =>
+      n === 1
+        ? new Response('rate limited', { status: 429, headers: { 'Retry-After': '0' } })
+        : new Response('done', { status: 200 }),
+    );
+    expect(await fetchText(URL_, { retries: 1, ...FAST })).toBe('done');
+    expect(stub.calls()).toBe(2);
+  });
+
+  test('retries network-level failures', async () => {
+    const stub = stubFetch(n =>
+      n === 1 ? new Error('connection reset') : new Response('ok', { status: 200 }),
+    );
+    expect(await fetchText(URL_, { retries: 1, ...FAST })).toBe('ok');
+    expect(stub.calls()).toBe(2);
+  });
+
+  test('does NOT retry permanent 4xx', async () => {
+    const stub = stubFetch(() => new Response('nope', { status: 404 }));
+    await expect(fetchJson(URL_, { retries: 3, ...FAST })).rejects.toThrow(/HTTP 404/);
+    expect(stub.calls()).toBe(1);
+  });
+
+  test('exhausts retries and surfaces the last error with status', async () => {
+    const stub = stubFetch(() => new Response('still down', { status: 503 }));
+    try {
+      await fetchJson(URL_, { retries: 2, ...FAST });
+      throw new Error('expected rejection');
+    } catch (err) {
+      expect(err).toBeInstanceOf(HttpStatusError);
+      expect((err as HttpStatusError).status).toBe(503);
+    }
+    expect(stub.calls()).toBe(3);
+  });
+
+  test('SSRF guard rejection is never retried', async () => {
+    const stub = stubFetch(() => new Response('ok', { status: 200 }));
+    await expect(fetchJson('http://127.0.0.1/x', { retries: 3, ...FAST })).rejects.toThrow(/private\/loopback/);
+    expect(stub.calls()).toBe(0);
   });
 });

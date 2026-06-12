@@ -30,4 +30,49 @@ describe('parseLever', () => {
   test('returns [] for non-array input', () => {
     expect(parseLever({}, 'Acme')).toEqual([]);
   });
+
+  test('maps annual salaryRange to native-currency fields', () => {
+    const json = [{
+      id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
+      salaryRange: { min: 120000, max: 150000, currency: 'usd', interval: 'per-year-salary' },
+    }];
+    expect(parseLever(json, 'Acme')[0]).toMatchObject({
+      salary_min_usd: 120000, salary_max_usd: 150000, salary_currency: 'USD',
+    });
+  });
+
+  test('treats missing interval as annual', () => {
+    const json = [{
+      id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
+      salaryRange: { min: 80000, max: 95000, currency: 'EUR' },
+    }];
+    expect(parseLever(json, 'Acme')[0]).toMatchObject({
+      salary_min_usd: 80000, salary_max_usd: 95000, salary_currency: 'EUR',
+    });
+  });
+
+  test('skips non-annual intervals (never compare hourly to an annual floor)', () => {
+    const json = [{
+      id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
+      salaryRange: { min: 40, max: 60, currency: 'USD', interval: 'per-hour-wage' },
+    }];
+    expect(parseLever(json, 'Acme')[0]).toMatchObject({
+      salary_min_usd: null, salary_max_usd: null, salary_currency: null,
+    });
+  });
+
+  test('nulls when salaryRange absent or malformed', () => {
+    const absent = [{ id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1' }];
+    expect(parseLever(absent, 'Acme')[0]).toMatchObject({
+      salary_min_usd: null, salary_max_usd: null, salary_currency: null,
+    });
+
+    const malformed = [{
+      id: '2', text: 'Y', hostedUrl: 'https://jobs.lever.co/acme/2',
+      salaryRange: { currency: 'USD' },
+    }];
+    expect(parseLever(malformed, 'Acme')[0]).toMatchObject({
+      salary_min_usd: null, salary_max_usd: null, salary_currency: null,
+    });
+  });
 });

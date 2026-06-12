@@ -74,7 +74,13 @@ export class AshbyAdapter implements SourceAdapter {
     const apiUrl = `https://api.ashbyhq.com/posting-api/job-board/${identifier}?includeCompensation=true`;
     ctx.emitProgress(`Fetching ${display_name} (Ashby)…`);
 
-    const json = await fetchJson(apiUrl, { allowedHosts: ASHBY_ALLOWED_HOSTS });
+    // Ashby's posting API routinely takes >10 s to respond cold and aborts at
+    // the default timeout — give it 30 s and a couple of retries.
+    const json = await fetchJson(apiUrl, {
+      allowedHosts: ASHBY_ALLOWED_HOSTS,
+      timeoutMs: 30_000,
+      retries: 2,
+    });
     const jobs = parseAshby(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

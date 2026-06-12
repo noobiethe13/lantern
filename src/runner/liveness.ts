@@ -32,6 +32,10 @@ async function fetchLiveness(url: string): Promise<LivenessInput | null> {
     const finalUrl = res.url ?? url;
     const bodyText = await res.text();
     const $ = cheerioLoad(bodyText);
+    // Site chrome contains links like "Apply now" pointing at the careers
+    // index, not this posting — a dead job would classify as active off its
+    // own nav. Strip chrome before collecting controls and body text.
+    $('nav, header, footer').remove();
     const applyControls: string[] = [];
     $('a, button').each((_, el) => {
       const text = $(el).text().trim();
