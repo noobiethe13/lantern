@@ -275,6 +275,8 @@ export async function runScan(query?: string): Promise<number> {
           sourceId: source.id,
           config,
           keywords: criteria.title?.positive ?? [],
+          locations: criteria.location?.allowed ?? [],
+          remoteRequired: criteria.location?.remote_required ?? false,
           emitProgress: (msg: string, _n?: number) => {
             console.log(`  ${msg}`);
             bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });

@@ -26,6 +26,20 @@ const APPLY_RX = [
 ];
 const MIN_CONTENT = 300;
 
+// Hosts that render job pages client-side: a plain fetch returns a near-empty
+// JS shell, so thin content there proves nothing about the posting's state.
+// Grow this list as more SPA boards are observed.
+const SPA_HOSTS = ['ashbyhq.com', 'apply.workable.com'];
+
+function isSpaHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return SPA_HOSTS.some(h => host === h || host.endsWith('.' + h));
+  } catch {
+    return false;
+  }
+}
+
 export interface LivenessInput {
   status: number;
   finalUrl: string;
@@ -51,8 +65,11 @@ export function classifyLiveness(i: LivenessInput): LivenessResult {
   const list = LISTING_PAGE.find(p => p.test(i.bodyText));
   if (list) return { result: 'expired', reason: `listing redirect ${list.source}` };
 
-  if (i.bodyText.trim().length < MIN_CONTENT)
+  if (i.bodyText.trim().length < MIN_CONTENT) {
+    if (isSpaHost(i.finalUrl))
+      return { result: 'uncertain', reason: 'thin content on client-rendered host' };
     return { result: 'expired', reason: 'insufficient content' };
+  }
 
   return { result: 'uncertain', reason: 'no apply control found' };
 }

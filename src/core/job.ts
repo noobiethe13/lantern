@@ -25,6 +25,12 @@ export interface SourceContext {
    *  aggregator adapters use these to drive their query; per-company board
    *  adapters ignore them. */
   keywords?: string[];
+  /** Allowed locations from the active criteria. Aggregators whose API takes
+   *  a location parameter use these to scope the query; per-company board
+   *  adapters ignore them (L1 still applies the location rules either way). */
+  locations?: string[];
+  /** Whether the active criteria requires remote roles. */
+  remoteRequired?: boolean;
   emitProgress: (msg: string, n?: number) => void;
   abortSignal: AbortSignal;
 }
