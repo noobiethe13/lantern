@@ -16,6 +16,7 @@
     "@fontsource-variable/hanken-grotesk": "5.2.8",
     "@fontsource-variable/source-serif-4": "5.2.9",
     "@fontsource-variable/spline-sans-mono": "5.2.8",
+    "@huggingface/transformers": "4.2.0",
     "cheerio": "^1.0.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",

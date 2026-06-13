@@ -13,6 +13,8 @@ import { BatchVerdictShape, BatchVerdictWithResumeShape } from '../llm/schemas';
 import { batchVerdictPrompt } from '../llm/prompts';
 import { activeResumeText } from '../routes/resume';
 import { applyLegitimacyPass } from './legitimacy';
+import { prerankSurvivors } from './preranker';
+import { criteriaToQueryText } from '../core/embed';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 
@@ -40,6 +42,9 @@ export interface L2JobRow {
   company: string;
   location: string | null;
   jd_text: string | null;
+  // Cached sentence embedding (raw Float32 BLOB) when present, for the L1.5
+  // pre-ranker. bun:sqlite returns a BLOB as a Uint8Array.
+  embedding: Uint8Array | null;
 }
 
 // Stale lock window — if a row in scan_locks is older than this, assume the
@@ -368,13 +373,19 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
   // Scope to jobs this run surfaced (upsertJob stamped last_run_id = runId on
   // every job it touched). Keeps L2 from re-scoring out-of-scope jobs from
   // earlier searches and aligns with the scope-to-current-search model.
-  const jobs = db
+  const survivors = db
     .query<L2JobRow, [number]>(
-      `SELECT id, title, company, location, jd_text
+      `SELECT id, title, company, location, jd_text, embedding
        FROM jobs
        WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND last_run_id = ?`
     )
     .all(runId);
+
+  // L1.5: order survivors most-relevant-first so the sequential L2 pass scores
+  // the best jobs earliest (results stream best-first). Reorder only, never drops;
+  // no-ops when the embedding feature is off.
+  const queryText = criteriaToQueryText(yaml.load(criteriaYaml) as Criteria);
+  const jobs = await prerankSurvivors(survivors, queryText);
 
   if (jobs.length === 0) {
     console.log('L2: no pending jobs');

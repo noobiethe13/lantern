@@ -9,6 +9,7 @@ import { attachments } from './routes/attachments';
 import { admin } from './routes/admin';
 import { llmSettings } from './routes/llm-settings';
 import { resumeSettings } from './routes/resume';
+import { embeddingSettings } from './routes/embeddings';
 
 // db import in routes triggers runMigrations via client.ts singleton
 
@@ -26,6 +27,7 @@ app.route('/api/attachments', attachments);
 app.route('/api/admin', admin);
 app.route('/api/settings/llm', llmSettings);
 app.route('/api/settings/resume', resumeSettings);
+app.route('/api/settings/embeddings', embeddingSettings);
 
 // Serve the built Vite SPA — static files first, then fall through to index.html
 app.use('/*', serveStatic({ root: './ui/dist' }));

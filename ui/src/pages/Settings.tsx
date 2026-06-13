@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import {
   api, type Source, type SourceType, type HealthCheck, type ResumeSettings,
+  type EmbeddingSettings,
 } from '@/lib/api';
 import { Button, Input, Badge, Spinner, Textarea, useToast } from '@/components/ui';
 
@@ -429,6 +430,66 @@ function ResumeSection() {
   );
 }
 
+function EmbeddingSection() {
+  const toast = useToast();
+  const [saved, setSaved] = useState<EmbeddingSettings | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.embeddings.get().then(res => {
+      setSaved(res.settings);
+      setEnabled(res.settings.enabled);
+    }).catch(() => setSaved({ enabled: true }));
+  }, []);
+
+  const dirty = saved !== null && enabled !== saved.enabled;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.embeddings.save({ enabled });
+      setSaved(res.settings);
+      toast(enabled
+        ? 'Semantic ranking on — the model downloads once on your next search.'
+        : 'Semantic ranking off.', 'success');
+    } catch (e) {
+      toast(`Could not save: ${String(e)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (saved === null) {
+    return (
+      <div>
+        <SectionHeading title="Semantic ranking" desc="Order the best matches first." />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeading
+        title="Semantic ranking"
+        desc="Use a small on-device model to order each search's survivors so the best matches are graded first. Runs locally — a ~25MB model downloads once. Turning this off skips the download entirely."
+        action={
+          <button onClick={() => setEnabled(v => !v)} aria-pressed={enabled} style={{ background: enabled ? 'var(--accent-muted)' : 'var(--surface-2)', color: enabled ? 'var(--accent-text)' : 'var(--text-faint)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 12px', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 150ms ease', whiteSpace: 'nowrap' }}>
+            {enabled ? 'On' : 'Off'}
+          </button>
+        }
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {dirty && <span style={{ fontSize: '11.5px', color: 'var(--warning)' }}>Unsaved changes</span>}
+          <Button size="sm" onClick={handleSave} loading={saving} disabled={!dirty}>Save</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const HEALTH_LABELS: Record<string, string> = { db: 'Database', llm: 'Claude Code' };
 const HEALTH_FIX: Record<string, string> = {
   db: 'Check that data/ is writable.',
@@ -592,6 +653,9 @@ export default function Settings() {
         </section>
         <section style={strip}>
           <ResumeSection />
+        </section>
+        <section style={strip}>
+          <EmbeddingSection />
         </section>
         <section style={strip}>
           <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={checkHealth} />

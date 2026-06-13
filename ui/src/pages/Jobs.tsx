@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
-  ChevronUp, ChevronDown, ShieldAlert,
+  ChevronUp, ChevronDown, ShieldAlert, Sparkles,
 } from 'lucide-react';
-import { api, formatMoney, type Job, type JobStatus, type Legitimacy } from '@/lib/api';
+import { api, formatMoney, type Job, type JobStatus, type Legitimacy, type SimilarJob } from '@/lib/api';
 import { Textarea, Spinner } from '@/components/ui';
 import { StatusPill } from '@/components/StatusPill';
 import { scoreColor } from '@/components/score';
@@ -362,9 +362,19 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   const [notes, setNotes] = useState(job.notes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
   const [showFullJd, setShowFullJd] = useState(false);
+  const [similar, setSimilar] = useState<SimilarJob[]>([]);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => { setNotes(job.notes ?? ''); setShowFullJd(false); }, [job.id, job.notes]);
+
+  // Nearest-neighbour jobs by embedding. Best-effort: a stale/disabled embedding
+  // store just yields an empty list, and the section hides itself.
+  useEffect(() => {
+    let live = true;
+    setSimilar([]);
+    api.jobs.similar(job.id).then(res => { if (live) setSimilar(res.jobs); }).catch(() => {});
+    return () => { live = false; };
+  }, [job.id]);
 
   const handleNotes = (val: string) => {
     setNotes(val);
@@ -583,6 +593,30 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
             <p style={{ fontSize: '12.5px', color: 'var(--text-faint)', fontStyle: 'italic', margin: 0 }}>No description captured.</p>
           )}
         </div>
+
+        {/* Similar jobs — nearest neighbours by local embedding. A "more like
+            this" triage move; each opens its posting directly. Hidden when the
+            store has no embedded neighbours yet. */}
+        {similar.length > 0 && (
+          <div>
+            <SectionLabel><Sparkles size={11} style={{ marginRight: 5, verticalAlign: '-1px' }} />Similar jobs</SectionLabel>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+              {similar.map((s, i) => (
+                <li key={s.id} style={{ borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', textDecoration: 'none' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</div>
+                      <div style={{ fontSize: '11.5px', color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.company}{s.source_name ? ` · ${s.source_name}` : ''}</div>
+                    </div>
+                    <span className="tnum" title="Similarity" style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0 }}>{Math.round(s.similarity * 100)}%</span>
+                    <ExternalLink size={12} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div style={{ fontSize: '11px', color: 'var(--text-faint)' }}>
           First seen {new Date(job.first_seen).toLocaleDateString()}
