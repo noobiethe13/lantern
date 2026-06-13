@@ -47,6 +47,16 @@ export function runMigrations(db: Database): void {
   if (!jobsCols.includes('company_norm')) {
     db.run('ALTER TABLE jobs ADD COLUMN company_norm TEXT');
   }
+
+  // legitimacy + legitimacy_reasons: ghost-job signal written by the legitimacy
+  // pass (runner/legitimacy.ts). Pre-existing rows stay NULL until a run
+  // re-surfaces them.
+  if (!jobsCols.includes('legitimacy')) {
+    db.run('ALTER TABLE jobs ADD COLUMN legitimacy TEXT');
+  }
+  if (!jobsCols.includes('legitimacy_reasons')) {
+    db.run('ALTER TABLE jobs ADD COLUMN legitimacy_reasons TEXT');
+  }
   const stale = db
     .query<{ id: number; company: string }, []>(
       'SELECT id, company FROM jobs WHERE company_norm IS NULL'

@@ -1,6 +1,7 @@
 import { load as cheerioLoad } from 'cheerio';
 import { db } from '../db/client';
 import { classifyLiveness, type LivenessInput } from '../core/liveness';
+import { recomputeLegitimacy } from './legitimacy';
 import { getScanningState } from './scan';
 
 const FETCH_TIMEOUT_MS = 10_000;
@@ -79,6 +80,8 @@ export async function runLivenessCheck(): Promise<LivenessSummary> {
       'UPDATE jobs SET liveness = ?, liveness_checked_at = ? WHERE id = ?',
       [result, now, job.id],
     );
+    // Liveness is a legitimacy input — refresh the job's ghost-job signal.
+    recomputeLegitimacy(job.id);
 
     summary.checked++;
     summary[result]++;

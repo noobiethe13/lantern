@@ -12,6 +12,7 @@ import { LlmError } from '../llm/provider';
 import { BatchVerdictShape, BatchVerdictWithResumeShape } from '../llm/schemas';
 import { batchVerdictPrompt } from '../llm/prompts';
 import { activeResumeText } from '../routes/resume';
+import { applyLegitimacyPass } from './legitimacy';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 
@@ -492,6 +493,10 @@ export async function runFull(query?: string): Promise<number> {
   }
   try {
     const runId = await runScan(query);
+    // Deterministic legitimacy (ghost-job) pass — zero LLM cost, so it runs
+    // before L2 and the badges are visible while L2 is still scoring.
+    const scored = applyLegitimacyPass(runId);
+    console.log(`Legitimacy: scored ${scored} jobs`);
     const criteriaYaml = loadCriteriaRaw();
     await runL2Pass(runId, criteriaYaml);
     // The run is complete only now (after L2). Covers all runL2Pass exit paths
