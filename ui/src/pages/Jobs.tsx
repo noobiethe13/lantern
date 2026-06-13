@@ -2,13 +2,19 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, ShieldAlert,
 } from 'lucide-react';
-import { api, formatMoney, type Job, type JobStatus } from '@/lib/api';
+import { api, formatMoney, type Job, type JobStatus, type Legitimacy } from '@/lib/api';
 import { Textarea, Spinner } from '@/components/ui';
 import { StatusPill } from '@/components/StatusPill';
 import { scoreColor } from '@/components/score';
 import { EmptyLantern } from '@/components/brand';
+
+// Ghost-job signal styling. 'high' renders nothing in the list — only postings
+// with actual red flags earn ink (signal, not accusation).
+function legitimacyColor(band: Legitimacy): string {
+  return band === 'suspicious' ? 'var(--danger)' : 'var(--warning)';
+}
 
 function fitLabel(score: number): string {
   return score >= 0.8 ? 'Strong match' : score >= 0.6 ? 'Good match' : score >= 0.4 ? 'Fair match' : 'Weak match';
@@ -275,8 +281,22 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
       </div>
 
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: '14.5px', fontWeight: 560, color: 'var(--text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {job.title}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span style={{ fontSize: '14.5px', fontWeight: 560, color: 'var(--text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {job.title}
+          </span>
+          {(job.legitimacy === 'caution' || job.legitimacy === 'suspicious') && (() => {
+            const flags = (job.legitimacy_reasons ?? []).filter(r => r.kind === 'flag').map(r => r.note);
+            return (
+              <span
+                title={flags.join(' · ')}
+                aria-label={`Ghost-listing signals: ${flags.join(', ')}`}
+                style={{ display: 'inline-flex', flexShrink: 0, color: legitimacyColor(job.legitimacy as Legitimacy) }}
+              >
+                <ShieldAlert size={13} />
+              </span>
+            );
+          })()}
         </div>
         <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.company}
@@ -363,6 +383,7 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   // render an empty "why it matched" section.
   const reasons = (v?.reasons ?? []).filter(r => r.trim().length > 0);
   const gaps = (v?.gaps ?? []).filter(g => g.trim().length > 0);
+  const legitimacyReasons = (job.legitimacy_reasons ?? []).filter(r => r.note.trim().length > 0);
 
   // Build the meta strip cells conditionally so empty fields don't leave gaps.
   const cells: { icon: React.ReactNode; label: string; value: React.ReactNode }[] = [
@@ -431,6 +452,11 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
 
         <div style={{ position: 'relative', zIndex: 1, marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <StatusPill status={job.status as JobStatus} interactive onChange={onStatusChange} />
+          {(job.legitimacy === 'caution' || job.legitimacy === 'suspicious') && (
+            <span style={{ fontSize: '11.5px', fontWeight: 500, color: legitimacyColor(job.legitimacy), display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 'var(--radius-full)', background: `color-mix(in oklch, ${legitimacyColor(job.legitimacy)} 14%, transparent)` }}>
+              <ShieldAlert size={11} /> {job.legitimacy === 'suspicious' ? 'Possible ghost listing' : 'Staleness signals'}
+            </span>
+          )}
           {v?.remote_confirmed && (
             <span style={{ fontSize: '11.5px', fontWeight: 500, color: 'var(--tone-blue)', display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 'var(--radius-full)', background: 'color-mix(in oklch, var(--tone-blue) 14%, transparent)' }}>
               <Globe size={11} /> Remote confirmed
@@ -489,6 +515,29 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
                   </li>
                 ))}
               </ul>
+            )}
+          </div>
+        )}
+
+        {/* Posting legitimacy — deterministic ghost-job signals from run history,
+            posting age, JD quality and liveness. 'high' means "no red flags
+            found", never "verified real", so the copy stays in that register. */}
+        {job.legitimacy && (
+          <div>
+            <SectionLabel>Posting legitimacy</SectionLabel>
+            {legitimacyReasons.length > 0 ? (
+              <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                {legitimacyReasons.map((r, i) => (
+                  <li key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
+                    <span aria-hidden style={{ color: r.kind === 'positive' ? 'var(--accent-text)' : legitimacyColor(job.legitimacy === 'high' ? 'caution' : job.legitimacy!), fontFamily: 'var(--font-mono)', fontSize: '12px', flexShrink: 0, marginTop: 1 }}>
+                      {r.kind === 'positive' ? '+' : '!'}
+                    </span>
+                    <span style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.55 }}>{r.note}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ fontSize: '12.5px', color: 'var(--text-faint)', margin: 0 }}>No red flags found.</p>
             )}
           </div>
         )}

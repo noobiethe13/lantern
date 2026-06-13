@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   -- search via this column (see runScan upsertJob).
   last_run_id          INTEGER,
   duplicate_urls       TEXT,
+  -- deterministic ghost-job signal (high or caution or suspicious) plus a JSON
+  -- array of human-readable reasons. Written by the legitimacy pass in
+  -- runner/legitimacy.ts, recomputed after liveness checks. NULL until a run
+  -- scores the job.
+  legitimacy           TEXT,
+  legitimacy_reasons   TEXT,
   status               TEXT NOT NULL DEFAULT 'new'
                        CHECK (status IN ('new','shortlist','applied','interview',
                                           'offer','rejected','hidden')),

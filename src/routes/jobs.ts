@@ -31,6 +31,14 @@ jobs.get('/', c => {
     }
   }
   if (l1 === '1') conditions.push('j.l1_pass = 1');
+  const legitimacy = c.req.query('legitimacy');
+  if (legitimacy) {
+    const bands = legitimacy.split(',').filter(b => ['high', 'caution', 'suspicious'].includes(b));
+    if (bands.length > 0) {
+      conditions.push(`j.legitimacy IN (${bands.map(() => '?').join(',')})`);
+      params.push(...bands);
+    }
+  }
   if (l2 === '1') conditions.push('j.l2_verdict_json IS NOT NULL');
   if (fit === '1') conditions.push('j.l2_fit = 1');
   if (remote === '1') conditions.push('j.remote = 1');
@@ -123,12 +131,13 @@ jobs.post('/liveness', async c => {
 
 function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
   // company_norm is an internal dedup prefilter column; drop it from the API.
-  const { l2_verdict_json, l1_reasons, duplicate_urls, company_norm, ...rest } = row;
+  const { l2_verdict_json, l1_reasons, duplicate_urls, company_norm, legitimacy_reasons, ...rest } = row;
   void company_norm;
   return {
     ...rest,
     l2_verdict: l2_verdict_json ? JSON.parse(l2_verdict_json as string) : null,
     l1_reasons: l1_reasons ? JSON.parse(l1_reasons as string) : null,
     duplicate_urls: duplicate_urls ? JSON.parse(duplicate_urls as string) : null,
+    legitimacy_reasons: legitimacy_reasons ? JSON.parse(legitimacy_reasons as string) : null,
   };
 }

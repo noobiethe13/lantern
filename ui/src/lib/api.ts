@@ -27,6 +27,15 @@ export type JobStatus =
 
 export type Liveness = 'active' | 'expired' | 'uncertain' | 'unchecked';
 
+// Deterministic ghost-job signal. 'high' means "no red flags found",
+// never "verified real" — phrase UI copy accordingly.
+export type Legitimacy = 'high' | 'caution' | 'suspicious';
+
+export interface LegitimacyReason {
+  note: string;
+  kind: 'flag' | 'positive';
+}
+
 export interface Verdict {
   fit: boolean;
   score: number;
@@ -64,6 +73,8 @@ export interface Job {
   l1_pass: number;
   l1_reasons: string[] | null;
   l2_verdict: Verdict | null;
+  legitimacy: Legitimacy | null;
+  legitimacy_reasons: LegitimacyReason[] | null;
   duplicate_urls: string[] | null;
   status: JobStatus;
   applied_at: number | null;
