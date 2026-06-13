@@ -115,6 +115,13 @@ export function runMigrations(db: Database): void {
   if (!jobsCols.includes('legitimacy_reasons')) {
     db.run('ALTER TABLE jobs ADD COLUMN legitimacy_reasons TEXT');
   }
+
+  // embedding: raw Float32 BLOB sentence embedding for the local semantic
+  // pre-ranker. Pre-existing rows stay NULL until a run re-embeds them. No index
+  // (a BLOB read by id, not queried).
+  if (!jobsCols.includes('embedding')) {
+    db.run('ALTER TABLE jobs ADD COLUMN embedding BLOB');
+  }
   const stale = db
     .query<{ id: number; company: string }, []>(
       'SELECT id, company FROM jobs WHERE company_norm IS NULL'

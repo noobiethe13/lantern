@@ -175,6 +175,13 @@ export interface ResumeSettings {
   text: string;
 }
 
+// Local semantic pre-ranker toggle. When on, an on-device embedding model
+// (~25MB, downloaded once) orders L1 survivors so the best matches are scored
+// first. Off skips the model entirely.
+export interface EmbeddingSettings {
+  enabled: boolean;
+}
+
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -288,6 +295,15 @@ export const api = {
       if (!res.ok) throw new ApiError(res.status, body.error ?? res.statusText);
       return body as { text: string };
     },
+  },
+
+  embeddings: {
+    get: () => request<{ settings: EmbeddingSettings }>('/settings/embeddings'),
+    save: (settings: EmbeddingSettings) =>
+      request<{ ok: boolean; settings: EmbeddingSettings }>('/settings/embeddings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
   },
 
   attachments: {

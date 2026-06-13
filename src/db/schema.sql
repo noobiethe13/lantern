@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   -- scores the job.
   legitimacy           TEXT,
   legitimacy_reasons   TEXT,
+  -- L2-normalized 384-d sentence embedding (all-MiniLM-L6-v2) of the job text,
+  -- stored as a raw Float32 BLOB. Powers the local semantic pre-ranker. NULL
+  -- until embedded (or when the embedding feature is disabled). No index — it is
+  -- read by id alongside L2 survivors, not queried.
+  embedding            BLOB,
   status               TEXT NOT NULL DEFAULT 'new'
                        CHECK (status IN ('new','shortlist','applied','interview',
                                           'offer','rejected','hidden')),
