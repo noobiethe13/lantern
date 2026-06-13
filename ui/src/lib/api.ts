@@ -81,6 +81,10 @@ export interface Job {
   notes: string | null;
 }
 
+// A job returned by the nearest-neighbour endpoint, with its cosine similarity
+// (0..1) to the anchor job.
+export type SimilarJob = Job & { similarity: number };
+
 export type SourceType =
   | 'greenhouse'
   | 'ashby'
@@ -214,6 +218,8 @@ export const api = {
       );
     },
     get: (id: number) => request<Job>(`/jobs/${id}`),
+    similar: (id: number, limit = 6) =>
+      request<{ jobs: SimilarJob[] }>(`/jobs/${id}/similar?limit=${limit}`),
     setStatus: (id: number, status: JobStatus) =>
       request<{ ok: boolean }>(`/jobs/${id}/status`, {
         method: 'PATCH',

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { runLivenessCheck } from '../runner/liveness';
+import { deserializeVector, topKSimilar } from '../core/embed';
 
 export const jobs = new Hono();
 
@@ -96,6 +97,40 @@ jobs.get('/:id', c => {
   return c.json(parseJobRow(row));
 });
 
+// Nearest-neighbour jobs by sentence embedding. Read-only: useful as a "more
+// like this" triage action once a job catches the eye. Only spans jobs that
+// already carry an embedding (i.e. have been through an L1.5 prerank pass) — an
+// empty list means the target (or the store) hasn't been embedded yet.
+jobs.get('/:id/similar', c => {
+  const id = Number(c.req.param('id'));
+  const limit = Math.min(Number(c.req.query('limit') ?? 8), 25);
+
+  const target = db
+    .query<{ embedding: Uint8Array | null }, [number]>('SELECT embedding FROM jobs WHERE id = ?')
+    .get(id);
+  const targetVec = deserializeVector(target?.embedding);
+  if (!targetVec) return c.json({ jobs: [] });
+
+  const rows = db
+    .query<Record<string, unknown>, [number]>(
+      `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
+       WHERE j.embedding IS NOT NULL AND j.id != ? AND j.status != 'hidden'`,
+    )
+    .all(id);
+
+  const candidates: { vec: Float32Array; item: Record<string, unknown> }[] = [];
+  for (const row of rows) {
+    const vec = deserializeVector(row.embedding as Uint8Array | null);
+    if (vec) candidates.push({ vec, item: row });
+  }
+
+  const ranked = topKSimilar(targetVec, candidates, limit);
+  return c.json({
+    jobs: ranked.map(r => ({ ...parseJobRow(r.item), similarity: r.sim })),
+  });
+});
+
 jobs.patch('/:id/status', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = z.object({ status: z.enum(JOB_STATUSES) }).safeParse(body);
@@ -130,9 +165,11 @@ jobs.post('/liveness', async c => {
 });
 
 function parseJobRow(row: Record<string, unknown>): Record<string, unknown> {
-  // company_norm is an internal dedup prefilter column; drop it from the API.
-  const { l2_verdict_json, l1_reasons, duplicate_urls, company_norm, legitimacy_reasons, ...rest } = row;
+  // company_norm is an internal dedup prefilter column and embedding is a raw
+  // Float32 BLOB — both are internal-only, drop them from the API response.
+  const { l2_verdict_json, l1_reasons, duplicate_urls, company_norm, legitimacy_reasons, embedding, ...rest } = row;
   void company_norm;
+  void embedding;
   return {
     ...rest,
     l2_verdict: l2_verdict_json ? JSON.parse(l2_verdict_json as string) : null,

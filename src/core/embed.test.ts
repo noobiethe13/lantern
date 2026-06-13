@@ -4,6 +4,7 @@ import {
   criteriaToQueryText,
   deserializeVector,
   serializeVector,
+  topKSimilar,
   EMBED_DIM,
 } from './embed';
 import type { Criteria } from './filter';
@@ -60,6 +61,37 @@ describe('serializeVector / deserializeVector', () => {
     const round = deserializeVector(buf)!;
     buf[0] = 0xff; // mutate the source bytes
     expect(round[0]).toBe(1); // the copy is unaffected
+  });
+});
+
+describe('topKSimilar', () => {
+  const target = new Float32Array([1, 0]);
+  const candidates = [
+    { vec: new Float32Array([1, 0]), item: 'same' },
+    { vec: new Float32Array([0.7071, 0.7071]), item: 'diag' },
+    { vec: new Float32Array([0, 1]), item: 'ortho' },
+    { vec: new Float32Array([-1, 0]), item: 'opposite' },
+  ];
+
+  test('returns top-k ordered by descending similarity', () => {
+    const out = topKSimilar(target, candidates, 2);
+    expect(out.map(o => o.item)).toEqual(['same', 'diag']);
+    expect(out[0].sim).toBeCloseTo(1, 4);
+    expect(out[1].sim).toBeCloseTo(0.7071, 4);
+  });
+
+  test('k larger than the pool returns the whole pool, still ranked', () => {
+    const out = topKSimilar(target, candidates, 99);
+    expect(out.map(o => o.item)).toEqual(['same', 'diag', 'ortho', 'opposite']);
+  });
+
+  test('k <= 0 returns empty', () => {
+    expect(topKSimilar(target, candidates, 0)).toEqual([]);
+    expect(topKSimilar(target, candidates, -3)).toEqual([]);
+  });
+
+  test('empty candidate pool returns empty', () => {
+    expect(topKSimilar(target, [], 5)).toEqual([]);
   });
 });
 

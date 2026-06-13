@@ -45,6 +45,21 @@ export function cosineSim(a: Float32Array, b: Float32Array): number {
   return dot;
 }
 
+/** Rank candidates by cosine similarity to a target vector, returning the top
+ * `k` (descending). Pure — the caller pairs each vector with whatever payload it
+ * wants back. A simple sort: candidate counts here are small (one machine's job
+ * store), so an ANN index isn't warranted yet. */
+export function topKSimilar<T>(
+  target: Float32Array,
+  candidates: { vec: Float32Array; item: T }[],
+  k: number,
+): { item: T; sim: number }[] {
+  return candidates
+    .map(({ vec, item }) => ({ item, sim: cosineSim(target, vec) }))
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, Math.max(0, k));
+}
+
 /** Float32Array → Buffer for storage in a BLOB column, and back. Little-endian
  * via the underlying ArrayBuffer; deserialize copies so the row buffer can be
  * freed. Returns null if the byte length isn't a whole number of floats. */
