@@ -43,9 +43,12 @@ export type SourceType =
   | 'smartrecruiters'
   | 'workable'
   | 'personio'
+  | 'bamboohr'
+  | 'workday'
   | 'remoteok'
   | 'arbeitnow'
-  | 'himalayas';
+  | 'himalayas'
+  | 'linkedin';
 
 export interface SourceAdapter {
   type: SourceType;

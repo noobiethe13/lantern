@@ -89,9 +89,12 @@ export type SourceType =
   | 'smartrecruiters'
   | 'workable'
   | 'personio'
+  | 'bamboohr'
+  | 'workday'
   | 'remoteok'
   | 'arbeitnow'
-  | 'himalayas';
+  | 'himalayas'
+  | 'linkedin';
 
 export interface Source {
   id: number;

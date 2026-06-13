@@ -21,6 +21,8 @@ interface SeedSource {
   identifier: string;
   display_name: string;
   enabled: boolean;
+  // Per-source config (Workday needs site/dc/host). Serialized to config_json.
+  config?: Record<string, unknown>;
 }
 
 interface DbSource {
@@ -95,14 +97,15 @@ function seedSources(): void {
     sources: SeedSource[];
   };
 
-  const insert = db.prepare<unknown, [string, string, string, number, number]>(
-    `INSERT OR IGNORE INTO sources (type, identifier, display_name, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?)`
+  const insert = db.prepare<unknown, [string, string, string, number, string | null, number]>(
+    `INSERT OR IGNORE INTO sources (type, identifier, display_name, enabled, config_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
   );
 
   const now = Date.now();
   for (const s of raw.sources) {
-    insert.run(s.type, s.identifier, s.display_name, s.enabled ? 1 : 0, now);
+    const configJson = s.config ? JSON.stringify(s.config) : null;
+    insert.run(s.type, s.identifier, s.display_name, s.enabled ? 1 : 0, configJson, now);
   }
 }
 

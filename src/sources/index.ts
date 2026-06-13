@@ -6,9 +6,12 @@ import { RecruiteeAdapter } from './recruitee';
 import { SmartRecruitersAdapter } from './smartrecruiters';
 import { WorkableAdapter } from './workable';
 import { PersonioAdapter } from './personio';
+import { BambooHrAdapter } from './bamboohr';
+import { WorkdayAdapter } from './workday';
 import { RemoteOkAdapter } from './remoteok';
 import { ArbeitnowAdapter } from './arbeitnow';
 import { HimalayasAdapter } from './himalayas';
+import { LinkedInAdapter } from './linkedin';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
@@ -18,9 +21,12 @@ export const adapterRegistry: Record<string, SourceAdapter> = {
   smartrecruiters: new SmartRecruitersAdapter(),
   workable: new WorkableAdapter(),
   personio: new PersonioAdapter(),
+  bamboohr: new BambooHrAdapter(),
+  workday: new WorkdayAdapter(),
   remoteok: new RemoteOkAdapter(),
   arbeitnow: new ArbeitnowAdapter(),
   himalayas: new HimalayasAdapter(),
+  linkedin: new LinkedInAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {
@@ -34,7 +40,8 @@ export type DetectedBoard =
   | { type: 'recruitee'; identifier: string }
   | { type: 'smartrecruiters'; identifier: string }
   | { type: 'workable'; identifier: string }
-  | { type: 'personio'; identifier: string };
+  | { type: 'personio'; identifier: string }
+  | { type: 'bamboohr'; identifier: string };
 
 /**
  * Best-effort detection of a board type + identifier from a public careers URL.
@@ -65,6 +72,13 @@ export function detectBoard(careersUrl: string): DetectedBoard | null {
 
   const personio = url.match(/^https?:\/\/([a-z0-9][a-z0-9-]*)\.jobs\.personio\.(?:de|com)/i);
   if (personio) return { type: 'personio', identifier: personio[1] };
+
+  const bamboohr = url.match(/^https?:\/\/([a-z0-9][a-z0-9-]*)\.bamboohr\.com/i);
+  if (bamboohr) return { type: 'bamboohr', identifier: bamboohr[1] };
+
+  // Workday is intentionally not auto-detected: its source needs a composite
+  // tenant + datacenter + site (config_json), which DetectedBoard's single
+  // `identifier` can't carry. Workday sources are added via Settings / seeds.
 
   return null;
 }

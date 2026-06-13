@@ -170,6 +170,21 @@ describe('fetchJson / fetchText — retries and error snippets', () => {
     expect(await fetchJson(URL_)).toEqual({ ok: true });
   });
 
+  test('POST with an object body JSON-encodes it and sets content-type', async () => {
+    let captured: RequestInit | undefined;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      captured = init;
+      return new Response('{"total":1}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await fetchJson(URL_, { method: 'POST', body: { offset: 0, limit: 20 } });
+    expect(captured?.method).toBe('POST');
+    expect(captured?.body).toBe('{"offset":0,"limit":20}');
+    const headers = captured?.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+    expect(captured?.redirect).toBe('error'); // SSRF contract preserved on POST
+  });
+
   test('non-OK error includes status and a body snippet', async () => {
     stubFetch(() => new Response('<html>Service under maintenance, try later</html>', { status: 503 }));
     await expect(fetchJson(URL_)).rejects.toThrow(/HTTP 503 — .*Service under maintenance/);

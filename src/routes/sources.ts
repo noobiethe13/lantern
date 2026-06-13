@@ -13,9 +13,12 @@ const SOURCE_TYPES = [
   'smartrecruiters',
   'workable',
   'personio',
+  'bamboohr',
+  'workday',
   'remoteok',
   'arbeitnow',
   'himalayas',
+  'linkedin',
 ] as const;
 
 const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
@@ -26,15 +29,20 @@ const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
   smartrecruiters: 'SmartRecruiters company slug',
   workable: 'Workable account slug',
   personio: 'Personio tenant slug',
+  bamboohr: 'BambooHR subdomain slug',
+  workday: 'Workday tenant slug',
   remoteok: 'RemoteOK identifier',
   arbeitnow: 'Arbeitnow identifier',
   himalayas: 'Himalayas identifier',
+  linkedin: 'LinkedIn identifier',
 };
 
 // Keyword-global aggregators have no per-company slug — the role/keyword drives
 // the query. They're seeded as singletons; the identifier is just a fixed,
 // slug-safe sentinel so the (type, identifier) uniqueness constraint holds.
-const AGGREGATOR_TYPES = new Set(['remoteok', 'arbeitnow', 'himalayas']);
+// LinkedIn is gated/unofficial (default-disabled in the UI) but still a
+// keyword-driven aggregator.
+const AGGREGATOR_TYPES = new Set(['remoteok', 'arbeitnow', 'himalayas', 'linkedin']);
 
 const CreateSourceSchema = z.object({
   type: z.enum(SOURCE_TYPES),
@@ -79,6 +87,20 @@ sources.post('/', async c => {
   const { type, identifier, display_name, enabled, config_json } = parsed.data;
   const identifierError = validateIdentifier(type, identifier);
   if (identifierError) return c.json({ error: identifierError }, 400);
+
+  // Workday needs its career-site name (and datacenter/host) in config_json —
+  // the single identifier slug can't hold a site name with underscores.
+  if (type === 'workday') {
+    const site = config_json?.['site'];
+    const hasHost = typeof config_json?.['host'] === 'string';
+    const hasDc = typeof config_json?.['dc'] === 'string';
+    if (typeof site !== 'string' || !site.trim()) {
+      return c.json({ error: 'Workday source requires config_json.site (the career-site name)' }, 400);
+    }
+    if (!hasHost && !hasDc) {
+      return c.json({ error: 'Workday source requires config_json.dc (e.g. "wd5") or config_json.host' }, 400);
+    }
+  }
 
   const now = Date.now();
   try {

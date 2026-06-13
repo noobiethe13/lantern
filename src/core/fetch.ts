@@ -21,6 +21,11 @@ export interface FetchOpts {
   /** Backoff base for retried attempts. Tests override this to keep retry
    *  suites fast; adapters should leave the default. */
   retryBaseDelayMs?: number;
+  /** HTTP method. Defaults to GET. Workday's cxs job feed is a POST. */
+  method?: 'GET' | 'POST';
+  /** Request body, paired with `method: 'POST'`. A plain object is JSON-encoded
+   *  (and a `Content-Type: application/json` header added unless one is set). */
+  body?: unknown;
 }
 
 const PRIVATE_HOST_RX = [
@@ -137,13 +142,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function buildRequestInit(opts: FetchOpts, signal: AbortSignal): RequestInit {
+  // redirect: 'error' — refuse cross-origin redirects (e.g. a Greenhouse
+  // response that 302s to 127.0.0.1 would otherwise bypass the host check).
+  const init: RequestInit = { signal, redirect: 'error', headers: { ...opts.headers } };
+  if (opts.method) init.method = opts.method;
+  if (opts.body !== undefined) {
+    const isString = typeof opts.body === 'string';
+    init.body = isString ? (opts.body as string) : JSON.stringify(opts.body);
+    if (!isString) {
+      const h = init.headers as Record<string, string>;
+      if (!Object.keys(h).some(k => k.toLowerCase() === 'content-type')) {
+        h['Content-Type'] = 'application/json';
+      }
+    }
+  }
+  return init;
+}
+
 async function fetchOnce(url: string, opts: FetchOpts): Promise<Response> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? FETCH_TIMEOUT_MS);
   try {
-    // redirect: 'error' — refuse cross-origin redirects (e.g. a Greenhouse
-    // response that 302s to 127.0.0.1 would otherwise bypass the host check).
-    const res = await fetch(url, { signal: ctrl.signal, redirect: 'error', headers: opts.headers });
+    const res = await fetch(url, buildRequestInit(opts, ctrl.signal));
     if (!res.ok) {
       const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
       const snippet = await bodySnippet(res);
