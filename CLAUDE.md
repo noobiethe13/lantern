@@ -218,6 +218,31 @@ internal types — convert at the boundary in src/api/client.ts" -->
 - Liveness strips `nav, header, footer` before collecting apply controls AND body
   text (nav "Apply now" links were a false-active vector). Thin content on a SPA
   host (`SPA_HOSTS` in `core/liveness.ts`) classifies `uncertain`, never closed.
+- Adapters that can't fetch a description (LinkedIn guest cards, Workday cxs
+  listing, SmartRecruiters/Workable list endpoints) must OMIT `jd_text` (leave it
+  absent → NULL), never set `''`. `core/legitimacy.ts` treats null jd_text as an
+  adapter gap (no flag) but a present-but-empty string as "no job description"
+  (a ghost flag) — `''` would wrongly flag every such job.
+- `sources.type` is a CHECK constraint baked into `CREATE TABLE`. SQLite has no
+  ALTER CHECK, so adding a board type needs BOTH the schema.sql CHECK (fresh DBs)
+  AND a table-rebuild migration in `migrate.ts` (existing DBs) — see
+  `migrateSourceTypeCheck` (`SOURCE_TYPE_CHECK` kept in sync with schema.sql;
+  rebuild runs with `foreign_keys=OFF` around a txn, preserves row ids so
+  `jobs.source_id` stays valid; no-op when the stored DDL already has every type).
+- `fetchJson`/`fetchText` take `method`/`body` in `FetchOpts` (Workday's cxs feed
+  is a POST; object bodies are JSON-encoded with a default Content-Type). The
+  SSRF guard + `redirect:'error'` still apply — don't hand-roll a POST `fetch`.
+- Gated job boards: verify the endpoint LIVE before building. The June-2026 plan
+  table was optimistic — Indeed/ZipRecruiter need a bundled scraped secret, ZR/
+  Naukri sit behind Cloudflare-WAF/recaptcha. Bundling a third-party secret or
+  needing WAF/TLS evasion = Phase-5 browser tier, NOT honest fetch-only Tier A.
+  LinkedIn guest (`seeMoreJobPostings/search`) is the one keyless one. Workday/
+  BambooHR are clean public ATS APIs (per-company, not gated). Shared politeness
+  helpers for the gated adapters live in `src/sources/gated-util.ts`.
+- Workday sources carry a composite identity: tenant slug (`identifier`) +
+  datacenter + career-site name in `config_json` (`{dc, site}` or `{host, site}`),
+  because the single slug can't hold a site name with underscores. seed-sources.yml
+  entries can include a `config:` object (seedSources serialises it to config_json).
 
 ## Architectural notes — work with these, not against them
 

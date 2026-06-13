@@ -3,6 +3,62 @@ import { join } from 'path';
 import type { Database } from 'bun:sqlite';
 import { normalizeCompany } from '../core/dedup';
 
+// Source types currently accepted by the sources.type CHECK. Keep in sync with
+// the CHECK in schema.sql — a SQLite CHECK constraint can only be changed by
+// rebuilding the table, so new board types added to schema.sql for fresh DBs
+// also need this list updated to migrate pre-existing DBs.
+const SOURCE_TYPE_CHECK = [
+  'greenhouse', 'ashby', 'lever',
+  'recruitee', 'smartrecruiters', 'workable', 'personio', 'bamboohr', 'workday',
+  'remoteok', 'arbeitnow', 'himalayas', 'linkedin',
+];
+
+/**
+ * Bring an existing DB's sources.type CHECK up to date. CREATE TABLE IF NOT
+ * EXISTS won't touch a table that already exists, so when new board types are
+ * added a pre-existing DB still carries the old CHECK and rejects inserts of the
+ * new types. SQLite has no ALTER CHECK — the supported fix is the table rebuild
+ * (create-new / copy / drop / rename). The rebuild preserves row ids, so
+ * jobs.source_id references stay valid. No-op when every current type already
+ * appears in the stored DDL.
+ */
+function migrateSourceTypeCheck(db: Database): void {
+  const row = db
+    .query<{ sql: string }, []>("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sources'")
+    .get();
+  if (!row) return; // fresh DB just created the up-to-date table
+  if (SOURCE_TYPE_CHECK.every(t => row.sql.includes(`'${t}'`))) return; // already current
+
+  const typeList = SOURCE_TYPE_CHECK.map(t => `'${t}'`).join(', ');
+  // foreign_keys can't be toggled inside a transaction; do it around one.
+  db.run('PRAGMA foreign_keys = OFF');
+  try {
+    const rebuild = db.transaction(() => {
+      db.run(`
+        CREATE TABLE sources_new (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          type            TEXT NOT NULL CHECK (type IN (${typeList})),
+          identifier      TEXT NOT NULL,
+          display_name    TEXT NOT NULL,
+          enabled         INTEGER NOT NULL DEFAULT 1,
+          config_json     TEXT,
+          last_scan_at    INTEGER,
+          last_status     TEXT,
+          last_error      TEXT,
+          created_at      INTEGER NOT NULL,
+          UNIQUE (type, identifier)
+        )
+      `);
+      db.run('INSERT INTO sources_new SELECT * FROM sources');
+      db.run('DROP TABLE sources');
+      db.run('ALTER TABLE sources_new RENAME TO sources');
+    });
+    rebuild();
+  } finally {
+    db.run('PRAGMA foreign_keys = ON');
+  }
+}
+
 export function runMigrations(db: Database): void {
   const schemaPath = join(import.meta.dir, 'schema.sql');
   const sql = readFileSync(schemaPath, 'utf-8');
@@ -22,6 +78,8 @@ export function runMigrations(db: Database): void {
   for (const stmt of statements) {
     db.run(stmt);
   }
+
+  migrateSourceTypeCheck(db);
 
   // Idempotent ADD COLUMN — schema.sql only fires for fresh DBs since
   // CREATE TABLE IF NOT EXISTS skips column changes on existing tables.

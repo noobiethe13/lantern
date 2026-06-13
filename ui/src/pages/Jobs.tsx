@@ -71,9 +71,12 @@ const SOURCE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'smartrecruiters', label: 'SmartRecruiters' },
   { value: 'workable', label: 'Workable' },
   { value: 'personio', label: 'Personio' },
+  { value: 'bamboohr', label: 'BambooHR' },
+  { value: 'workday', label: 'Workday' },
   { value: 'remoteok', label: 'RemoteOK' },
   { value: 'arbeitnow', label: 'Arbeitnow' },
   { value: 'himalayas', label: 'Himalayas' },
+  { value: 'linkedin', label: 'LinkedIn' },
 ];
 
 // Understated underline search — the masthead's quiet right-hand affordance.

@@ -13,7 +13,7 @@ import { Button, Input, Badge, Spinner, Textarea, useToast } from '@/components/
 
 type BadgeTone = 'neutral' | 'accent' | 'blue' | 'violet' | 'success' | 'warning' | 'danger' | 'dim';
 
-const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: string }[] = [
+const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: string; gated?: boolean }[] = [
   { value: 'greenhouse', label: 'Greenhouse', placeholder: 'board-slug (e.g. stripe)' },
   { value: 'ashby', label: 'Ashby', placeholder: 'jobs.ashbyhq.com/company' },
   { value: 'lever', label: 'Lever', placeholder: 'jobs.lever.co/company' },
@@ -21,16 +21,24 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'smartrecruiters', label: 'SmartRecruiters', placeholder: 'company slug (e.g. Bosch)' },
   { value: 'workable', label: 'Workable', placeholder: 'account slug (apply.workable.com/slug)' },
   { value: 'personio', label: 'Personio', placeholder: 'tenant slug (e.g. acme → acme.jobs.personio.de)' },
+  { value: 'bamboohr', label: 'BambooHR', placeholder: 'subdomain slug (e.g. acme → acme.bamboohr.com)' },
+  { value: 'workday', label: 'Workday', placeholder: 'tenant slug (e.g. salesforce)' },
   { value: 'remoteok', label: 'RemoteOK', placeholder: 'global — searched by your role keyword' },
   { value: 'arbeitnow', label: 'Arbeitnow', placeholder: 'global — searched by your role keyword' },
   { value: 'himalayas', label: 'Himalayas', placeholder: 'global — searched by your role keyword' },
+  { value: 'linkedin', label: 'LinkedIn', placeholder: 'global — searched by your role keyword', gated: true },
 ];
 
 const TYPE_TONE: Record<SourceType, BadgeTone> = {
   greenhouse: 'success', ashby: 'blue', lever: 'warning', recruitee: 'violet',
   smartrecruiters: 'danger', workable: 'neutral', personio: 'neutral',
-  remoteok: 'accent', arbeitnow: 'accent', himalayas: 'accent',
+  bamboohr: 'success', workday: 'blue',
+  remoteok: 'accent', arbeitnow: 'accent', himalayas: 'accent', linkedin: 'warning',
 };
+
+const GATED_TYPES = new Set<SourceType>(
+  SOURCE_TYPE_OPTIONS.filter(o => o.gated).map(o => o.value),
+);
 
 // Badge tone → concrete color, for the composition bar + legend (mirrors the
 // badge colors used on the roster rows so the encodings agree).
@@ -87,7 +95,14 @@ function SourceRow({ source, onToggle, onDelete }: { source: Source; onToggle: (
         <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.display_name}</div>
         <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.identifier}</div>
       </div>
-      <Badge tone={TYPE_TONE[source.type] ?? 'neutral'}>{typeOpt?.label ?? source.type}</Badge>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+        <Badge tone={TYPE_TONE[source.type] ?? 'neutral'}>{typeOpt?.label ?? source.type}</Badge>
+        {GATED_TYPES.has(source.type) && (
+          <span title="Unofficial endpoint — gray-area, rate-limited, may break" style={{ fontSize: '9.5px', color: 'var(--warning)', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            unofficial
+          </span>
+        )}
+      </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', color: 'var(--text-faint)' }}>{statusIcon}{timeAgo(source.last_scan_at)}</div>
       <button onClick={onToggle} style={{ background: enabled ? 'var(--accent-muted)' : 'var(--surface-2)', color: enabled ? 'var(--accent-text)' : 'var(--text-faint)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '4px 10px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 150ms ease' }}>
         {enabled ? 'On' : 'Off'}
@@ -114,16 +129,24 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
   const [type, setType] = useState<SourceType>('greenhouse');
   const [identifier, setIdentifier] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [wdSite, setWdSite] = useState('');
+  const [wdDc, setWdDc] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typeOpt = SOURCE_TYPE_OPTIONS.find(t => t.value === type)!;
+  const isWorkday = type === 'workday';
+  const isGated = GATED_TYPES.has(type);
+  const workdayReady = !isWorkday || (wdSite.trim() && wdDc.trim());
 
   const handleAdd = async () => {
-    if (!identifier.trim() || !displayName.trim()) return;
+    if (!identifier.trim() || !displayName.trim() || !workdayReady) return;
     setSaving(true); setError(null);
     try {
-      await api.sources.create({ type, identifier: identifier.trim(), display_name: displayName.trim() });
-      setIdentifier(''); setDisplayName(''); setOpen(false); onAdded();
+      const config_json = isWorkday
+        ? { site: wdSite.trim(), dc: wdDc.trim() }
+        : undefined;
+      await api.sources.create({ type, identifier: identifier.trim(), display_name: displayName.trim(), config_json });
+      setIdentifier(''); setDisplayName(''); setWdSite(''); setWdDc(''); setOpen(false); onAdded();
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   };
 
@@ -153,9 +176,33 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
           <Input id="add-src-name" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Company name" style={{ fontSize: '12.5px', height: 32 }} onKeyDown={e => e.key === 'Enter' && handleAdd()} />
         </div>
       </div>
+      {isWorkday && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 150px', gap: 10, alignItems: 'end' }}>
+          <div>
+            <label htmlFor="add-src-wdsite" style={{ display: 'block', fontSize: '11px', color: 'var(--text-faint)', marginBottom: 4 }}>Career-site name</label>
+            <Input id="add-src-wdsite" value={wdSite} onChange={e => setWdSite(e.target.value)} placeholder="e.g. External_Career_Site" style={{ fontSize: '12.5px', height: 32 }} />
+          </div>
+          <div>
+            <label htmlFor="add-src-wddc" style={{ display: 'block', fontSize: '11px', color: 'var(--text-faint)', marginBottom: 4 }}>Datacenter</label>
+            <Input id="add-src-wddc" value={wdDc} onChange={e => setWdDc(e.target.value)} placeholder="e.g. wd5" style={{ fontSize: '12.5px', height: 32 }} />
+          </div>
+        </div>
+      )}
+      {isWorkday && (
+        <div style={{ fontSize: '11.5px', color: 'var(--text-faint)' }}>
+          From the careers URL <span style={{ fontFamily: 'var(--font-mono)' }}>{'{tenant}.{dc}.myworkdayjobs.com/{site}'}</span> — e.g.
+          {' '}<span style={{ fontFamily: 'var(--font-mono)' }}>salesforce</span> · <span style={{ fontFamily: 'var(--font-mono)' }}>wd12</span> · <span style={{ fontFamily: 'var(--font-mono)' }}>External_Career_Site</span>.
+        </div>
+      )}
+      {isGated && (
+        <div style={{ fontSize: '11.5px', color: 'var(--warning)' }}>
+          Unofficial endpoint — gray-area, aggressively rate-limited, and may break without notice.
+          Use lightly for personal search.
+        </div>
+      )}
       {error && <div style={{ fontSize: '12px', color: 'var(--danger)' }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button size="sm" onClick={handleAdd} loading={saving} disabled={!identifier.trim() || !displayName.trim()}><Plus size={13} /> Add</Button>
+        <Button size="sm" onClick={handleAdd} loading={saving} disabled={!identifier.trim() || !displayName.trim() || !workdayReady}><Plus size={13} /> Add</Button>
         <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(null); }}>Cancel</Button>
       </div>
     </div>

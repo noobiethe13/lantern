@@ -335,7 +335,20 @@ sources:
   - { type: workable,        identifier: kahoot,    display_name: "Kahoot",    enabled: true }
   - { type: workable,        identifier: persado,   display_name: "Persado",   enabled: true }
   - { type: workable,        identifier: skroutz,   display_name: "Skroutz",   enabled: true }
+  # BambooHR (per-company; slug = the subdomain in {slug}.bamboohr.com).
+  # Starter set — only live-probed tenants with >0 openings are listed (BambooHR
+  # skews to SMBs, so this list grows by curation, like the Greenhouse tier above).
+  - { type: bamboohr,        identifier: trundl,    display_name: "Trundl",    enabled: true }
+  - { type: bamboohr,        identifier: bitly,     display_name: "Bitly",     enabled: true }
+  # Workday (per-company; needs tenant slug + datacenter + career-site name from
+  # the {tenant}.{dc}.myworkdayjobs.com/{site} careers URL, carried in config).
+  # Starter set — expand once Workday's maintenance window clears and per-tenant
+  # site names are discovered.
+  - { type: workday, identifier: salesforce, display_name: "Salesforce", enabled: true, config: { site: External_Career_Site, dc: wd12 } }
   # Keyword-global aggregators — the role/keyword drives the query; no per-company slug.
   - { type: remoteok,   identifier: remoteok,   display_name: "RemoteOK (remote)",  enabled: true }
   - { type: arbeitnow,  identifier: arbeitnow,  display_name: "Arbeitnow (EU)",     enabled: true }
   - { type: himalayas,  identifier: himalayas,  display_name: "Himalayas (remote)", enabled: true }
+  # LinkedIn — gated/unofficial guest endpoint; keyword-driven aggregator.
+  # Default DISABLED: gray-area, aggressively rate-limited, no JD/salary in cards.
+  - { type: linkedin,   identifier: linkedin,   display_name: "LinkedIn (guest)",   enabled: false }
