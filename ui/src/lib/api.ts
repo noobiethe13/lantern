@@ -76,6 +76,12 @@ export interface Job {
   legitimacy: Legitimacy | null;
   legitimacy_reasons: LegitimacyReason[] | null;
   duplicate_urls: string[] | null;
+  // Semantic dedup: when set, this posting is a near-duplicate folded into the
+  // canonical job with this id (hidden from the default list, not L2-scored).
+  duplicate_of: number | null;
+  // Number of near-duplicate postings folded into this (canonical) job. Present
+  // on list/detail rows; 0 when none.
+  duplicate_count?: number;
   status: JobStatus;
   applied_at: number | null;
   notes: string | null;
@@ -220,6 +226,8 @@ export const api = {
     get: (id: number) => request<Job>(`/jobs/${id}`),
     similar: (id: number, limit = 6) =>
       request<{ jobs: SimilarJob[] }>(`/jobs/${id}/similar?limit=${limit}`),
+    duplicates: (id: number) =>
+      request<{ jobs: Job[] }>(`/jobs/${id}/duplicates`),
     setStatus: (id: number, status: JobStatus) =>
       request<{ ok: boolean }>(`/jobs/${id}/status`, {
         method: 'PATCH',

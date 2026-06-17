@@ -13,6 +13,7 @@ import { BatchVerdictShape, BatchVerdictWithResumeShape } from '../llm/schemas';
 import { batchVerdictPrompt } from '../llm/prompts';
 import { activeResumeText } from '../routes/resume';
 import { applyLegitimacyPass } from './legitimacy';
+import { applySemanticDedupPass } from './semantic-dedup';
 import { prerankSurvivors } from './preranker';
 import { criteriaToQueryText } from '../core/embed';
 import { runPool } from '../core/pool';
@@ -387,7 +388,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string): Promise<vo
     .query<L2JobRow, [number]>(
       `SELECT id, title, company, location, jd_text, embedding
        FROM jobs
-       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND last_run_id = ?`
+       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND duplicate_of IS NULL AND last_run_id = ?`
     )
     .all(runId);
 
@@ -521,6 +522,10 @@ export async function runFull(query?: string): Promise<number> {
     // before L2 and the badges are visible while L2 is still scoring.
     const scored = applyLegitimacyPass(runId);
     console.log(`Legitimacy: scored ${scored} jobs`);
+    // Semantic dedup runs before L2 so near-duplicate reposts are skipped by the
+    // expensive scoring pass (and hidden from the default list). Best-effort.
+    const deduped = await applySemanticDedupPass(runId);
+    console.log(`Semantic dedup: folded ${deduped} duplicate postings`);
     const criteriaYaml = loadCriteriaRaw();
     await runL2Pass(runId, criteriaYaml);
     // The run is complete only now (after L2). Covers all runL2Pass exit paths

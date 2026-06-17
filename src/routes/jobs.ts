@@ -62,6 +62,12 @@ jobs.get('/', c => {
     conditions.push('(j.title LIKE ? OR j.company LIKE ?)');
     params.push(`%${q}%`, `%${q}%`);
   }
+  // Semantic near-duplicates fold into a canonical posting (jobs.duplicate_of) and
+  // are hidden by default so the user sees one row per real job. include_duplicates=1
+  // surfaces them (each carries duplicate_of so the UI can mark it).
+  if (c.req.query('include_duplicates') !== '1') {
+    conditions.push('j.duplicate_of IS NULL');
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -70,7 +76,8 @@ jobs.get('/', c => {
   const orderBy = 'ORDER BY (j.l2_score IS NULL), j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC';
 
   const rows = db.query<Record<string, unknown>, Binding[]>(
-    `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+    `SELECT j.*, s.display_name AS source_name, s.type AS source_type,
+            (SELECT COUNT(*) FROM jobs d WHERE d.duplicate_of = j.id) AS duplicate_count
      FROM jobs j
      LEFT JOIN sources s ON s.id = j.source_id
      ${where}
@@ -89,12 +96,30 @@ jobs.get('/', c => {
 
 jobs.get('/:id', c => {
   const row = db.query<Record<string, unknown>, [number]>(
-    `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+    `SELECT j.*, s.display_name AS source_name, s.type AS source_type,
+            (SELECT COUNT(*) FROM jobs d WHERE d.duplicate_of = j.id) AS duplicate_count
      FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
      WHERE j.id = ?`
   ).get(Number(c.req.param('id')));
   if (!row) return c.json({ error: 'not found' }, 404);
   return c.json(parseJobRow(row));
+});
+
+// Near-duplicate postings that fold into this (canonical) job — the same-employer
+// reposts the semantic-dedup pass detected. These are kept but hidden from the
+// default list and skipped by L2; surfacing them here lets the detail panel show
+// "also posted as, not separately scored". Empty when the job has no duplicates.
+jobs.get('/:id/duplicates', c => {
+  const id = Number(c.req.param('id'));
+  const rows = db
+    .query<Record<string, unknown>, [number]>(
+      `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
+       WHERE j.duplicate_of = ?
+       ORDER BY j.first_seen DESC`,
+    )
+    .all(id);
+  return c.json({ jobs: rows.map(parseJobRow) });
 });
 
 // Nearest-neighbour jobs by sentence embedding. Read-only: useful as a "more
@@ -115,7 +140,8 @@ jobs.get('/:id/similar', c => {
     .query<Record<string, unknown>, [number]>(
       `SELECT j.*, s.display_name AS source_name, s.type AS source_type
        FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
-       WHERE j.embedding IS NOT NULL AND j.id != ? AND j.status != 'hidden'`,
+       WHERE j.embedding IS NOT NULL AND j.id != ? AND j.status != 'hidden'
+             AND j.duplicate_of IS NULL`,
     )
     .all(id);
 
