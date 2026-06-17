@@ -62,12 +62,13 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   their existing payloads). SmartRecruiters + Workable JD are deferred TODOs.
 - **Two-tier filter**: L1 deterministic rules (`src/core/filter.ts`) run inline
   during scan and kill ~80% with zero LLM cost — title (uniform across sources),
-  location allow-list (+ remote), salary floor, company excludes. L2 LLM verdict
+  location allow-list (+ remote), salary floor, company excludes, and a seniority
+  gate (drops senior+ titles only when criteria restricts to junior/mid). L2 LLM verdict
   runs as a separate **sequential** pass over L1 survivors **scoped to the run**
   (`last_run_id`); verdicts (+ denormalized `l2_score`/`l2_fit`) are stored per
-  job and invalidated whenever criteria change. (L2 grades jobs in batches of 10
-  per `claude` call — `L2_BATCH_SIZE` — to amortize each subprocess's ~15K
-  uncacheable cold-start tokens; batches run sequentially.)
+  job and invalidated whenever criteria change. (L2 grades jobs in batches of 20
+  per `claude` call — `L2_BATCH_SIZE` — to amortize each subprocess's large
+  uncacheable fixed per-spawn cost; batches run sequentially.)
 - **Run scoping & ranking**: `upsertJob` stamps `last_run_id` on every job a run
   surfaces; the Jobs API filters `?run=latest|<id>` and `?fit=1` and orders fit/L2
   views by `l2_score DESC`. So each search shows its own ranked result set.
@@ -177,7 +178,7 @@ internal types — convert at the boundary in src/api/client.ts" -->
   runs `nl-filter` → writes the `criteria` id=1 row → invalidates L2 verdicts
   (`l2_verdict_json`/`l2_score`/`l2_fit`). There is no `/api/criteria` route and no
   Settings criteria editor — don't reintroduce them.
-- L2 grades jobs in batches (`L2_BATCH_SIZE=10`) per `claude` call (`runL2Pass`,
+- L2 grades jobs in batches (`L2_BATCH_SIZE=20`) per `claude` call (`runL2Pass`,
   `batchVerdictPrompt`, `BatchVerdictShape`) to amortize the ~15K system/tool
   tokens each subprocess cold-starts with and can't cache across invocations.
   Batches are sequential. Don't revert to per-job L2 calls.

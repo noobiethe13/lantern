@@ -19,6 +19,20 @@ export interface L1Result {
   reasons: string[];
 }
 
+// Word-bounded senior/management title markers, consulted ONLY when the criteria
+// restricts to junior/mid (see the seniority gate in l1Filter). Deliberately
+// EXCLUDES 'lead', 'manager', and 'architect' — those mark a role, not a level
+// (Product Manager / Product Lead / Solutions Architect are commonly mid), so
+// gating on them would drop real fits. Word boundaries keep '\bsr\b' from matching
+// 'SRE' and '\bvp\b' from matching 'VPN'. Title-only ⇒ a partial filter: a senior
+// role with a plain title still reaches L2 for the JD-based read.
+const SENIOR_TITLE_RE =
+  /\b(senior|sr|staff|principal|director|vp|head of|distinguished|fellow)\b/i;
+
+// Criteria levels that count as "senior and up". If the allowed set names none of
+// these, the user asked for junior/mid only and the seniority gate engages.
+const SENIOR_LEVELS = new Set(['senior', 'staff', 'principal']);
+
 export function l1Filter(job: Job, c: Criteria): L1Result {
   const reasons: string[] = [];
   const lower = (s?: string) => (s ?? '').toLowerCase();
@@ -32,6 +46,18 @@ export function l1Filter(job: Job, c: Criteria): L1Result {
     }
     const negHit = neg.find(k => t.includes(k));
     if (negHit) reasons.push(`title has negative keyword "${negHit}"`);
+  }
+
+  // Seniority gate: when the user restricted to junior/mid only, drop titles that
+  // advertise a senior+ level. Deterministic + zero-token — it trims the L2 queue
+  // of jobs L2 would reject for seniority anyway. Conservative by design (see
+  // SENIOR_TITLE_RE); fires ONLY on an explicit junior/mid criteria, so an unstated
+  // or senior-inclusive seniority never gates.
+  if (c.seniority?.allowed?.length) {
+    const wantsSeniorPlus = c.seniority.allowed.some((l) => SENIOR_LEVELS.has(l));
+    if (!wantsSeniorPlus && SENIOR_TITLE_RE.test(job.title ?? '')) {
+      reasons.push(`title implies senior+ level (criteria allows ${c.seniority.allowed.join('/')})`);
+    }
   }
 
   if (c.location) {

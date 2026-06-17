@@ -87,7 +87,7 @@ sources:
   - { type: greenhouse,      identifier: greenhouse,        display_name: "Greenhouse",        enabled: true }
   - { type: greenhouse,      identifier: guild,             display_name: "Guild",             enabled: true }
   - { type: greenhouse,      identifier: gusto,             display_name: "Gusto",             enabled: true }
-  - { type: greenhouse,      identifier: headway,           display_name: "Headway",           enabled: true }
+  - { type: greenhouse,      identifier: headway,           display_name: "Headway",           enabled: false }  # board slug 404s as of 2026-06-15 (left Greenhouse); recheck or replace slug
   - { type: greenhouse,      identifier: hellofresh,        display_name: "HelloFresh",        enabled: true }
   - { type: greenhouse,      identifier: helsing,           display_name: "Helsing",           enabled: true }
   - { type: greenhouse,      identifier: hightouch,         display_name: "Hightouch",         enabled: true }
@@ -308,7 +308,7 @@ sources:
   - { type: recruitee,       identifier: bunq,           display_name: "bunq",            enabled: true }
   - { type: recruitee,       identifier: channable,      display_name: "Channable",       enabled: true }
   - { type: recruitee,       identifier: floryn,         display_name: "Floryn",          enabled: true }
-  - { type: recruitee,       identifier: intigriti,      display_name: "Intigriti",       enabled: true }
+  - { type: recruitee,       identifier: intigriti,      display_name: "Intigriti",       enabled: false }  # board slug 404s as of 2026-06-15 (left Recruitee); recheck or replace slug
   - { type: recruitee,       identifier: nmbrs,          display_name: "Nmbrs",           enabled: true }
   - { type: recruitee,       identifier: onlinedialogue, display_name: "Online Dialogue", enabled: true }
   - { type: recruitee,       identifier: vandebron,      display_name: "Vandebron",       enabled: true }

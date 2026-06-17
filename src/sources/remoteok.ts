@@ -61,6 +61,9 @@ export class RemoteOkAdapter implements SourceAdapter {
     const json = await fetchJson(REMOTEOK_URL, {
       allowedHosts: REMOTEOK_ALLOWED_HOSTS,
       headers: REMOTEOK_HEADERS,
+      // One big payload (all jobs); give it room rather than aborting at the 10s default.
+      timeoutMs: 30_000,
+      retries: 2,
     });
     const jobs = parseRemoteOk(json, keywords);
     for (const job of jobs) {

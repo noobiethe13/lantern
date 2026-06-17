@@ -93,6 +93,20 @@ describe('topKSimilar', () => {
   test('empty candidate pool returns empty', () => {
     expect(topKSimilar(target, [], 5)).toEqual([]);
   });
+
+  test('at k = pool size it is a permutation — reorders without dropping or duplicating', () => {
+    // The L1.5 pre-ranker's safety contract is "reorder only, never drops". Ranking
+    // by similarity at full depth must return every item exactly once, ties included.
+    const cands = [
+      { vec: new Float32Array([1, 0]), item: 'a' },
+      { vec: new Float32Array([0, 1]), item: 'b' },
+      { vec: new Float32Array([1, 0]), item: 'c' }, // ties with 'a'
+      { vec: new Float32Array([-1, 0]), item: 'd' },
+    ];
+    const out = topKSimilar(target, cands, cands.length);
+    expect(out.length).toBe(cands.length);
+    expect(out.map(o => o.item).sort()).toEqual(['a', 'b', 'c', 'd']);
+  });
 });
 
 describe('criteriaToQueryText', () => {
