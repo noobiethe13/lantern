@@ -62,7 +62,8 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   their existing payloads). SmartRecruiters + Workable JD are deferred TODOs.
 - **Two-tier filter**: L1 deterministic rules (`src/core/filter.ts`) run inline
   during scan and kill ~80% with zero LLM cost — title (uniform across sources),
-  location allow-list (+ remote), salary floor, company excludes. L2 LLM verdict
+  location allow-list (+ remote), salary floor, company excludes, and a seniority
+  gate (drops senior+ titles only when criteria restricts to junior/mid). L2 LLM verdict
   runs as a separate **sequential** pass over L1 survivors **scoped to the run**
   (`last_run_id`); verdicts (+ denormalized `l2_score`/`l2_fit`) are stored per
   job and invalidated whenever criteria change. (L2 grades jobs in batches of 20

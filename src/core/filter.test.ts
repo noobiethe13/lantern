@@ -33,6 +33,53 @@ describe('l1Filter — title', () => {
   });
 });
 
+describe('l1Filter — seniority gate (junior/mid only)', () => {
+  const juniorMid: Criteria = { seniority: { allowed: ['junior', 'mid'] } };
+
+  test('drops senior-marked titles when criteria is junior/mid', () => {
+    for (const title of [
+      'Senior DevOps Engineer',
+      'Sr. Software Engineer',
+      'Staff Software Engineer',
+      'Principal Data Platform Engineer',
+      'Director of Engineering',
+      'VP of Infrastructure',
+      'Head of Platform',
+    ]) {
+      const r = l1Filter(job({ title }), juniorMid);
+      expect(r.pass).toBe(false);
+      expect(r.reasons.join()).toContain('senior+ level');
+    }
+  });
+
+  test('keeps genuinely junior/mid titles', () => {
+    expect(l1Filter(job({ title: 'DevOps Engineer' }), juniorMid).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Cloud Engineer II' }), juniorMid).pass).toBe(true);
+  });
+
+  test('does NOT gate role words that are level-ambiguous (manager/lead/architect)', () => {
+    for (const title of ['Product Manager', 'Product Lead', 'Solutions Architect']) {
+      expect(l1Filter(job({ title }), juniorMid).pass).toBe(true);
+    }
+  });
+
+  test('word boundaries: "SRE" and "VPN" are not senior markers', () => {
+    expect(l1Filter(job({ title: 'SRE (Site Reliability Engineer)' }), juniorMid).pass).toBe(true);
+    expect(l1Filter(job({ title: 'VPN Infrastructure Engineer' }), juniorMid).pass).toBe(true);
+  });
+
+  test('does not fire when the criteria allows senior+', () => {
+    const withSenior: Criteria = { seniority: { allowed: ['mid', 'senior'] } };
+    expect(l1Filter(job({ title: 'Senior DevOps Engineer' }), withSenior).pass).toBe(true);
+  });
+
+  test('does not fire when seniority is unstated or empty', () => {
+    expect(l1Filter(job({ title: 'Senior DevOps Engineer' }), {}).pass).toBe(true);
+    const empty: Criteria = { seniority: { allowed: [] } };
+    expect(l1Filter(job({ title: 'Senior DevOps Engineer' }), empty).pass).toBe(true);
+  });
+});
+
 describe('l1Filter — location allow-list', () => {
   const c: Criteria = { location: { remote_required: false, allowed: ['uk', 'united kingdom'] } };
 
