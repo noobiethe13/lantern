@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
-  ChevronUp, ChevronDown, ShieldAlert, Sparkles,
+  ChevronUp, ChevronDown, ShieldAlert, Sparkles, Layers,
 } from 'lucide-react';
 import { api, formatMoney, type Job, type JobStatus, type Legitimacy, type SimilarJob } from '@/lib/api';
 import { Textarea, Spinner } from '@/components/ui';
@@ -304,6 +304,14 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
         <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.company}
           {job.source_name && <span style={{ color: 'var(--text-faint)' }}> · {job.source_name}</span>}
+          {!!job.duplicate_count && (
+            <span
+              title={`${job.duplicate_count} near-duplicate repost${job.duplicate_count > 1 ? 's' : ''} folded in`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, color: 'var(--text-faint)' }}
+            >
+              <Layers size={11} style={{ verticalAlign: '-1px' }} />{job.duplicate_count}
+            </span>
+          )}
         </div>
       </div>
 
@@ -363,6 +371,7 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   const [savingNotes, setSavingNotes] = useState(false);
   const [showFullJd, setShowFullJd] = useState(false);
   const [similar, setSimilar] = useState<SimilarJob[]>([]);
+  const [duplicates, setDuplicates] = useState<Job[]>([]);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => { setNotes(job.notes ?? ''); setShowFullJd(false); }, [job.id, job.notes]);
@@ -375,6 +384,17 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
     api.jobs.similar(job.id).then(res => { if (live) setSimilar(res.jobs); }).catch(() => {});
     return () => { live = false; };
   }, [job.id]);
+
+  // Near-duplicate reposts folded into this canonical job (skipped by L2). Only
+  // fetch when the count says there are some.
+  useEffect(() => {
+    let live = true;
+    setDuplicates([]);
+    if (job.duplicate_count) {
+      api.jobs.duplicates(job.id).then(res => { if (live) setDuplicates(res.jobs); }).catch(() => {});
+    }
+    return () => { live = false; };
+  }, [job.id, job.duplicate_count]);
 
   const handleNotes = (val: string) => {
     setNotes(val);
@@ -593,6 +613,32 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
             <p style={{ fontSize: '12.5px', color: 'var(--text-faint)', fontStyle: 'italic', margin: 0 }}>No description captured.</p>
           )}
         </div>
+
+        {/* Near-duplicate reposts — same-employer postings the semantic-dedup
+            pass folded into this one. Kept but skipped by L2, so we say so: the
+            user shouldn't wonder why these have no score. */}
+        {duplicates.length > 0 && (
+          <div>
+            <SectionLabel><Layers size={11} style={{ marginRight: 5, verticalAlign: '-1px' }} />Near-duplicate reposts</SectionLabel>
+            <div style={{ fontSize: '11.5px', color: 'var(--text-faint)', marginTop: -3, marginBottom: 7 }}>
+              Same role detected on other boards — not separately scored.
+            </div>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+              {duplicates.map((d, i) => (
+                <li key={d.id} style={{ borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none' }}>
+                  <a href={d.url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', textDecoration: 'none' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.title}</div>
+                      <div style={{ fontSize: '11.5px', color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.company}{d.source_name ? ` · ${d.source_name}` : ''}</div>
+                    </div>
+                    <ExternalLink size={12} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Similar jobs — nearest neighbours by local embedding. A "more like
             this" triage move; each opens its posting directly. Hidden when the

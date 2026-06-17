@@ -58,6 +58,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   -- search via this column (see runScan upsertJob).
   last_run_id          INTEGER,
   duplicate_urls       TEXT,
+  -- semantic-dedup pointer. When a posting is a near-duplicate of another (same
+  -- normalized company, embedding cosine over threshold) this holds the canonical
+  -- jobs.id it folds into. NULL = canonical or unique. Set by the semantic-dedup
+  -- pass (runner/semantic-dedup.ts), recomputed each run. Duplicates are kept
+  -- (never deleted) but hidden from the default jobs list and skipped by L2.
+  duplicate_of         INTEGER,
   -- deterministic ghost-job signal (high or caution or suspicious) plus a JSON
   -- array of human-readable reasons. Written by the legitimacy pass in
   -- runner/legitimacy.ts, recomputed after liveness checks. NULL until a run

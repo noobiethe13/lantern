@@ -1,5 +1,5 @@
-import { db } from '../db/client';
-import { cosineSim, deserializeVector, embedTexts, serializeVector } from '../core/embed';
+import { cosineSim, embedTexts } from '../core/embed';
+import { ensureEmbeddings } from './embed-fill';
 import { embeddingEnabled } from '../routes/embeddings';
 import type { L2JobRow } from './scan';
 
@@ -9,10 +9,6 @@ import type { L2JobRow } from './scan';
 // a worse queue position, never a missed match. Any failure (model can't load,
 // etc.) falls back to the original order: embeddings are an enhancement, never a
 // gate on L2.
-
-function jobText(job: L2JobRow): string {
-  return [job.title, job.company, job.jd_text ?? ''].filter(Boolean).join('\n');
-}
 
 /**
  * Return the L1 survivors reordered most-relevant-first. No-ops (returns the
@@ -24,25 +20,7 @@ export async function prerankSurvivors(jobs: L2JobRow[], queryText: string): Pro
   if (!embeddingEnabled() || jobs.length <= 1 || queryText.trim() === '') return jobs;
 
   try {
-    const vecById = new Map<number, Float32Array>();
-    const missing: L2JobRow[] = [];
-    for (const job of jobs) {
-      const vec = deserializeVector(job.embedding);
-      if (vec) vecById.set(job.id, vec);
-      else missing.push(job);
-    }
-
-    if (missing.length > 0) {
-      const vecs = await embedTexts(missing.map(jobText));
-      const persist = db.prepare('UPDATE jobs SET embedding = ? WHERE id = ?');
-      const tx = db.transaction((rows: { id: number; vec: Float32Array }[]) => {
-        for (const r of rows) persist.run(serializeVector(r.vec), r.id);
-      });
-      const pairs = missing.map((job, i) => ({ id: job.id, vec: vecs[i] }));
-      tx(pairs);
-      for (const p of pairs) vecById.set(p.id, p.vec);
-    }
-
+    const vecById = await ensureEmbeddings(jobs);
     const [queryVec] = await embedTexts([queryText]);
     if (!queryVec) return jobs;
 

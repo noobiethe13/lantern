@@ -122,6 +122,14 @@ export function runMigrations(db: Database): void {
   if (!jobsCols.includes('embedding')) {
     db.run('ALTER TABLE jobs ADD COLUMN embedding BLOB');
   }
+
+  // duplicate_of: canonical jobs.id a semantic near-duplicate folds into (see
+  // runner/semantic-dedup.ts). Pre-existing rows stay NULL until a run re-dedups.
+  // Indexed below — the jobs list filters `duplicate_of IS NULL` and the
+  // duplicates endpoint queries `duplicate_of = ?`.
+  if (!jobsCols.includes('duplicate_of')) {
+    db.run('ALTER TABLE jobs ADD COLUMN duplicate_of INTEGER');
+  }
   const stale = db
     .query<{ id: number; company: string }, []>(
       'SELECT id, company FROM jobs WHERE company_norm IS NULL'
@@ -135,4 +143,5 @@ export function runMigrations(db: Database): void {
     backfill(stale);
   }
   db.run('CREATE INDEX IF NOT EXISTS idx_jobs_company_norm ON jobs(company_norm)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_jobs_duplicate_of ON jobs(duplicate_of)');
 }
