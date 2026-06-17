@@ -66,7 +66,12 @@ export class HimalayasAdapter implements SourceAdapter {
     let total = 0;
     for (const keyword of keywords) {
       if (ctx.abortSignal.aborted) break;
-      const json = await fetchJson(buildUrl(keyword), { allowedHosts: HIMALAYAS_ALLOWED_HOSTS });
+      const json = await fetchJson(buildUrl(keyword), {
+        allowedHosts: HIMALAYAS_ALLOWED_HOSTS,
+        // Aggregators can be slow; without this they hit the 10s default and abort.
+        timeoutMs: 30_000,
+        retries: 2,
+      });
       for (const job of parseHimalayas(json)) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);

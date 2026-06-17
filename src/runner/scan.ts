@@ -15,6 +15,7 @@ import { activeResumeText } from '../routes/resume';
 import { applyLegitimacyPass } from './legitimacy';
 import { prerankSurvivors } from './preranker';
 import { criteriaToQueryText } from '../core/embed';
+import { runPool } from '../core/pool';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 
@@ -217,13 +218,26 @@ function upsertJob(
   return 'new';
 }
 
+// Max source adapters fetched at once, via a sliding-window pool (runPool). Kept
+// at 10 deliberately: Greenhouse/Ashby/Lever boards each share one API host, so a
+// higher global width raises per-host request rate (and rate-limit risk) more than
+// it buys — the real speedup is the pool itself (no idle gaps waiting on a batch's
+// slowest member), not a bigger number.
 const CONCURRENCY = 10;
 
-// L2 grades jobs in batches of this size per `claude` call to amortize the
-// per-subprocess cold-start overhead (~15K uncacheable tokens). Sequential for
-// now; timeout scales with batch size (10 jobs ≫ 1, so the default 120s is tight).
-const L2_BATCH_SIZE = 10;
-const L2_BATCH_TIMEOUT_MS = 240_000;
+// L2 grades jobs in batches of this size per `claude` call to amortize the large
+// FIXED per-spawn cost (minimal system prompt + JSON schema + CLI scaffolding,
+// re-sent every subprocess and uncacheable across processes). Bigger batches =
+// fewer spawns = less of that overhead AND less total usage (so a Claude session
+// limit is hit later or not at all) — with no change to per-job grading, since each
+// job is still graded independently on its own title/company/location/JD. This is
+// the one L2 cost lever that trades away neither recall nor model quality. 20 is a
+// conservative step up from the original 10; raise it further if verdict quality
+// holds. Sequential.
+const L2_BATCH_SIZE = 20;
+// Kill-timeout scales with batch size (~24s/job, matching the original 240s for 10)
+// — a bigger batch does proportionally more inference before returning.
+const L2_BATCH_TIMEOUT_MS = L2_BATCH_SIZE * 24_000;
 
 export async function runScan(query?: string): Promise<number> {
   console.log('lantern — starting scan');
@@ -262,79 +276,75 @@ export async function runScan(query?: string): Promise<number> {
 
   const abort = new AbortController();
 
-  for (let i = 0; i < sources.length; i += CONCURRENCY) {
-    const batch = sources.slice(i, i + CONCURRENCY);
-
-    const results = await Promise.allSettled(
-      batch.map(async source => {
-        const adapter = getAdapter(source.type);
-        if (!adapter) {
-          console.log(`  [skip] no adapter for type: ${source.type}`);
-          return;
-        }
-
-        bus.emit({ runId, type: 'source_start', msg: `Scanning ${source.display_name}`, data: { source: source.display_name } });
-
-        const config: Record<string, unknown> = {
-          identifier: source.identifier,
-          display_name: source.display_name,
-          ...(source.config_json ? JSON.parse(source.config_json) : {}),
-        };
-
-        const ctx = {
-          sourceId: source.id,
-          config,
-          keywords: criteria.title?.positive ?? [],
-          locations: criteria.location?.allowed ?? [],
-          remoteRequired: criteria.location?.remote_required ?? false,
-          emitProgress: (msg: string, _n?: number) => {
-            console.log(`  ${msg}`);
-            bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });
-          },
-          abortSignal: abort.signal,
-        };
-
-        let sourceJobCount = 0;
-        try {
-          for await (const job of adapter.fetch(ctx)) {
-            if (abort.signal.aborted) break;
-            const { pass, reasons } = l1Filter(job, criteria);
-            const status = upsertJob(job, source.id, runId, pass, reasons);
-            jobsFound++;
-            sourceJobCount++;
-            if (status === 'new') jobsNew++;
-            if (pass) jobsL1Pass++;
-          }
-
-          db.run(
-            `UPDATE sources SET last_scan_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?`,
-            [Date.now(), source.id]
-          );
-
-          const doneMsg = `${source.display_name}: ${sourceJobCount} jobs`;
-          bus.emit({ runId, type: 'source_done', msg: doneMsg, data: { source: source.display_name, count: sourceJobCount } });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const status = isSourceFetchError(err) ? err.kind : 'http-error';
-          console.error(`  [error:${status}] ${source.display_name}: ${msg}`);
-          runErrors.push({ source: source.display_name, error: msg });
-          db.run(
-            `UPDATE sources SET last_scan_at = ?, last_status = ?, last_error = ? WHERE id = ?`,
-            [Date.now(), status, msg, source.id]
-          );
-          bus.emit({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}`, data: { source: source.display_name, error: msg } });
-        }
-
-        return sourceJobCount;
-      })
-    );
-
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        runErrors.push({ source: 'unknown', error: String(result.reason) });
-      }
+  // Per-source scan. Owns its own error handling (a failed board marks itself and
+  // is recorded in runErrors, never aborts the run). Run via a sliding-window pool
+  // so the next source starts the instant one finishes — no batch waits on its
+  // slowest member.
+  const scanOne = async (source: DbSource): Promise<void> => {
+    const adapter = getAdapter(source.type);
+    if (!adapter) {
+      console.log(`  [skip] no adapter for type: ${source.type}`);
+      return;
     }
-  }
+
+    bus.emit({ runId, type: 'source_start', msg: `Scanning ${source.display_name}`, data: { source: source.display_name } });
+
+    const config: Record<string, unknown> = {
+      identifier: source.identifier,
+      display_name: source.display_name,
+      ...(source.config_json ? JSON.parse(source.config_json) : {}),
+    };
+
+    const ctx = {
+      sourceId: source.id,
+      config,
+      keywords: criteria.title?.positive ?? [],
+      locations: criteria.location?.allowed ?? [],
+      remoteRequired: criteria.location?.remote_required ?? false,
+      emitProgress: (msg: string, _n?: number) => {
+        console.log(`  ${msg}`);
+        bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });
+      },
+      abortSignal: abort.signal,
+    };
+
+    let sourceJobCount = 0;
+    try {
+      for await (const job of adapter.fetch(ctx)) {
+        if (abort.signal.aborted) break;
+        const { pass, reasons } = l1Filter(job, criteria);
+        const status = upsertJob(job, source.id, runId, pass, reasons);
+        jobsFound++;
+        sourceJobCount++;
+        if (status === 'new') jobsNew++;
+        if (pass) jobsL1Pass++;
+      }
+
+      db.run(
+        `UPDATE sources SET last_scan_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?`,
+        [Date.now(), source.id]
+      );
+
+      const doneMsg = `${source.display_name}: ${sourceJobCount} jobs`;
+      bus.emit({ runId, type: 'source_done', msg: doneMsg, data: { source: source.display_name, count: sourceJobCount } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status = isSourceFetchError(err) ? err.kind : 'http-error';
+      console.error(`  [error:${status}] ${source.display_name}: ${msg}`);
+      runErrors.push({ source: source.display_name, error: msg });
+      db.run(
+        `UPDATE sources SET last_scan_at = ?, last_status = ?, last_error = ? WHERE id = ?`,
+        [Date.now(), status, msg, source.id]
+      );
+      bus.emit({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}`, data: { source: source.display_name, error: msg } });
+    }
+  };
+
+  // runPool's onError is the safety net for anything scanOne itself didn't catch
+  // (e.g. a malformed config_json before the try) — it should be rare.
+  await runPool(sources, CONCURRENCY, scanOne, (source, err) => {
+    runErrors.push({ source: source.display_name, error: String(err) });
+  });
 
   // NOTE: finished_at is intentionally NOT set here. The run isn't done until L2
   // finishes (runFull sets finished_at after runL2Pass). Setting it at L1-end made

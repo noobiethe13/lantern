@@ -30,7 +30,7 @@ paths:
   comments **semicolon-free** — `migrate.ts` splits on `;` before stripping
   comments. Migrations aren't test-covered: verify changes with `runMigrations`
   on a `:memory:` DB. Indexes on migration-added columns go in `migrate.ts`.
-- **L2 cost.** `runL2Pass` grades jobs in **batches of `L2_BATCH_SIZE` (10)** per
+- **L2 cost.** `runL2Pass` grades jobs in **batches of `L2_BATCH_SIZE` (20)** per
   `claude` call to amortize the ~15K uncacheable cold-start tokens each subprocess
   re-sends. Batches are **sequential**; each call uses `BatchVerdictShape`
   (`{verdicts:[{job_id,...}]}`) and maps results back by `job_id` (an id missing

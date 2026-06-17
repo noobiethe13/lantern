@@ -50,7 +50,11 @@ export class ArbeitnowAdapter implements SourceAdapter {
     }
     ctx.emitProgress(`Fetching Arbeitnow for ${keywords.join(', ')}…`);
 
-    const json = await fetchJson(ARBEITNOW_URL, { allowedHosts: ARBEITNOW_ALLOWED_HOSTS });
+    const json = await fetchJson(ARBEITNOW_URL, {
+      allowedHosts: ARBEITNOW_ALLOWED_HOSTS,
+      timeoutMs: 30_000,
+      retries: 2,
+    });
     const jobs = parseArbeitnow(json, keywords);
     for (const job of jobs) {
       if (ctx.abortSignal.aborted) break;
