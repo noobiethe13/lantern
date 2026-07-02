@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS sources (
   type            TEXT NOT NULL CHECK (type IN (
     'greenhouse', 'ashby', 'lever',
     'recruitee', 'smartrecruiters', 'workable', 'personio', 'bamboohr', 'workday',
-    'remoteok', 'arbeitnow', 'himalayas', 'linkedin'
+    'remoteok', 'arbeitnow', 'himalayas', 'linkedin', 'google_jobs', 'jobicy'
   )),
   identifier      TEXT NOT NULL,
   display_name    TEXT NOT NULL,

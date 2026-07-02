@@ -15,7 +15,8 @@ default seed list) **and** keyword-global aggregators (RemoteOK / Arbeitnow /
 Himalayas, where the keyword drives the query). Filters via deterministic L1
 rules + LLM L2 verdicts; results are scoped to the current search and ranked by
 fit. SQLite store. Local web UI at `localhost:3000`. UI-only — no user-facing CLI
-surface. No headless browser.
+surface. No headless browser in the default fetch path (an optional, lazy,
+deterministic browser tier handles a few opt-in features — see Critical rule §6).
 
 Criteria is a **derived artifact**, not user-managed: the search endpoint
 generates it from the query and writes the single `criteria` row (id=1) that the
@@ -26,7 +27,10 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
 - **Bun** (runtime, not Node) — native TS, `bun:sqlite`, builtin fetch.
 - **Hono** (HTTP server, with SSE for run progress).
 - **bun:sqlite** (DB at `data/data.db`).
-- **cheerio** (HTML / XML parsing). No Playwright, no headless browser.
+- **cheerio** (HTML / XML parsing). No browser in the default path; an
+  **optional, lazy, deterministic** browser tier (`src/runner/browser.ts`,
+  Patchright, dynamic-imported, absent by default) serves a few opt-in features —
+  never bulk fetch, never LLM-driven (§6).
 - **LLM**: **Claude Code is the only provider**. Interface in
   `src/llm/provider.ts`, `llm` singleton in `src/llm/index.ts`, the single
   backend at `src/llm/providers/claude-code.ts` (spawns the `claude` CLI in
@@ -98,8 +102,16 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
    honors this contract.
 4. **Source adapters are async iterables** so the runner can stream.
 5. **L1 runs inline during scan, no LLM.** L2 is a separate pass.
-6. **Liveness only runs on shortlisted jobs**, not at scan time, and is
-   **fetch-only** — never add a headless browser anywhere in lantern.
+6. **Liveness only runs on shortlisted jobs**, not at scan time. **No headless
+   browser in the default/hot scan path, and no LLM-driven browsing ever.** The
+   deterministic browser tier (`src/runner/browser.ts`) is the sole exception: an
+   **optional, lazy, dynamic-imported** engine (Patchright; absent by default)
+   used deterministically (navigate + fixed selectors, zero LLM tokens) for opt-in
+   features only — shortlisted-job SPA-liveness fallback, paste-a-URL extraction,
+   and opt-in browser-driven sources (best-effort Indeed). It keeps the SSRF +
+   injection caps and tears down ephemerally. `src/runner/liveness.test.ts`
+   enforces that the engine is named only in that one seam and loaded only via
+   dynamic `import()`. See ADR 0003 (session notes).
 7. **Bind the local server to `localhost` only**, never `0.0.0.0`.
 8. **Scraped/aggregator content fed to LLMs is an injection vector** — cap
    length (the `verdict` prompt slices ~4KB; `htmlToText` caps ~8KB) and
@@ -186,9 +198,16 @@ internal types — convert at the boundary in src/api/client.ts" -->
   `src/db/client.ts`) runs `createDb()` and all migrations at module
   load. Tests and standalone tools that import the `llm` singleton pay
   filesystem cost up-front; if they don't need the DB, stub it.
-- Playwright / any headless browser is banned everywhere in lantern (removed
-  in Phase 8). Liveness is fetch-only; `src/runner/liveness.test.ts` asserts
-  Playwright is not imported anywhere.
+- The browser ban is now **scoped, not absolute** (Phase 5, ADR 0003). A headless
+  browser was removed in Phase 8 because it served a deleted LLM-HTML-extraction
+  strategy — the binding constraint was deterministic/fetch-only identity, not the
+  browser per se. The deterministic browser tier (`src/runner/browser.ts`) is an
+  optional, lazy, dynamic-imported engine (absent by default, zero LLM tokens),
+  allowed ONLY for opt-in liveness-fallback / paste-a-URL / browser-driven sources.
+  `src/runner/liveness.test.ts` now asserts the engine is named only in that seam
+  and loaded only via dynamic `import()` — NOT that no browser exists. Still banned:
+  a browser in the default/hot fetch path, a static engine import anywhere, and any
+  LLM-driven browsing (screenshots/DOM → model).
 - Claude Code is the only LLM provider; there is no provider switcher or
   `constructionKey()` cache (removed in Phase 1 — the provider takes no
   construction inputs, so a single lazy instance is reused). Per-task model

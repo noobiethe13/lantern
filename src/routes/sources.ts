@@ -19,6 +19,8 @@ const SOURCE_TYPES = [
   'arbeitnow',
   'himalayas',
   'linkedin',
+  'google_jobs',
+  'jobicy',
 ] as const;
 
 const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
@@ -35,6 +37,8 @@ const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
   arbeitnow: 'Arbeitnow identifier',
   himalayas: 'Himalayas identifier',
   linkedin: 'LinkedIn identifier',
+  google_jobs: 'Google Jobs identifier',
+  jobicy: 'Jobicy identifier',
 };
 
 // Keyword-global aggregators have no per-company slug — the role/keyword drives
@@ -42,7 +46,9 @@ const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
 // slug-safe sentinel so the (type, identifier) uniqueness constraint holds.
 // LinkedIn is gated/unofficial (default-disabled in the UI) but still a
 // keyword-driven aggregator.
-const AGGREGATOR_TYPES = new Set(['remoteok', 'arbeitnow', 'himalayas', 'linkedin']);
+const AGGREGATOR_TYPES = new Set([
+  'remoteok', 'arbeitnow', 'himalayas', 'linkedin', 'google_jobs', 'jobicy',
+]);
 
 const CreateSourceSchema = z.object({
   type: z.enum(SOURCE_TYPES),
@@ -99,6 +105,15 @@ sources.post('/', async c => {
     }
     if (!hasHost && !hasDc) {
       return c.json({ error: 'Workday source requires config_json.dc (e.g. "wd5") or config_json.host' }, 400);
+    }
+  }
+
+  // Google Jobs (SerpAPI) needs the user's API key in config_json — never
+  // hard-coded. An unconfigured source would be inert, so reject at create time.
+  if (type === 'google_jobs') {
+    const apiKey = config_json?.['apiKey'];
+    if (typeof apiKey !== 'string' || !apiKey.trim()) {
+      return c.json({ error: 'Google Jobs source requires config_json.apiKey (your SerpAPI key)' }, 400);
     }
   }
 

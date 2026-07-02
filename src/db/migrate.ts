@@ -10,7 +10,7 @@ import { normalizeCompany } from '../core/dedup';
 const SOURCE_TYPE_CHECK = [
   'greenhouse', 'ashby', 'lever',
   'recruitee', 'smartrecruiters', 'workable', 'personio', 'bamboohr', 'workday',
-  'remoteok', 'arbeitnow', 'himalayas', 'linkedin',
+  'remoteok', 'arbeitnow', 'himalayas', 'linkedin', 'google_jobs', 'jobicy',
 ];
 
 /**
@@ -78,6 +78,11 @@ export function runMigrations(db: Database): void {
   for (const stmt of statements) {
     db.run(stmt);
   }
+
+  // 'indeed' was a short-lived browser-tier source, dropped before commit. Remove any
+  // seeded indeed rows BEFORE the CHECK rebuild below — the rebuild copies rows with
+  // SELECT *, and an indeed row would violate the new CHECK (which no longer lists it).
+  db.run("DELETE FROM sources WHERE type = 'indeed'");
 
   migrateSourceTypeCheck(db);
 

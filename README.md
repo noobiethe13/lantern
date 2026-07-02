@@ -72,7 +72,7 @@ bun test path/to/file.test.ts             # a single file
 ## Architecture
 
 See [CLAUDE.md](CLAUDE.md) for the full architecture, critical rules, and
-common tasks, and [docs/adr/](docs/adr/) for design records. In brief:
+common tasks. In brief:
 
 - **Source adapters** (`src/sources/*`) are async iterables so the runner
   streams jobs into SQLite without buffering. Registry at

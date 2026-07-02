@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {
   api, type Source, type SourceType, type HealthCheck, type ResumeSettings,
-  type EmbeddingSettings,
+  type EmbeddingSettings, type FreshnessSettings,
 } from '@/lib/api';
 import { Button, Input, Badge, Spinner, Textarea, useToast } from '@/components/ui';
 
@@ -28,6 +28,8 @@ const SOURCE_TYPE_OPTIONS: { value: SourceType; label: string; placeholder: stri
   { value: 'arbeitnow', label: 'Arbeitnow', placeholder: 'global — searched by your role keyword' },
   { value: 'himalayas', label: 'Himalayas', placeholder: 'global — searched by your role keyword' },
   { value: 'linkedin', label: 'LinkedIn', placeholder: 'global — searched by your role keyword', gated: true },
+  { value: 'google_jobs', label: 'Google Jobs', placeholder: 'global — needs a SerpAPI key' },
+  { value: 'jobicy', label: 'Jobicy', placeholder: 'global — searched by your role keyword' },
 ];
 
 const TYPE_TONE: Record<SourceType, BadgeTone> = {
@@ -35,6 +37,7 @@ const TYPE_TONE: Record<SourceType, BadgeTone> = {
   smartrecruiters: 'danger', workable: 'neutral', personio: 'neutral',
   bamboohr: 'success', workday: 'blue',
   remoteok: 'accent', arbeitnow: 'accent', himalayas: 'accent', linkedin: 'warning',
+  google_jobs: 'blue', jobicy: 'accent',
 };
 
 const GATED_TYPES = new Set<SourceType>(
@@ -132,22 +135,27 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
   const [displayName, setDisplayName] = useState('');
   const [wdSite, setWdSite] = useState('');
   const [wdDc, setWdDc] = useState('');
+  const [serpKey, setSerpKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typeOpt = SOURCE_TYPE_OPTIONS.find(t => t.value === type)!;
   const isWorkday = type === 'workday';
+  const isGoogleJobs = type === 'google_jobs';
   const isGated = GATED_TYPES.has(type);
   const workdayReady = !isWorkday || (wdSite.trim() && wdDc.trim());
+  const googleReady = !isGoogleJobs || !!serpKey.trim();
 
   const handleAdd = async () => {
-    if (!identifier.trim() || !displayName.trim() || !workdayReady) return;
+    if (!identifier.trim() || !displayName.trim() || !workdayReady || !googleReady) return;
     setSaving(true); setError(null);
     try {
       const config_json = isWorkday
         ? { site: wdSite.trim(), dc: wdDc.trim() }
-        : undefined;
+        : isGoogleJobs
+          ? { apiKey: serpKey.trim() }
+          : undefined;
       await api.sources.create({ type, identifier: identifier.trim(), display_name: displayName.trim(), config_json });
-      setIdentifier(''); setDisplayName(''); setWdSite(''); setWdDc(''); setOpen(false); onAdded();
+      setIdentifier(''); setDisplayName(''); setWdSite(''); setWdDc(''); setSerpKey(''); setOpen(false); onAdded();
     } catch (e) { setError(String(e)); } finally { setSaving(false); }
   };
 
@@ -193,6 +201,15 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
         <div style={{ fontSize: '11.5px', color: 'var(--text-faint)' }}>
           From the careers URL <span style={{ fontFamily: 'var(--font-mono)' }}>{'{tenant}.{dc}.myworkdayjobs.com/{site}'}</span> — e.g.
           {' '}<span style={{ fontFamily: 'var(--font-mono)' }}>salesforce</span> · <span style={{ fontFamily: 'var(--font-mono)' }}>wd12</span> · <span style={{ fontFamily: 'var(--font-mono)' }}>External_Career_Site</span>.
+        </div>
+      )}
+      {isGoogleJobs && (
+        <div>
+          <label htmlFor="add-src-serpkey" style={{ display: 'block', fontSize: '11px', color: 'var(--text-faint)', marginBottom: 4 }}>SerpAPI key</label>
+          <Input id="add-src-serpkey" type="password" value={serpKey} onChange={e => setSerpKey(e.target.value)} placeholder="your SerpAPI api_key" style={{ fontSize: '12.5px', height: 32 }} />
+          <div style={{ fontSize: '11.5px', color: 'var(--text-faint)', marginTop: 6 }}>
+            Google's deduplicated cross-board index (LinkedIn, ATS, ZipRecruiter). Stored locally; sent only to serpapi.com. Does <strong>not</strong> include Indeed.
+          </div>
         </div>
       )}
       {isGated && (
@@ -430,6 +447,73 @@ function ResumeSection() {
   );
 }
 
+function FreshnessSection() {
+  const toast = useToast();
+  const [saved, setSaved] = useState<FreshnessSettings | null>(null);
+  const [enabled, setEnabled] = useState(true);
+  const [days, setDays] = useState(7);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.freshness.get().then(res => {
+      setSaved(res.settings);
+      setEnabled(res.settings.enabled);
+      setDays(res.settings.maxAgeDays);
+    }).catch(() => setSaved({ enabled: true, maxAgeDays: 7 }));
+  }, []);
+
+  const clampedDays = Math.min(365, Math.max(1, Math.floor(days) || 7));
+  const dirty = saved !== null && (enabled !== saved.enabled || clampedDays !== saved.maxAgeDays);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await api.freshness.save({ enabled, maxAgeDays: clampedDays });
+      setSaved(res.settings);
+      setDays(res.settings.maxAgeDays);
+      toast(enabled
+        ? `Freshness on — dropping dated jobs older than ${clampedDays} days before grading.`
+        : 'Freshness off.', 'success');
+    } catch (e) {
+      toast(`Could not save: ${String(e)}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (saved === null) {
+    return (
+      <div>
+        <SectionHeading title="Freshness" desc="Skip stale postings before grading." />
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}><Spinner /></div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionHeading
+        title="Freshness"
+        desc="Drop jobs whose posted date is older than your window before L2 grades them — cuts grading cost and surfaces fresh roles. Jobs with no posted date always pass through."
+        action={
+          <button onClick={() => setEnabled(v => !v)} aria-pressed={enabled} style={{ background: enabled ? 'var(--accent-muted)' : 'var(--surface-2)', color: enabled ? 'var(--accent-text)' : 'var(--text-faint)', border: 'none', borderRadius: 'var(--radius-sm)', padding: '5px 12px', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 150ms ease', whiteSpace: 'nowrap' }}>
+            {enabled ? 'On' : 'Off'}
+          </button>
+        }
+      />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <label htmlFor="freshness-days" style={{ fontSize: '12.5px', color: enabled ? 'var(--text)' : 'var(--text-faint)' }}>Max age</label>
+        <Input id="freshness-days" type="number" min={1} max={365} value={String(days)} disabled={!enabled} onChange={e => setDays(Number(e.target.value))} style={{ width: 72, fontSize: '12.5px', height: 32 }} />
+        <span style={{ fontSize: '12.5px', color: 'var(--text-faint)' }}>days</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+          {dirty && <span style={{ fontSize: '11.5px', color: 'var(--warning)' }}>Unsaved changes</span>}
+          <Button size="sm" onClick={handleSave} loading={saving} disabled={!dirty}>Save</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EmbeddingSection() {
   const toast = useToast();
   const [saved, setSaved] = useState<EmbeddingSettings | null>(null);
@@ -656,6 +740,9 @@ export default function Settings() {
         </section>
         <section style={strip}>
           <EmbeddingSection />
+        </section>
+        <section style={strip}>
+          <FreshnessSection />
         </section>
         <section style={strip}>
           <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={checkHealth} />

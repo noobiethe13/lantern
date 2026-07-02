@@ -19,6 +19,14 @@ export interface L1Result {
   reasons: string[];
 }
 
+export interface L1Options {
+  /** Reference time for the freshness gate (defaults to Date.now()). */
+  now?: number;
+  /** Drop dated jobs older than this many days. 0/absent disables the gate; a job
+   *  with no posted date always passes. */
+  maxAgeDays?: number;
+}
+
 // Word-bounded senior/management title markers, consulted ONLY when the criteria
 // restricts to junior/mid (see the seniority gate in l1Filter). Deliberately
 // EXCLUDES 'lead', 'manager', and 'architect' — those mark a role, not a level
@@ -33,7 +41,7 @@ const SENIOR_TITLE_RE =
 // these, the user asked for junior/mid only and the seniority gate engages.
 const SENIOR_LEVELS = new Set(['senior', 'staff', 'principal']);
 
-export function l1Filter(job: Job, c: Criteria): L1Result {
+export function l1Filter(job: Job, c: Criteria, opts: L1Options = {}): L1Result {
   const reasons: string[] = [];
   const lower = (s?: string) => (s ?? '').toLowerCase();
 
@@ -122,6 +130,19 @@ export function l1Filter(job: Job, c: Criteria): L1Result {
     reasons.push(
       `salary ${job.salary_min_usd} ${job.salary_currency} below floor ${c.salary_min_usd}`
     );
+  }
+
+  // Freshness gate: drop jobs whose posted date is older than the user's window.
+  // Deterministic + zero-token — trims stale postings from the L2 queue (the
+  // binding cost constraint). A job with no posted date passes (don't drop what we
+  // can't date); a within-window or future date passes too. "Older" is strict:
+  // a job posted exactly maxAgeDays ago still passes.
+  if (opts.maxAgeDays && opts.maxAgeDays > 0 && job.posted_at != null) {
+    const now = opts.now ?? Date.now();
+    const ageDays = Math.floor((now - job.posted_at) / 86_400_000);
+    if (ageDays > opts.maxAgeDays) {
+      reasons.push(`posted ${ageDays}d ago, older than ${opts.maxAgeDays}d freshness window`);
+    }
   }
 
   return { pass: reasons.length === 0, reasons };

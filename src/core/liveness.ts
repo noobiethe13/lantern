@@ -74,4 +74,4 @@ export function classifyLiveness(i: LivenessInput): LivenessResult {
   return { result: 'uncertain', reason: 'no apply control found' };
 }
 
-export { MIN_CONTENT };
+export { MIN_CONTENT, isSpaHost };

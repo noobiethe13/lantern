@@ -77,6 +77,8 @@ const SOURCE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'arbeitnow', label: 'Arbeitnow' },
   { value: 'himalayas', label: 'Himalayas' },
   { value: 'linkedin', label: 'LinkedIn' },
+  { value: 'google_jobs', label: 'Google Jobs' },
+  { value: 'jobicy', label: 'Jobicy' },
 ];
 
 // Understated underline search — the masthead's quiet right-hand affordance.
@@ -253,8 +255,15 @@ function RefineControl({
 const TRIAGED_STATUSES: JobStatus[] = ['shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'];
 
 function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolean; index: number; onSelect: () => void }) {
-  const daysAgo = Math.floor((Date.now() - job.first_seen) / 86400000);
+  // Age reflects when the job was POSTED when the source gave a date (more useful
+  // than when Lantern happened to scan it); fall back to first_seen (scan time)
+  // only when there's no posted date, and say so in the tooltip.
+  const ageBasis = job.posted_at ?? job.first_seen;
+  const daysAgo = Math.floor((Date.now() - ageBasis) / 86400000);
   const seen = daysAgo === 0 ? 'today' : daysAgo === 1 ? '1d' : `${daysAgo}d`;
+  const ageTitle = job.posted_at != null
+    ? `Posted ${new Date(job.posted_at).toLocaleDateString()}`
+    : `First seen ${new Date(job.first_seen).toLocaleDateString()} (no posted date)`;
   const v = job.l2_verdict;
 
   return (
@@ -335,7 +344,7 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
             </span>}
       </div>
 
-      <span className="col-seen tnum" style={{ alignSelf: 'center', fontSize: '11.5px', color: daysAgo === 0 ? 'var(--accent-text)' : 'var(--text-faint)', fontWeight: daysAgo === 0 ? 600 : 400, textAlign: 'right' }}>{seen}</span>
+      <span className="col-seen tnum" title={ageTitle} style={{ alignSelf: 'center', fontSize: '11.5px', color: daysAgo === 0 ? 'var(--accent-text)' : 'var(--text-faint)', fontWeight: daysAgo === 0 ? 600 : 400, textAlign: 'right' }}>{seen}</span>
     </div>
   );
 }
@@ -664,6 +673,11 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
           </div>
         )}
 
+        {job.posted_at != null && (
+          <div style={{ fontSize: '11px', color: 'var(--text-faint)' }}>
+            Posted {new Date(job.posted_at).toLocaleDateString()}
+          </div>
+        )}
         <div style={{ fontSize: '11px', color: 'var(--text-faint)' }}>
           First seen {new Date(job.first_seen).toLocaleDateString()}
         </div>

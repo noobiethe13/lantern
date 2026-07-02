@@ -200,3 +200,36 @@ describe('l1Filter — salary + excludes', () => {
     expect(l1Filter(job(), c).pass).toBe(false);
   });
 });
+
+describe('l1Filter — freshness gate', () => {
+  const now = 1000 * 86_400_000; // fixed reference "now" (day 1000) in ms
+  const daysAgo = (n: number) => now - n * 86_400_000;
+
+  test('passes a job posted within the window', () => {
+    expect(l1Filter(job({ posted_at: daysAgo(3) }), {}, { now, maxAgeDays: 7 }).pass).toBe(true);
+  });
+
+  test('drops a job posted older than the window, with a freshness reason', () => {
+    const r = l1Filter(job({ posted_at: daysAgo(20) }), {}, { now, maxAgeDays: 7 });
+    expect(r.pass).toBe(false);
+    expect(r.reasons.some(x => x.includes('freshness'))).toBe(true);
+  });
+
+  test('passes a job with no posted date (cannot date it)', () => {
+    expect(l1Filter(job({ posted_at: null }), {}, { now, maxAgeDays: 7 }).pass).toBe(true);
+    expect(l1Filter(job(), {}, { now, maxAgeDays: 7 }).pass).toBe(true); // posted_at undefined
+  });
+
+  test('no gate when maxAgeDays is 0 or absent', () => {
+    expect(l1Filter(job({ posted_at: daysAgo(365) }), {}, { now, maxAgeDays: 0 }).pass).toBe(true);
+    expect(l1Filter(job({ posted_at: daysAgo(365) }), {}).pass).toBe(true);
+  });
+
+  test('exactly at the boundary passes (older is strict)', () => {
+    expect(l1Filter(job({ posted_at: daysAgo(7) }), {}, { now, maxAgeDays: 7 }).pass).toBe(true);
+  });
+
+  test('a future posted date passes', () => {
+    expect(l1Filter(job({ posted_at: now + 86_400_000 }), {}, { now, maxAgeDays: 7 }).pass).toBe(true);
+  });
+});

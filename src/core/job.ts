@@ -48,7 +48,9 @@ export type SourceType =
   | 'remoteok'
   | 'arbeitnow'
   | 'himalayas'
-  | 'linkedin';
+  | 'linkedin'
+  | 'google_jobs'
+  | 'jobicy';
 
 export interface SourceAdapter {
   type: SourceType;

@@ -350,5 +350,10 @@ sources:
   - { type: arbeitnow,  identifier: arbeitnow,  display_name: "Arbeitnow (EU)",     enabled: true }
   - { type: himalayas,  identifier: himalayas,  display_name: "Himalayas (remote)", enabled: true }
   # LinkedIn — gated/unofficial guest endpoint; keyword-driven aggregator.
-  # Default DISABLED: gray-area, aggressively rate-limited, no JD/salary in cards.
+  # Default DISABLED: gray-area, aggressively rate-limited. JD enriched via the
+  # keyless detail endpoint (capped); no salary (login-only).
   - { type: linkedin,   identifier: linkedin,   display_name: "LinkedIn (guest)",   enabled: false }
+  # Jobicy — keyless public remote-jobs API; honest fetch aggregator like Himalayas.
+  - { type: jobicy,     identifier: jobicy,     display_name: "Jobicy (remote)",    enabled: true }
+  # Google Jobs (SerpAPI) is NOT seeded — it needs the user's API key, so it's added
+  # via Settings → Add a source (key stored in config_json). Covers LinkedIn/ATS, not Indeed.

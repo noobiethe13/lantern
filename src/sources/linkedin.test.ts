@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseLinkedIn } from './linkedin';
+import { parseLinkedIn, parseLinkedInDetail } from './linkedin';
 
 // Trimmed real shape from the guest `seeMoreJobPostings/search` fragment: a
 // `<ul>` of `<li>` cards. Card 1 is complete; card 2 uses the `--new` listdate
@@ -78,5 +78,34 @@ describe('parseLinkedIn', () => {
 
   test('returns [] for empty input', () => {
     expect(parseLinkedIn('')).toEqual([]);
+  });
+});
+
+describe('parseLinkedInDetail', () => {
+  test('extracts JD text from show-more-less-html__markup', () => {
+    const html = `
+      <section class="show-more-less-html">
+        <div class="show-more-less-html__markup">
+          <p>We are hiring a <strong>Backend Engineer</strong>.</p>
+          <ul><li>Python</li><li>PostgreSQL</li></ul>
+        </div>
+      </section>`;
+    const jd = parseLinkedInDetail(html);
+    expect(jd).toContain('Backend Engineer');
+    expect(jd).toContain('Python');
+    expect(jd).toContain('PostgreSQL');
+  });
+
+  test('falls back to description__text when markup container is absent', () => {
+    const html = '<div class="description__text"><p>Fallback description body.</p></div>';
+    expect(parseLinkedInDetail(html)).toContain('Fallback description body');
+  });
+
+  test('returns null (not "") when no JD container is present', () => {
+    expect(parseLinkedInDetail('<div class="other">nope</div>')).toBeNull();
+  });
+
+  test('returns null for empty input', () => {
+    expect(parseLinkedInDetail('')).toBeNull();
   });
 });

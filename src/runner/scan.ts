@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 import { db } from '../db/client';
 import { getAdapter } from '../sources/index';
 import { l1Filter, type Criteria } from '../core/filter';
+import { freshnessMaxAgeDays } from '../routes/freshness';
 import { contentHash, normalizeCompany, rolesMatch } from '../core/dedup';
 import { toDbRow } from '../core/normalize';
 import type { Job } from '../core/job';
@@ -275,6 +276,11 @@ export async function runScan(query?: string): Promise<number> {
   let jobsNew = 0;
   let jobsL1Pass = 0;
 
+  // Freshness gate inputs, read once for the whole scan (a single reference time
+  // keeps the cutoff consistent across the minutes a scan runs). 0 = disabled.
+  const freshMaxAge = freshnessMaxAgeDays();
+  const scanNow = Date.now();
+
   const abort = new AbortController();
 
   // Per-source scan. Owns its own error handling (a failed board marks itself and
@@ -313,7 +319,7 @@ export async function runScan(query?: string): Promise<number> {
     try {
       for await (const job of adapter.fetch(ctx)) {
         if (abort.signal.aborted) break;
-        const { pass, reasons } = l1Filter(job, criteria);
+        const { pass, reasons } = l1Filter(job, criteria, { now: scanNow, maxAgeDays: freshMaxAge });
         const status = upsertJob(job, source.id, runId, pass, reasons);
         jobsFound++;
         sourceJobCount++;

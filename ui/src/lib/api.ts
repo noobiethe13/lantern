@@ -104,7 +104,9 @@ export type SourceType =
   | 'remoteok'
   | 'arbeitnow'
   | 'himalayas'
-  | 'linkedin';
+  | 'linkedin'
+  | 'google_jobs'
+  | 'jobicy';
 
 export interface Source {
   id: number;
@@ -190,6 +192,13 @@ export interface ResumeSettings {
 // first. Off skips the model entirely.
 export interface EmbeddingSettings {
   enabled: boolean;
+}
+
+// L1 freshness gate. When on, dated jobs older than `maxAgeDays` fail L1 (never
+// reach L2); jobs with no posted date always pass.
+export interface FreshnessSettings {
+  enabled: boolean;
+  maxAgeDays: number;
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -315,6 +324,15 @@ export const api = {
     get: () => request<{ settings: EmbeddingSettings }>('/settings/embeddings'),
     save: (settings: EmbeddingSettings) =>
       request<{ ok: boolean; settings: EmbeddingSettings }>('/settings/embeddings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
+  },
+
+  freshness: {
+    get: () => request<{ settings: FreshnessSettings }>('/settings/freshness'),
+    save: (settings: FreshnessSettings) =>
+      request<{ ok: boolean; settings: FreshnessSettings }>('/settings/freshness', {
         method: 'PUT',
         body: JSON.stringify(settings),
       }),

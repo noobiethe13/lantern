@@ -12,6 +12,8 @@ import { RemoteOkAdapter } from './remoteok';
 import { ArbeitnowAdapter } from './arbeitnow';
 import { HimalayasAdapter } from './himalayas';
 import { LinkedInAdapter } from './linkedin';
+import { GoogleJobsAdapter } from './google-jobs';
+import { JobicyAdapter } from './jobicy';
 
 export const adapterRegistry: Record<string, SourceAdapter> = {
   greenhouse: new GreenhouseAdapter(),
@@ -27,6 +29,8 @@ export const adapterRegistry: Record<string, SourceAdapter> = {
   arbeitnow: new ArbeitnowAdapter(),
   himalayas: new HimalayasAdapter(),
   linkedin: new LinkedInAdapter(),
+  google_jobs: new GoogleJobsAdapter(),
+  jobicy: new JobicyAdapter(),
 };
 
 export function getAdapter(type: string): SourceAdapter | null {
