@@ -1,0 +1,11 @@
+[test]
+timeout = 30000
+
+[install]
+# Never auto-install missing imports. The browser tier (src/runner/browser.ts)
+# dynamically imports an OPTIONAL engine (patchright) that must stay ABSENT in a
+# default install — without this, `bun test` exercising that import() would
+# silently auto-install it into package.json and break the "no browser by default"
+# guarantee. Real deps live in package.json and install via `bun install`; the
+# opt-in browser engine installs separately (see browser.ts header).
+auto = "disable"

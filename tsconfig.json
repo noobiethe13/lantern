@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM"],
+    "types": ["bun-types"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["./src/*"],
+      "@/*": ["./ui/src/*"]
+    }
+  },
+  "include": ["src/**/*", "scripts/**/*", "ui/**/*"],
+  "exclude": ["node_modules", "ui/dist"]
+}

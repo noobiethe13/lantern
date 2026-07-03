@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+ui/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# User data — never commit (DB, attachments, persisted browser profile)
+data/
+
+# Downloaded embedding-model weights (all-MiniLM-L6-v2) — fetched on first use
+models/
+
+# Bootstrap / per-session scratch
+.claude/session/
+
+# User-local Claude Code overrides (permissions, personal prefs)
+.claude/settings.local.json
+
+# Internal maintenance notes — kept locally, not published
+.claude/security-findings.md
+.claude/known-issues.md
+.claude/agent-memory/
+
+# OS
+.DS_Store
+Thumbs.db

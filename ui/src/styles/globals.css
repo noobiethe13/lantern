@@ -1,0 +1,351 @@
+@import "tailwindcss";
+
+/*
+  lantern design tokens — refined / premium / minimal.
+  Warm neutrals tinted toward the amber "lantern glow" accent (OKLCH).
+  Light is the default theme (:root); dark is [data-theme="dark"].
+  Hues: neutrals ~75, accent ~64 (warm amber). No pure black / white.
+*/
+
+@layer base {
+  :root {
+    /* surfaces — soft warm paper (easy on the eye, not stark white) */
+    --bg: oklch(0.931 0.015 76);
+    --surface: oklch(0.962 0.010 76);
+    --surface-2: oklch(0.908 0.017 76);
+    --border: oklch(0.844 0.017 76);
+    --border-subtle: oklch(0.888 0.014 76);
+
+    /* decorative (hero orbs / embers / rings) — on light paper the orbs are
+       multiplied in (--deco-blend) so they read as warm tinted light pooling
+       on the page, not opaque peach smudges floating over it */
+    --deco-blend: multiply;
+    --orb-1: oklch(0.78 0.16 60 / 0.60);
+    --orb-2: oklch(0.74 0.15 33 / 0.50);
+    --ring-stroke: oklch(0.60 0.155 58);
+    --ember: oklch(0.62 0.185 50);
+    /* ambient page blobs — same multiplied-light treatment */
+    --blob-1: oklch(0.82 0.11 60 / 0.34);
+    --blob-2: oklch(0.78 0.11 33 / 0.28);
+
+    /* text — warm ink (softened off pure black). 3 tiers; muted clears AA,
+       faint is a tertiary tier for non-essential meta. */
+    --text: oklch(0.30 0.020 60);
+    --text-muted: oklch(0.485 0.019 60);
+    --text-faint: oklch(0.575 0.017 60);
+
+    /* accent — the lantern glow (amber) */
+    --accent: oklch(0.695 0.155 64);       /* fill */
+    --accent-hover: oklch(0.64 0.16 61);
+    --accent-ink: oklch(0.24 0.04 65);     /* text/icon ON the accent fill */
+    --accent-text: oklch(0.535 0.135 52);  /* accent used as text/link on bg */
+    --accent-muted: oklch(0.910 0.050 72);  /* faint amber tint surface */
+    --accent-ring: oklch(0.695 0.155 64 / 0.40);
+
+    /* secondary warm tone — coral/clay, used sparingly (italic accent, highlights) */
+    --accent-2: oklch(0.605 0.155 33);
+    --accent-2-soft: oklch(0.66 0.15 33);
+
+    /* score heat ramp endpoints — scoreColor() mixes hot into ash by fit, so
+       weak scores read as cooled ash and strong fits as lantern gold */
+    --score-ash: oklch(0.62 0.02 75);
+    --score-hot: oklch(0.58 0.16 55);
+
+    /* status — warm-aligned, low chroma */
+    --success: oklch(0.56 0.12 150);
+    --warning: oklch(0.62 0.13 58);
+    --danger: oklch(0.55 0.18 27);
+    --tone-blue: oklch(0.55 0.11 250);
+    --tone-violet: oklch(0.52 0.12 300);
+
+    /* elevation — premium = very soft */
+    --shadow-sm: 0 1px 2px oklch(0.24 0.02 70 / 0.06), 0 1px 3px oklch(0.24 0.02 70 / 0.05);
+    --shadow-md: 0 1px 2px oklch(0.24 0.02 70 / 0.06), 0 6px 16px oklch(0.24 0.02 70 / 0.10), 0 16px 40px oklch(0.24 0.02 70 / 0.10);
+
+    /* type — a two-serif editorial system: a high-contrast display face
+       (Bodoni) for big moments, a humanist text serif (Source Serif) for
+       sub-headings, a warm grotesque for UI, mono for data. */
+    --font-display: 'Bodoni Moda Variable', ui-serif, Georgia, serif;
+    --font-serif: 'Source Serif 4 Variable', ui-serif, Georgia, serif;
+    --font-ui: 'Hanken Grotesk Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'Spline Sans Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+    --mono: var(--font-mono); /* back-compat alias */
+
+    /* radius */
+    --radius-sm: 6px;
+    --radius-md: 9px;
+    --radius-lg: 14px;
+    --radius-full: 999px;
+
+    /* 4pt spacing scale (semantic) */
+    --space-2xs: 4px;
+    --space-xs: 8px;
+    --space-sm: 12px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    --space-2xl: 48px;
+    --space-3xl: 64px;
+    --space-4xl: 96px;
+  }
+
+  [data-theme="dark"] {
+    /* surfaces — warm charcoal */
+    --bg: oklch(0.178 0.006 75);
+    --surface: oklch(0.214 0.007 75);
+    --surface-2: oklch(0.255 0.008 75);
+    --border: oklch(0.318 0.010 75);
+    --border-subtle: oklch(0.268 0.008 75);
+
+    /* text — warm light */
+    --text: oklch(0.935 0.008 80);
+    --text-muted: oklch(0.715 0.011 80);
+    --text-faint: oklch(0.605 0.012 80);
+
+    /* accent — brighter amber for the dark field */
+    --accent: oklch(0.765 0.15 66);
+    --accent-hover: oklch(0.82 0.14 68);
+    --accent-ink: oklch(0.20 0.035 65);
+    --accent-text: oklch(0.80 0.13 66);
+    --accent-muted: oklch(0.305 0.042 65);
+    --accent-ring: oklch(0.765 0.15 66 / 0.5);
+
+    --success: oklch(0.72 0.135 152);
+    --warning: oklch(0.78 0.13 72);
+    --danger: oklch(0.68 0.17 27);
+    --tone-blue: oklch(0.72 0.11 250);
+    --tone-violet: oklch(0.72 0.12 300);
+    --accent-2: oklch(0.70 0.15 33);
+    --accent-2-soft: oklch(0.74 0.14 33);
+
+    --score-ash: oklch(0.60 0.015 80);
+    --score-hot: oklch(0.83 0.155 70);
+
+    /* decorative — brighter on the dark field; light-on-dark already reads as
+       light, so no blend trickery needed */
+    --deco-blend: normal;
+    --orb-1: oklch(0.70 0.16 66 / 0.42);
+    --orb-2: oklch(0.60 0.15 32 / 0.36);
+    --ring-stroke: oklch(0.80 0.13 66);
+    --ember: oklch(0.82 0.15 60);
+    --blob-1: oklch(0.72 0.15 66 / 0.13);
+    --blob-2: oklch(0.62 0.15 32 / 0.12);
+
+    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.32), 0 1px 3px oklch(0 0 0 / 0.28);
+    --shadow-md: 0 2px 8px oklch(0 0 0 / 0.34), 0 12px 32px oklch(0 0 0 / 0.30);
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  html {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    font-optical-sizing: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 15px;
+    line-height: 1.55;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    min-height: 100dvh;
+  }
+
+  /* light text on the dark field reads lighter — give it more air */
+  [data-theme="dark"] body { line-height: 1.6; }
+
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 550;
+    letter-spacing: -0.01em;
+    line-height: 1.08;
+    text-wrap: balance;
+  }
+
+  h2, h3, h4 {
+    font-family: var(--font-serif);
+    font-weight: 560;
+    letter-spacing: -0.012em;
+    line-height: 1.18;
+    text-wrap: balance;
+  }
+
+  em, .italic { font-style: italic; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-full); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); }
+
+  ::selection { background: var(--accent-muted); color: var(--text); }
+
+  :focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  code, pre, .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* staggered entrance for page-load reveals */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* the lantern pulse — a single calm accent signal while scanning */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.08); }
+}
+
+/* indeterminate scan bar — a warm sweep of light */
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+/* ambient, always-on motion — slow + GPU-cheap (transform/opacity only) */
+@keyframes drift-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(22px, 14px, 0) scale(1.07); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50%      { transform: translate3d(-18px, 12px, 0) scale(1.09); }
+}
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+@keyframes breathe {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50%      { opacity: 0.8;  transform: scale(1.06); }
+}
+/* a lantern flickers — gentle, irregular */
+@keyframes flicker {
+  0%, 100% { opacity: 1; }
+  18% { opacity: 0.86; }
+  37% { opacity: 0.97; }
+  52% { opacity: 0.8; }
+  68% { opacity: 0.94; }
+  83% { opacity: 0.88; }
+}
+
+/* embers — warm sparks rising from the lantern. The rise (outer element, y only)
+   and the waver (inner element, alternating x) compose into an S-curve path;
+   opacity cools as the ember climbs. */
+@keyframes ember-rise {
+  0%   { transform: translate3d(0, 30px, 0); opacity: 0; }
+  10%  { opacity: var(--ember-o, 0.5); }
+  80%  { opacity: calc(var(--ember-o, 0.5) * 0.55); }
+  100% { transform: translate3d(0, -260px, 0); opacity: 0; }
+}
+@keyframes ember-sway {
+  from { transform: translate3d(calc(var(--sway-x, 16px) * -0.5), 0, 0); }
+  to   { transform: translate3d(calc(var(--sway-x, 16px) * 0.5), 0, 0); }
+}
+@keyframes ember-flicker {
+  0%, 100% { opacity: 1; }
+  45% { opacity: 0.55; }
+  72% { opacity: 0.85; }
+}
+
+/* cycling hero placeholder — fade in, hold, fade out (one full interval) */
+@keyframes ph-cycle {
+  0%        { opacity: 0; transform: translateY(5px); }
+  7%, 82%   { opacity: 1; transform: translateY(0); }
+  95%, 100% { opacity: 0; transform: translateY(-4px); }
+}
+
+/* resting halo behind the hero search bar — breathes in place
+   (translate keeps it centered; the keyframe owns the whole transform) */
+@keyframes halo-breathe {
+  0%, 100% { opacity: 0.5;  transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 0.85; transform: translate(-50%, -50%) scale(1.05); }
+}
+
+/* ignition — a shockwave of light when a search is fired */
+@keyframes ignite-ring {
+  0%   { transform: translate(-50%, -50%) scale(0.15); opacity: 0.75; }
+  100% { transform: translate(-50%, -50%) scale(1);    opacity: 0; }
+}
+@keyframes ignite-flash {
+  0%   { opacity: 0; }
+  22%  { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+
+/* Responsive — desktop-first; gracefully collapse on narrow viewports. */
+@media (max-width: 860px) {
+  .app-sidebar { width: 60px !important; padding-left: 8px !important; padding-right: 8px !important; }
+  .app-sidebar .nav-label,
+  .app-sidebar .wordmark-text,
+  .app-sidebar .theme-label { display: none; }
+  .app-sidebar .nav-link,
+  .app-sidebar .theme-toggle { justify-content: center; }
+}
+
+@media (max-width: 760px) {
+  /* detail panel overlays instead of pushing content */
+  .jobs-main { margin-right: auto !important; }
+  /* trim the jobs table to the essentials */
+  .jobs-grid { grid-template-columns: minmax(0,1fr) 96px 96px !important; }
+  .col-location, .col-seen { display: none !important; }
+}
+
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-serif { font-family: var(--font-serif); }
+  .font-ui { font-family: var(--font-ui); }
+  .text-muted { color: var(--text-muted); }
+  .text-faint { color: var(--text-faint); }
+  .text-accent { color: var(--accent-text); }
+  .bg-surface { background: var(--surface); }
+  .bg-surface-2 { background: var(--surface-2); }
+  .border-subtle { border-color: var(--border-subtle); }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .transition-fast { transition: all 150ms cubic-bezier(0.22, 1, 0.36, 1); }
+}
+
+/* staggered reveal for the detail-panel sections */
+.panel-stagger > * { animation: rise 380ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.panel-stagger > *:nth-child(1) { animation-delay: 30ms; }
+.panel-stagger > *:nth-child(2) { animation-delay: 70ms; }
+.panel-stagger > *:nth-child(3) { animation-delay: 110ms; }
+.panel-stagger > *:nth-child(4) { animation-delay: 150ms; }
+.panel-stagger > *:nth-child(5) { animation-delay: 190ms; }
+.panel-stagger > *:nth-child(6) { animation-delay: 230ms; }
+.panel-stagger > *:nth-child(7) { animation-delay: 270ms; }
