@@ -206,9 +206,14 @@ internal types — convert at the boundary in src/api/client.ts" -->
   identical query skips nl-filter and keeps verdicts). There is no `/api/criteria` route and no
   Settings criteria editor — don't reintroduce them.
 - L2 grades jobs in batches (`L2_BATCH_SIZE=20`) per `claude` call (`runL2Pass`,
-  `batchVerdictPrompt`, `BatchVerdictShape`) to amortize the ~15K system/tool
-  tokens each subprocess cold-starts with and can't cache across invocations.
-  Batches are sequential. Don't revert to per-job L2 calls.
+  `batchVerdictPrompt`, `BatchVerdictShape`) to amortize the fixed per-spawn
+  cost each subprocess cold-starts with. Batches are sequential. Don't revert to
+  per-job L2 calls.
+- The provider spawns `claude` with `--tools ''` (drops built-in tool defs,
+  ~27K -> ~1.5K input tokens/spawn) and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+  (skips a ~2.5K-token background Haiku call). Default models are the CLI
+  aliases `sonnet`/`haiku` so the newest model the installed CLI knows is used
+  automatically — don't pin full model ids in `TASK_MODELS`.
 - Importing `src/llm/index.ts` (and anything that transitively pulls in
   `src/db/client.ts`) runs `createDb()` and all migrations at module
   load. Tests and standalone tools that import the `llm` singleton pay

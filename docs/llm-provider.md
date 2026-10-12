@@ -56,6 +56,11 @@ environment so a scan behaves the same for everyone:
 - `--setting-sources ''`, `--strict-mcp-config --mcp-config '{}'`,
   `--disable-slash-commands`, and a throwaway working directory, so no user settings,
   hooks, MCP servers, skills, or project auto-discovery leak in.
+- `--tools ''` drops the built-in tool definitions (none are used; `--json-schema`
+  works without them), which are most of the fixed per-call context: about 27K
+  input tokens down to about 1.5K. `--no-session-persistence` skips writing a
+  transcript per call, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` in the
+  child's env skips a background Haiku side call (about 2.5K tokens).
 - The prompt is piped on stdin to avoid multi-line argument truncation.
 
 The CLI must be on your `PATH` and signed in; it runs over your existing OAuth
@@ -102,8 +107,10 @@ than failing an entire 20-job batch over one job's imperfect output — the
 ## Model overrides
 
 Which model handles each task is configurable from the Settings page and stored in
-the settings table (`llm` row), re-read on every call. Grading defaults to a
-mid-tier model; the two tasks can be pointed at different models independently.
+the settings table (`llm` row), re-read on every call. Both tasks default to the
+CLI alias `sonnet`, which the installed `claude` CLI resolves to the newest
+Sonnet it supports, so updating Claude Code upgrades the model with no change
+here. The two tasks can be pointed at different models independently.
 An override is spliced into the CLI's argv right after `--model`, so it's
 validated against `MODEL_OVERRIDE_RE` (a strict model-id shape) both where it's
 written (the settings route, 400 on a bad value) and where it's read back out

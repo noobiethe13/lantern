@@ -854,8 +854,8 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
   let abortError: string | undefined;
 
   // Grade jobs in batches so one `claude` subprocess scores L2_BATCH_SIZE jobs,
-  // amortizing the ~15K cold-start overhead across the batch instead of paying it
-  // per job. Each batch gets a larger timeout (N jobs ≫ 1).
+  // amortizing the per-spawn fixed cost (system prompt + schema + CLI startup)
+  // across the batch instead of paying it per job. Each batch gets a larger timeout (N jobs ≫ 1).
   for (let i = 0; i < jobs.length; i += L2_BATCH_SIZE) {
     const batch = jobs.slice(i, i + L2_BATCH_SIZE);
     const prompt = batchVerdictPrompt(

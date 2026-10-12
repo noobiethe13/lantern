@@ -7,13 +7,14 @@ import { classifyErrorMessage, LlmError } from '../provider';
 import type { HealthcheckOptions, HealthcheckResult, LlmProvider, LlmRequest, LlmTask } from '../provider';
 import { zodToProviderSchema } from '../zod-to-schema';
 
-type ClaudeModel = 'claude-opus-4-7' | 'claude-sonnet-4-6' | 'claude-haiku-4-5';
-
-const TASK_MODELS: Record<LlmTask, ClaudeModel> = {
-  verdict: 'claude-sonnet-4-6',
+// CLI aliases, not pinned ids: the installed `claude` CLI resolves `sonnet` to
+// the newest Sonnet it supports, so a CLI update picks up a new model with no
+// code change. Pin a full id via the Settings per-task override if needed.
+const TASK_MODELS: Record<LlmTask, string> = {
+  verdict: 'sonnet',
   // nl-filter drives the entire search — getting the criteria wrong wastes the
   // whole scan — so it runs on sonnet despite being a single short call.
-  'nl-filter': 'claude-sonnet-4-6',
+  'nl-filter': 'sonnet',
 };
 
 const STRICT_SUFFIX =
@@ -87,7 +88,7 @@ function unwrapClaudeResponse(stdout: string): unknown {
 }
 
 async function spawnClaude<T>(
-  model: ClaudeModel,
+  model: string,
   prompt: string,
   schema: z.ZodType<T>,
   timeoutMs?: number,
@@ -106,7 +107,15 @@ async function spawnClaude<T>(
   //   --strict-mcp-config +    use only the empty inline MCP config → no MCP
   //   --mcp-config             servers.
   //   --disable-slash-commands no skills.
+  //   --tools ''               no built-in tool definitions. These are the bulk
+  //                            of the fixed per-spawn context (~27K -> ~1.5K
+  //                            input tokens measured on CLI 2.1.x) and none are
+  //                            used. --json-schema still works without them.
+  //   --no-session-persistence don't write a resumable transcript per call.
   //   cwd = throwaway dir      no project CLAUDE.md auto-discovery.
+  //   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+  //                            skips the CLI's background Haiku side call
+  //                            (~2.5K tokens per spawn) plus telemetry.
   // Prompt piped on stdin to avoid Windows multi-line argv truncation
   // (a known gotcha with headless CLI wrappers).
   const effectiveTimeoutMs = timeoutMs ?? 120_000;
@@ -125,13 +134,18 @@ async function spawnClaude<T>(
           '--setting-sources', '',
           '--strict-mcp-config', '--mcp-config', EMPTY_MCP_CONFIG,
           '--disable-slash-commands',
+          '--tools', '',
+          '--no-session-persistence',
         ],
         // Bun.spawn resolves a bare command (here "claude") against a PATH
         // snapshot taken at Bun's own startup, NOT the live process.env.PATH,
         // unless `env` is passed explicitly — otherwise a long-running
         // `bun --watch` server would need a restart to notice a CLI installed
         // (or a PATH change) after it started.
-        { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', cwd: isolatedCwd(), env: process.env },
+        {
+          stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', cwd: isolatedCwd(),
+          env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+        },
       );
     } catch (err) {
       // Bun throws synchronously when the executable can't be resolved at all
@@ -195,7 +209,7 @@ export class ClaudeCodeProvider implements LlmProvider {
   }
 
   async call<T>(req: LlmRequest, schema: z.ZodType<T>): Promise<T> {
-    const model = (req.modelOverride ?? this.defaultModelFor(req.task)) as ClaudeModel;
+    const model = req.modelOverride ?? this.defaultModelFor(req.task);
 
     let raw: unknown = undefined;
     let haveRaw = false;
@@ -270,7 +284,7 @@ export class ClaudeCodeProvider implements LlmProvider {
     // before the first scan.
     const ProbeShape = z.object({ ok: z.boolean() });
     try {
-      const raw = await spawnClaude('claude-haiku-4-5', 'Respond with the JSON {"ok":true}.', ProbeShape, 30_000);
+      const raw = await spawnClaude('haiku', 'Respond with the JSON {"ok":true}.', ProbeShape, 30_000);
       ProbeShape.parse(raw);
       return { ok: true, detail: version };
     } catch (err) {
