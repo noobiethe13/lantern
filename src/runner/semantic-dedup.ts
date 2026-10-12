@@ -23,6 +23,9 @@ interface DedupRow {
   salary_max_usd: number | null;
   embedding: Uint8Array | null;
   duplicate_urls: string | null;
+  status: string;
+  notes: string | null;
+  attachment_count: number;
 }
 
 // Canonical preference: a posting that carries more information is the better one
@@ -32,6 +35,13 @@ function priority(row: DedupRow): number {
   const hasJd = (row.jd_text ?? '').trim().length > 0 ? 2 : 0;
   const hasSalary = row.salary_min_usd !== null || row.salary_max_usd !== null ? 1 : 0;
   return hasJd + hasSalary;
+}
+
+// A triaged row is the user's own work product (status moved off 'new', has
+// notes, or has an attachment) — see DedupItem.triaged for why clusterDuplicates
+// must never fold it away as a duplicate.
+function isTriaged(row: DedupRow): boolean {
+  return row.status !== 'new' || Boolean(row.notes?.trim()) || row.attachment_count > 0;
 }
 
 /**
@@ -52,7 +62,9 @@ export async function applySemanticDedupPass(runId: number): Promise<number> {
   const survivors = db
     .query<DedupRow, [number]>(
       `SELECT id, company_norm, title, company, jd_text, url,
-              salary_min_usd, salary_max_usd, embedding, duplicate_urls
+              salary_min_usd, salary_max_usd, embedding, duplicate_urls,
+              status, notes,
+              (SELECT COUNT(*) FROM attachments a WHERE a.job_id = jobs.id) AS attachment_count
        FROM jobs
        WHERE l1_pass = 1 AND last_run_id = ?`,
     )
@@ -74,7 +86,9 @@ export async function applySemanticDedupPass(runId: number): Promise<number> {
     const items: DedupItem[] = candidates
       .map(row => {
         const vec = vecById.get(row.id);
-        return vec ? { id: row.id, companyNorm: row.company_norm ?? '', vec, priority: priority(row) } : null;
+        return vec
+          ? { id: row.id, companyNorm: row.company_norm ?? '', vec, priority: priority(row), triaged: isTriaged(row) }
+          : null;
       })
       .filter((it): it is DedupItem => it !== null);
 

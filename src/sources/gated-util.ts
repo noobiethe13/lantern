@@ -34,23 +34,46 @@ export function stripUrlQuery(href: string | undefined | null): string | null {
 }
 
 /**
- * Pick a single location string for boards whose search takes one `location`
- * param. Criteria carries an allow-list; we use the first entry, falling back to
- * "Remote" when the search requires remote and named no place. Empty string when
- * neither applies (the board then returns unscoped results, still L1-filtered).
+ * Pick a single named location string for boards whose search takes one
+ * `location`/`country` param. Criteria carries an allow-list; we use the first
+ * entry. Returns '' when no place is named — deliberately NOT a "Remote"
+ * fallback, since these APIs generally don't recognise that as a place (e.g.
+ * SerpAPI's `locations.json?q=Remote` resolves to nothing, so every Google
+ * Jobs request 404s/empties out). Callers that need to express "remote, no
+ * specific place" use their own API's dedicated param instead (LinkedIn's
+ * `f_WT=2`, Google Jobs's `ltype=1`).
  */
 export function pickLocation(ctx: SourceContext): string {
   const first = (ctx.locations ?? []).find(l => l && l.trim());
-  if (first) return first.trim();
-  if (ctx.remoteRequired) return 'Remote';
-  return '';
+  return first ? first.trim() : '';
+}
+
+/** True when `needle` occurs in `hay` as a whole word/phrase, not merely as a
+ *  raw substring — mirrors `normalizeKeywords` in runner/scan.ts so "java"
+ *  survives next to "javascript" (a raw `.includes()` would wrongly drop it,
+ *  since "java" is a substring of "javascript"). */
+function containsWords(hay: string, needle: string): boolean {
+  return ` ${hay} `.includes(` ${needle} `);
 }
 
 /**
  * Bound the keyword fan-out. Gated adapters issue one search per keyword (like
  * himalayas) and dedupe results; capping keeps request volume — and 429 risk —
  * low on these fragile endpoints.
+ *
+ * Also cleans the raw criteria keywords first — trims, lowercases, drops
+ * empties, dedupes, and drops any keyword that contains an already-kept
+ * keyword as a WHOLE WORD (e.g. "flutter developer" after "flutter" — the
+ * broader term is redundant since the narrower one already matches those
+ * postings too) — so the capped slots aren't wasted on near-duplicates.
  */
 export function pickKeywords(ctx: SourceContext, max: number): string[] {
-  return (ctx.keywords ?? []).map(k => k.trim()).filter(Boolean).slice(0, max);
+  const kept: string[] = [];
+  for (const raw of ctx.keywords ?? []) {
+    const kw = raw.trim().toLowerCase();
+    if (!kw) continue;
+    if (kept.some(k => containsWords(kw, k))) continue;
+    kept.push(kw);
+  }
+  return kept.slice(0, max);
 }

@@ -48,6 +48,38 @@ describe('classifyLiveness', () => {
     }
   });
 
+  test('non-2xx other than 404/410 → uncertain, even with a thin body', () => {
+    for (const status of [403, 429, 500, 503, 999]) {
+      const r = classifyLiveness(input({ status, bodyText: 'Just a moment...' }));
+      expect(r).toEqual({ result: 'uncertain', reason: `HTTP ${status}` });
+    }
+  });
+
+  test('a visible apply control wins over an inline "no longer available" string', () => {
+    const r = classifyLiveness(input({
+      bodyText: `${FILLER} This job is no longer available.`,
+      applyControls: ['Apply for this job'],
+    }));
+    expect(r.result).toBe('active');
+  });
+
+  test('"closed on <date>" alone is not an expiry signal', () => {
+    for (const text of ['Our offices are closed on July 4.', 'Office closed on 25 Dec for holidays.']) {
+      expect(classifyLiveness(input({ bodyText: `${FILLER} ${text}` })).result).toBe('uncertain');
+    }
+    // Explicit application-closed wording still expires.
+    expect(classifyLiveness(input({ bodyText: `${FILLER} Applications have closed.` })).result).toBe('expired');
+  });
+
+  test('BambooHR and Workday shells are client-rendered hosts', () => {
+    for (const url of [
+      'https://acme.bamboohr.com/careers/42',
+      'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Pune/Engineer_R123',
+    ]) {
+      expect(classifyLiveness(input({ finalUrl: url, bodyText: 'loading…' })).result).toBe('uncertain');
+    }
+  });
+
   test('hard-expired pattern wins even on an SPA host', () => {
     const r = classifyLiveness(input({
       finalUrl: 'https://jobs.ashbyhq.com/acme/123',

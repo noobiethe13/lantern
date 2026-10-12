@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { l1Filter, type Criteria } from './filter';
+import { l1Filter, termMatches, type Criteria } from './filter';
 import type { Job } from './job';
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -93,7 +93,7 @@ describe('l1Filter — location allow-list', () => {
     expect(r.reasons.join()).toContain('allowed list');
   });
 
-  test('remote jobs bypass the allow-list', () => {
+  test('worldwide remote jobs pass the allow-list', () => {
     expect(l1Filter(job({ location: 'Remote — Worldwide' }), c).pass).toBe(true);
     expect(l1Filter(job({ location: 'Anywhere', remote: true }), c).pass).toBe(true);
   });
@@ -231,5 +231,330 @@ describe('l1Filter — freshness gate', () => {
 
   test('a future posted date passes', () => {
     expect(l1Filter(job({ posted_at: now + 86_400_000 }), {}, { now, maxAgeDays: 7 }).pass).toBe(true);
+  });
+});
+
+describe('termMatches — whole-word matching', () => {
+  const cases: [string, string, boolean][] = [
+    // term, hay, expected
+    ['us', 'Remote - US', true],
+    ['us', 'Remote - Australia', false],
+    ['us', 'Austin, TX', false],
+    ['us', 'Brussels', false],
+    ['us', 'Limassol, Cyprus', false],
+    ['us', 'Mauritius', false],
+    ['us', 'Business hours IST', false],
+    ['usa', 'Lausanne', false],
+    ['usa', 'Busan', false],
+    ['usa', 'Remote (USA only)', true],
+    ['intern', 'Internal Tools Engineer', false],
+    ['intern', 'International Payments Engineer', false],
+    ['intern', 'Software Engineering Intern', true],
+    ['java', 'JavaScript Engineer', false],
+    ['java', 'Java Developer', true],
+    ['meta', 'Metabase', false],
+    ['meta', 'MetaMask', false],
+    ['meta', 'Metaview', false],
+    ['meta', 'Meta Platforms', true],
+    ['x', 'Dropbox', false],
+    ['x', 'Netflix', false],
+    ['x', 'X', true],
+    ['india', 'Indianapolis, IN', false],
+    ['india', 'Remote - Indianapolis, Indiana', false],
+    ['india', 'Bengaluru, India', true],
+    ['uk', 'Kyiv, Ukraine', false],
+    ['uk', 'London, UK', true],
+    ['ios', 'Biostatistician', false],
+    ['ios', 'iOS Engineer', true],
+    ['pm', 'Business Development Representative', false],
+    ['pm', 'Senior PM, Payments', true],
+    ['full stack', 'Full-Stack Engineer', true],
+    ['full stack', 'Fullstack Developer', true],
+    ['full stack', 'Full Stack Developer', true],
+    ['site reliability', 'Site-Reliability Engineer', true],
+    ['node.js', 'Node.js Developer', true],
+    ['node.js', 'Nodejs Developer', false],
+    ['c++', 'C++ Engineer', true],
+    ['c#', 'C# / .NET Developer', true],
+    ['.net', 'ASP.NET Developer', true],
+    ['.net', '.NET Engineer', true],
+    ['ci/cd', 'CI/CD Engineer', true],
+    ['ci/cd', 'CI-CD Engineer', true],
+    ['zurich', 'Zürich', true],
+    ['', 'anything', false],
+    ['   ', 'anything', false],
+  ];
+  for (const [term, hay, expected] of cases) {
+    test(`"${term}" in "${hay}" → ${expected}`, () => {
+      expect(termMatches(hay, term)).toBe(expected);
+    });
+  }
+});
+
+describe('l1Filter — whole-word terms across rules', () => {
+  test('block "us" leaves unrelated places containing "us" alone', () => {
+    const c: Criteria = { location: { remote_required: false, allowed: [], block: ['us'] } };
+    for (const location of [
+      'Remote - Australia', 'Brussels', 'Limassol, Cyprus', 'Mauritius',
+      'Business hours IST', 'Lausanne', 'Busan',
+    ]) {
+      expect(l1Filter(job({ location }), c).pass).toBe(true);
+    }
+    expect(l1Filter(job({ location: 'Remote - US' }), c).pass).toBe(false);
+    // "us" resolves to the United States in the gazetteer, so a US city is blocked
+    // on geography rather than on the letters in "Austin".
+    expect(l1Filter(job({ location: 'Austin, TX' }), c).pass).toBe(false);
+  });
+
+  test('negative "intern" / positive "java" are whole-word', () => {
+    const neg: Criteria = { title: { positive: [], negative: ['intern'] } };
+    expect(l1Filter(job({ title: 'Engineer, Internal Tools' }), neg).pass).toBe(true);
+    expect(l1Filter(job({ title: 'International Payments Engineer' }), neg).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Backend Intern' }), neg).pass).toBe(false);
+    const pos: Criteria = { title: { positive: ['java'], negative: [] } };
+    expect(l1Filter(job({ title: 'JavaScript Engineer' }), pos).pass).toBe(false);
+    expect(l1Filter(job({ title: 'Java Engineer' }), pos).pass).toBe(true);
+  });
+
+  test('positive "ios"/"pm" do not match inside words; hyphenated compounds match', () => {
+    const c: Criteria = { title: { positive: ['ios', 'pm', 'full stack', 'site reliability'], negative: [] } };
+    expect(l1Filter(job({ title: 'Biostatistician' }), c).pass).toBe(false);
+    expect(l1Filter(job({ title: 'Business Development Representative' }), c).pass).toBe(false);
+    for (const title of ['Full-Stack Engineer', 'Fullstack Developer', 'Site-Reliability Engineer']) {
+      expect(l1Filter(job({ title }), c).pass).toBe(true);
+    }
+  });
+
+  test('company excludes are whole-word', () => {
+    const c: Criteria = { exclude_companies: ['meta', 'x'] };
+    for (const company of ['Metabase', 'MetaMask', 'Metaview', 'Dropbox', 'Netflix']) {
+      expect(l1Filter(job({ company }), c).pass).toBe(true);
+    }
+    expect(l1Filter(job({ company: 'Meta' }), c).pass).toBe(false);
+    expect(l1Filter(job({ company: 'X' }), c).pass).toBe(false);
+  });
+
+  test('allowed "uk" does not admit Ukraine', () => {
+    const c: Criteria = { location: { remote_required: false, allowed: ['uk'] } };
+    expect(l1Filter(job({ location: 'Kyiv, Ukraine' }), c).pass).toBe(false);
+  });
+});
+
+describe('l1Filter — geography (gazetteer)', () => {
+  const india: Criteria = {
+    location: { remote_required: false, allowed: ['india'], always_allow: ['india'] },
+  };
+
+  test('allowed ["india"] admits Indian cities that never say "India"', () => {
+    for (const location of [
+      'Bangalore', 'Hyderabad', 'Gurugram', 'Bengaluru - BLR1', 'IN - Bengaluru',
+      'Pune/Pimpri-Chinchwad Area', 'Mumbai Metropolitan Region', 'Greater Chennai Area',
+      'Hybrid - Bangalore', 'Greater Lucknow Area', 'Noida, Uttar Pradesh', 'Kochi, Kerala',
+    ]) {
+      expect(l1Filter(job({ location }), india).reasons).toEqual([]);
+    }
+  });
+
+  test('allowed ["india"] rejects Indiana/Indianapolis and other countries', () => {
+    for (const location of [
+      'Indianapolis, IN', 'Indianapolis, Indiana', 'Austin, TX', 'Berlin, Germany', 'London, UK',
+    ]) {
+      const r = l1Filter(job({ location }), india);
+      expect(r.pass).toBe(false);
+      expect(r.reasons.join()).toContain('not in allowed list');
+    }
+  });
+
+  test('block ["united states"] blocks a US city named only by its state code', () => {
+    const c: Criteria = { location: { remote_required: false, allowed: [], block: ['united states'] } };
+    expect(l1Filter(job({ location: 'Austin, TX' }), c).reasons.join()).toContain('blocked by');
+    expect(l1Filter(job({ location: 'Chennai, TN' }), c).pass).toBe(true);
+    // A region only partly inside the blocked country is not dropped on a guess.
+    expect(l1Filter(job({ location: 'Remote - Americas' }), c).pass).toBe(true);
+  });
+
+  test('always_allow rescues via the gazetteer too', () => {
+    const c: Criteria = {
+      location: { remote_required: false, allowed: [], block: ['united states'], always_allow: ['india'] },
+    };
+    expect(l1Filter(job({ location: 'San Francisco, CA or Bangalore' }), c).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — remote eligibility (home region)', () => {
+  const india: Criteria = {
+    location: { remote_required: false, allowed: ['india'], always_allow: ['india'] },
+  };
+
+  test('remote jobs restricted to other regions fail', () => {
+    const cases: [string, boolean | undefined][] = [
+      ['Remote - US', undefined],
+      ['Remote - United States', undefined],
+      ['United States - Remote', undefined],
+      ['Canada - Remote (ON, AB, BC, or NS Only)', undefined],
+      ['San Francisco, CA, US; Remote, US', undefined],
+      ['Remote (EMEA)', undefined],
+      ['United States', true],
+      ['Philippines', true],
+      ['USA', true],
+    ];
+    for (const [location, remote] of cases) {
+      const r = l1Filter(job({ location, remote }), india);
+      expect(r.pass).toBe(false);
+      expect(r.reasons.join()).toContain('remote but restricted to');
+    }
+    expect(l1Filter(job({ location: 'Remote - US' }), india).reasons).toEqual([
+      'remote but restricted to United States',
+    ]);
+  });
+
+  test('remote jobs open to the home region (or anywhere) pass', () => {
+    const cases: [string, boolean | undefined][] = [
+      ['Remote', undefined],
+      ['Anywhere', true],
+      ['Worldwide', true],
+      ['Remote - India', undefined],
+      ['India (Remote)', undefined],
+      ['APAC', true],
+      ['Remote - Asia Pacific', undefined],
+      ['', true],
+      ['Australia, Canada, India, United Kingdom, United States', true],
+      ['Remote - US or Bangalore', undefined],
+      ['Remote (Global), US preferred', undefined],
+      ['Remote - Springfield', undefined], // unrecognized place → no signal → pass
+    ];
+    for (const [location, remote] of cases) {
+      expect(l1Filter(job({ location, remote }), india).reasons).toEqual([]);
+    }
+  });
+
+  test('home region from always_allow alone engages the rule', () => {
+    const home: Criteria = { location: { remote_required: true, allowed: [], always_allow: ['india'] } };
+    expect(l1Filter(job({ location: 'Remote - US' }), home).pass).toBe(false);
+    expect(l1Filter(job({ location: 'Remote - India' }), home).pass).toBe(true);
+  });
+
+  test('regions contain countries: allowed ["europe"] admits a remote Germany job', () => {
+    const eu: Criteria = { location: { remote_required: false, allowed: ['europe'] } };
+    expect(l1Filter(job({ location: 'Remote - Germany' }), eu).pass).toBe(true);
+    expect(l1Filter(job({ location: 'Remote - US' }), eu).pass).toBe(false);
+  });
+
+  test('without a home region, remote jobs are location-agnostic as before', () => {
+    const open: Criteria = { location: { remote_required: false, allowed: [], block: [] } };
+    expect(l1Filter(job({ location: 'Remote - US' }), open).pass).toBe(true);
+    // An allow-list of unrecognized terms can't be evaluated against places.
+    const unknown: Criteria = { location: { remote_required: false, allowed: ['springfield'] } };
+    expect(l1Filter(job({ location: 'Remote - US' }), unknown).pass).toBe(true);
+  });
+
+  test('an allowed term that matches the text literally still passes a remote job', () => {
+    const c: Criteria = { location: { remote_required: false, allowed: ['berlin', 'remote'] } };
+    expect(l1Filter(job({ location: 'Remote - US' }), c).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — salary range vs floor', () => {
+  const c: Criteria = { salary_min_usd: 150000, salary_currency: 'USD' };
+  const cases: [number | null, number | null, boolean][] = [
+    [140000, 190000, true], // range reaches the floor
+    [140000, 149999, false], // whole range below the floor
+    [140000, null, false], // min-only below: unchanged
+    [160000, null, true], // min-only above: unchanged
+    [null, 120000, false], // max-only below
+    [null, 200000, true],
+  ];
+  for (const [min, max, pass] of cases) {
+    test(`${min}–${max} vs 150000 floor → ${pass ? 'pass' : 'fail'}`, () => {
+      const j = job({ salary_min_usd: min, salary_max_usd: max, salary_currency: 'USD' });
+      expect(l1Filter(j, c).pass).toBe(pass);
+    });
+  }
+
+  test('currency comparison is case-insensitive on both sides', () => {
+    const lower: Criteria = { salary_min_usd: 150000, salary_currency: 'usd' };
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'USD' }), lower).pass).toBe(false);
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'usd' }), c).pass).toBe(false);
+    expect(l1Filter(job({ salary_min_usd: 90000, salary_currency: 'EUR' }), lower).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — seniority gate refinements', () => {
+  const juniorMid: Criteria = { seniority: { allowed: ['junior', 'mid'] } };
+  const cases: [string, boolean][] = [
+    ['Staff Accountant', true],
+    ['Staff Nurse', true],
+    ['Staff Writer', true],
+    ['Research Fellow, Machine Learning', true],
+    ['AI Fellow (Early Career)', true],
+    ['Software Engineer II', true],
+    ['Flutter Developer 3+ years', true],
+    ['Senior Staff Engineer', false],
+    ['Staff Software Engineer', false],
+    ['Staff Data Scientist', false],
+    ['Staff Mobile Engineer', false],
+    ['Snr DevOps Engineer', false],
+    ['SDE III - Mobile (Flutter)', false],
+    ['SDE-3', false],
+    ['Software Engineer III', false],
+    ['Software Engineer IV', false],
+    ['Distinguished Engineer', false],
+    ['Tech Lead, Flutter', true], // lead stays ungated (documented choice)
+    // S-3: a years-of-experience callout must never be misread as ladder rung 3/4/5.
+    ['Flutter Developer 3 Years', true],
+    ['Flutter Developer - 3 Yrs Exp', true],
+    ['Flutter Developer 3-5 Yrs', true],
+    ['Developer - 4 Years', true],
+  ];
+  for (const [title, pass] of cases) {
+    test(`"${title}" → ${pass ? 'pass' : 'drop'}`, () => {
+      expect(l1Filter(job({ title }), juniorMid).pass).toBe(pass);
+    });
+  }
+});
+
+describe('l1Filter — blank terms are ignored', () => {
+  test('blank company excludes exclude nothing', () => {
+    expect(l1Filter(job({ company: 'Acme Corp' }), { exclude_companies: ['', ' '] }).pass).toBe(true);
+  });
+
+  test('blank positive terms do not disable the title rule', () => {
+    const c: Criteria = { title: { positive: ['', 'frontend'], negative: [' '] } };
+    expect(l1Filter(job({ title: 'Backend Engineer' }), c).pass).toBe(false);
+    expect(l1Filter(job({ title: 'Frontend Engineer' }), c).pass).toBe(true);
+  });
+
+  test('blank allowed/always_allow terms neither bypass nor constrain', () => {
+    const c: Criteria = {
+      location: { remote_required: false, allowed: ['', 'india'], always_allow: [''] },
+    };
+    expect(l1Filter(job({ location: 'Berlin, Germany' }), c).pass).toBe(false);
+    expect(l1Filter(job({ location: 'Pune' }), c).pass).toBe(true);
+    const onlyBlank: Criteria = { location: { remote_required: false, allowed: [' '] } };
+    expect(l1Filter(job({ location: 'Berlin, Germany' }), onlyBlank).pass).toBe(true);
+  });
+
+  test('whitespace around terms is trimmed', () => {
+    const c: Criteria = { title: { positive: ['  flutter '], negative: [] } };
+    expect(l1Filter(job({ title: 'Flutter Developer' }), c).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — performance', () => {
+  test('10k jobs through a full criteria stay fast (terms compiled once per criteria)', () => {
+    const c: Criteria = {
+      title: { positive: ['flutter', 'mobile', 'dart', 'android', 'ios'], negative: ['intern', 'manager'] },
+      location: { remote_required: false, allowed: ['india', 'bangalore'], block: ['us'], always_allow: ['india'] },
+      seniority: { allowed: ['junior', 'mid'] },
+      salary_min_usd: 1000000,
+      salary_currency: 'INR',
+      exclude_companies: ['meta', 'acme staffing'],
+    };
+    const locations = ['Remote - US', 'Bengaluru, Karnataka, India', 'Austin, TX', 'Remote', 'Remote (EMEA)'];
+    const jobs = Array.from({ length: 10_000 }, (_, i) =>
+      job({ title: `Flutter Developer ${i}`, location: locations[i % locations.length], company: `Co ${i}` }));
+    const t0 = performance.now();
+    for (const j of jobs) l1Filter(j, c);
+    expect(performance.now() - t0).toBeLessThan(1500);
   });
 });

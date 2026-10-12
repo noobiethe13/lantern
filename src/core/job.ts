@@ -31,6 +31,10 @@ export interface SourceContext {
   locations?: string[];
   /** Whether the active criteria requires remote roles. */
   remoteRequired?: boolean;
+  /** Freshness window in days from the active criteria, when the search sets
+   *  one. Adapters whose API takes a recency filter (e.g. LinkedIn's `f_TPR`)
+   *  use it to scope the query; others ignore it. Populated by the runner. */
+  maxAgeDays?: number;
   emitProgress: (msg: string, n?: number) => void;
   abortSignal: AbortSignal;
 }
@@ -55,4 +59,14 @@ export type SourceType =
 export interface SourceAdapter {
   type: SourceType;
   fetch(ctx: SourceContext): AsyncIterable<Job>;
+  /**
+   * Optional per-job enrichment for expensive extra detail (e.g. a JD that
+   * needs its own request) that shouldn't be fetched for every candidate up
+   * front. The runner calls this only for jobs that already passed L1, within
+   * a per-run budget — never over the full unfiltered `fetch()` stream.
+   * Returns a partial Job patch to merge (e.g. `{ jd_text }`), or null when
+   * nothing was found. Adapters should treat their own fetch failures as
+   * recoverable and return null rather than throw.
+   */
+  enrich?(job: Job, ctx: SourceContext): Promise<Partial<Job> | null>;
 }

@@ -3,10 +3,21 @@ import { z } from 'zod';
 import { db } from '../db/client';
 import { runLivenessCheck } from '../runner/liveness';
 import { deserializeVector, topKSimilar } from '../core/embed';
+import { zodErrorBody } from '../server/errors';
 
 export const jobs = new Hono();
 
 const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'] as const;
+
+// Query params are always strings (or absent) at this boundary — a negative
+// LIMIT is "unlimited" in SQLite (bypassing the cap) and a non-numeric value
+// throws SQLITE_MISMATCH once bound, so validate before it reaches the query.
+function clampInt(raw: string | undefined, fallback: number, min: number, max: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n)) return fallback;
+  return Math.min(Math.max(n, min), max);
+}
 
 jobs.get('/', c => {
   const status = c.req.query('status');
@@ -17,8 +28,8 @@ jobs.get('/', c => {
   const sourceType = c.req.query('source_type');
   const run = c.req.query('run');
   const q = c.req.query('q');
-  const limit = Math.min(Number(c.req.query('limit') ?? 100), 500);
-  const offset = Number(c.req.query('offset') ?? 0);
+  const limit = clampInt(c.req.query('limit'), 100, 1, 500);
+  const offset = clampInt(c.req.query('offset'), 0, 0, Number.MAX_SAFE_INTEGER);
 
   type Binding = string | number | null;
   const conditions: string[] = [];
@@ -128,7 +139,7 @@ jobs.get('/:id/duplicates', c => {
 // empty list means the target (or the store) hasn't been embedded yet.
 jobs.get('/:id/similar', c => {
   const id = Number(c.req.param('id'));
-  const limit = Math.min(Number(c.req.query('limit') ?? 8), 25);
+  const limit = clampInt(c.req.query('limit'), 8, 1, 25);
 
   const target = db
     .query<{ embedding: Uint8Array | null }, [number]>('SELECT embedding FROM jobs WHERE id = ?')
@@ -136,31 +147,47 @@ jobs.get('/:id/similar', c => {
   const targetVec = deserializeVector(target?.embedding);
   if (!targetVec) return c.json({ jobs: [] });
 
-  const rows = db
-    .query<Record<string, unknown>, [number]>(
-      `SELECT j.*, s.display_name AS source_name, s.type AS source_type
-       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
-       WHERE j.embedding IS NOT NULL AND j.id != ? AND j.status != 'hidden'
-             AND j.duplicate_of IS NULL`,
+  // Rank on id + embedding only — this runs on every detail-panel open (j/k
+  // navigation), so pulling full rows (jd_text, embedding BLOB, ...) for every
+  // embedded job in the store just to throw all but `limit` away is wasteful.
+  // Full rows are fetched only for the winning top-k ids below.
+  const idRows = db
+    .query<{ id: number; embedding: Uint8Array | null }, [number]>(
+      `SELECT id, embedding FROM jobs
+       WHERE embedding IS NOT NULL AND id != ? AND status != 'hidden' AND duplicate_of IS NULL`,
     )
     .all(id);
 
-  const candidates: { vec: Float32Array; item: Record<string, unknown> }[] = [];
-  for (const row of rows) {
-    const vec = deserializeVector(row.embedding as Uint8Array | null);
-    if (vec) candidates.push({ vec, item: row });
+  const candidates: { vec: Float32Array; item: number }[] = [];
+  for (const row of idRows) {
+    const vec = deserializeVector(row.embedding);
+    if (vec) candidates.push({ vec, item: row.id });
   }
 
   const ranked = topKSimilar(targetVec, candidates, limit);
-  return c.json({
-    jobs: ranked.map(r => ({ ...parseJobRow(r.item), similarity: r.sim })),
-  });
+  if (ranked.length === 0) return c.json({ jobs: [] });
+
+  const rows = db
+    .query<Record<string, unknown>, number[]>(
+      `SELECT j.*, s.display_name AS source_name, s.type AS source_type
+       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id
+       WHERE j.id IN (${ranked.map(() => '?').join(',')})`,
+    )
+    .all(...ranked.map(r => r.item));
+
+  const byId = new Map(rows.map(r => [Number(r['id']), r]));
+  const result: Record<string, unknown>[] = [];
+  for (const r of ranked) {
+    const row = byId.get(r.item);
+    if (row) result.push({ ...parseJobRow(row), similarity: r.sim });
+  }
+  return c.json({ jobs: result });
 });
 
 jobs.patch('/:id/status', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = z.object({ status: z.enum(JOB_STATUSES) }).safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   const { status } = parsed.data;
   const id = Number(c.req.param('id'));
@@ -175,7 +202,7 @@ jobs.patch('/:id/status', async c => {
 jobs.patch('/:id/notes', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = z.object({ notes: z.string().max(4000) }).safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   db.run('UPDATE jobs SET notes = ? WHERE id = ?', [parsed.data.notes, Number(c.req.param('id'))]);
   return c.json({ ok: true });

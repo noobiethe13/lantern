@@ -35,22 +35,64 @@ function extractAshbySalary(compensation: unknown): AshbySalary {
   };
 }
 
+/**
+ * Build the location string from the primary + every secondary location plus
+ * the postal country, and derive `remote` from `workplaceType` (falling back
+ * to `isRemote` only when `workplaceType` is absent). `isRemote` alone isn't
+ * trustworthy — Linear's Hybrid London posting carries `isRemote:true`.
+ * Hybrid/onsite postings get a "(Hybrid)"/"(On-site)" suffix so L1's onsite
+ * regex can act on the location string too.
+ */
+function buildAshbyLocation(job: Record<string, unknown>): { location: string; remote: boolean } {
+  const loc = job['location'];
+  const primary = typeof loc === 'string' ? loc : ((loc as Record<string, unknown>)?.['name'] as string) ?? '';
+  const secondary = Array.isArray(job['secondaryLocations'])
+    ? (job['secondaryLocations'] as unknown[])
+        .map(l => (l as Record<string, unknown> | undefined)?.['location'])
+        .filter((l): l is string => typeof l === 'string' && l.trim() !== '')
+    : [];
+  let location = [...new Set([primary, ...secondary].filter(l => l.trim() !== ''))].join('; ');
+
+  const address = job['address'] as Record<string, unknown> | undefined;
+  const postal = address?.['postalAddress'] as Record<string, unknown> | undefined;
+  const country = typeof postal?.['addressCountry'] === 'string' ? (postal['addressCountry'] as string) : '';
+  if (country && !location.toLowerCase().includes(country.toLowerCase())) {
+    location = location ? `${location}, ${country}` : country;
+  }
+
+  const workplaceType = typeof job['workplaceType'] === 'string' ? (job['workplaceType'] as string) : null;
+  const remote = workplaceType === 'Remote' || (workplaceType == null && job['isRemote'] === true);
+  const wtLower = workplaceType?.toLowerCase();
+  // Only append when there's a base location to qualify — an empty location must
+  // stay empty (L1 treats a blank location as lenient/pass-through; a bare
+  // "(Hybrid)"/"(On-site)" string is not a real place and would defeat that).
+  if (location && wtLower === 'hybrid') location = `${location} (Hybrid)`;
+  else if (location && wtLower === 'onsite') location = `${location} (On-site)`;
+
+  return { location, remote };
+}
+
 export function parseAshby(json: unknown, company: string): Job[] {
   const data = json as { jobs?: unknown[] };
-  return (data.jobs ?? []).map((j: unknown) => {
+  const jobs: Job[] = [];
+  for (const j of data.jobs ?? []) {
     const job = j as Record<string, unknown>;
+    const url = (job['jobUrl'] as string) ?? '';
+    const title = (job['title'] as string) ?? '';
+    // A posting missing url or title would otherwise collide with every
+    // other empty-url job on the `WHERE url = ?` upsert lookup.
+    if (!url || !title) continue;
+
     const salary = extractAshbySalary(job['compensation']);
-    const loc = job['location'];
+    const { location, remote } = buildAshbyLocation(job);
     const jd = htmlToText((job['descriptionPlain'] as string) || (job['descriptionHtml'] as string));
-    return {
+    jobs.push({
       external_id: String(job['id'] ?? ''),
-      title: (job['title'] as string) ?? '',
-      url: (job['jobUrl'] as string) ?? '',
+      title,
+      url,
       company,
-      location:
-        typeof loc === 'string'
-          ? loc
-          : ((loc as Record<string, unknown>)?.['name'] as string) ?? '',
+      location,
+      remote,
       salary_min_usd: salary.min,
       salary_max_usd: salary.max,
       salary_currency: salary.currency,
@@ -58,8 +100,9 @@ export function parseAshby(json: unknown, company: string): Job[] {
       posted_at: job['publishedAt']
         ? new Date(job['publishedAt'] as string).getTime()
         : null,
-    };
-  });
+    });
+  }
+  return jobs;
 }
 
 export class AshbyAdapter implements SourceAdapter {

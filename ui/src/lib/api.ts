@@ -7,6 +7,23 @@ export class ApiError extends Error {
   }
 }
 
+// Error bodies are `{ error: string, issues?: Array<{ path, message }> }`, but
+// an older server (or a validation library) can send a non-string `error` —
+// render something readable instead of the useless "[object Object]".
+function errorMessage(body: unknown, fallback: string): string {
+  if (body && typeof body === 'object') {
+    const b = body as { error?: unknown; issues?: Array<{ path: string; message: string }> };
+    if (typeof b.error === 'string' && b.error) return b.error;
+    if (Array.isArray(b.issues) && b.issues.length > 0) {
+      return b.issues.map(i => `${i.path}: ${i.message}`).join('; ');
+    }
+    if (b.error !== undefined) {
+      try { return JSON.stringify(b.error); } catch { /* fall through to fallback */ }
+    }
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -14,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new ApiError(res.status, body.error ?? res.statusText);
+    throw new ApiError(res.status, errorMessage(body, res.statusText));
   }
   return res.json() as Promise<T>;
 }
@@ -144,6 +161,7 @@ export interface InterpretedCriteria {
   salary_min_usd: number | null;
   salary_currency?: string;
   exclude_companies: string[];
+  experience_years: { min: number | null; max: number | null } | null;
 }
 
 // Format a salary amount in its native currency. Falls back to a "CODE amount"
@@ -260,7 +278,13 @@ export const api = {
     }) => request<{ id: number }>('/sources', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: number, body: { display_name?: string; enabled?: boolean; config_json?: Record<string, unknown> }) =>
       request<{ ok: boolean }>(`/sources/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    delete: (id: number) => request<{ ok: boolean }>(`/sources/${id}`, { method: 'DELETE' }),
+    // Seeded sources (or ones with saved jobs) can't be hard-deleted server-side —
+    // the endpoint turns them off instead and says so.
+    delete: (id: number) =>
+      request<{ ok: true; deleted: true } | { ok: true; disabled: true; msg: string }>(
+        `/sources/${id}`,
+        { method: 'DELETE' }
+      ),
   },
 
   runs: {
@@ -269,7 +293,7 @@ export const api = {
     // A natural-language query drives the search; the backend interprets it into
     // criteria via Claude before scanning. Omitted = plain re-scan of current criteria.
     startScan: (query?: string) =>
-      request<{ ok: boolean; msg: string; criteria: InterpretedCriteria | null }>('/runs/scan', {
+      request<{ ok: boolean; msg: string; criteria: InterpretedCriteria | null; runId: number }>('/runs/scan', {
         method: 'POST',
         body: JSON.stringify(query ? { query } : {}),
       }),
@@ -279,9 +303,10 @@ export const api = {
   health: {
     // The endpoint returns 503 when any single check fails, but the body still
     // carries the per-check detail — parse it regardless so a failing LLM check
-    // doesn't mask a healthy DB.
-    check: async (): Promise<HealthCheck> => {
-      const res = await fetch(`${BASE}/health`);
+    // doesn't mask a healthy DB. `deep` also runs the (slower) model probe —
+    // used for the explicit "Re-check" button, not the cheap mount-time check.
+    check: async (deep = false): Promise<HealthCheck> => {
+      const res = await fetch(`${BASE}/health${deep ? '?deep=1' : ''}`);
       const body = await res.json().catch(() => null);
       if (body && typeof body === 'object' && 'checks' in body) return body as HealthCheck;
       throw new ApiError(res.status, res.statusText);

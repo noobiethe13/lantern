@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
+import { zodErrorBody } from '../server/errors';
 
 export const freshnessSettings = new Hono();
 
@@ -40,7 +41,7 @@ freshnessSettings.get('/', (c) => {
 freshnessSettings.put('/', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = FreshnessSettingsSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   db.run(
     `INSERT INTO settings (key, value_json, updated_at) VALUES ('freshness', ?, ?)

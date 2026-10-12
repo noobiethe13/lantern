@@ -220,7 +220,7 @@ function AddSourceForm({ onAdded }: { onAdded: () => void }) {
       )}
       {error && <div style={{ fontSize: '12px', color: 'var(--danger)' }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <Button size="sm" onClick={handleAdd} loading={saving} disabled={!identifier.trim() || !displayName.trim() || !workdayReady}><Plus size={13} /> Add</Button>
+        <Button size="sm" onClick={handleAdd} loading={saving} disabled={!identifier.trim() || !displayName.trim() || !workdayReady || !googleReady}><Plus size={13} /> Add</Button>
         <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setError(null); }}>Cancel</Button>
       </div>
     </div>
@@ -257,6 +257,7 @@ function SourcesSection({ sources, loading, setSources, reload }: {
   sources: Source[]; loading: boolean;
   setSources: Dispatch<SetStateAction<Source[]>>; reload: () => void;
 }) {
+  const toast = useToast();
   const [filter, setFilter] = useState('');
   const [expanded, setExpanded] = useState(false);
 
@@ -266,9 +267,23 @@ function SourcesSection({ sources, loading, setSources, reload }: {
     await api.sources.update(source.id, { enabled: newEnabled }).catch(() => reload());
   };
 
+  // Seeded sources (or ones with saved jobs) can't be hard-deleted — the server
+  // turns them off instead and says so. Wait for the real outcome rather than
+  // optimistically removing the row: a "disabled" response must leave the row
+  // in place (just switched off), and a genuine error must surface, not
+  // silently self-heal via reload (which used to mask a 500 as a UI glitch).
   const handleDelete = async (id: number) => {
-    setSources(prev => prev.filter(s => s.id !== id));
-    await api.sources.delete(id).catch(() => reload());
+    try {
+      const res = await api.sources.delete(id);
+      if ('deleted' in res && res.deleted) {
+        setSources(prev => prev.filter(s => s.id !== id));
+      } else if ('disabled' in res && res.disabled) {
+        setSources(prev => prev.map(s => s.id === id ? { ...s, enabled: 0 } : s));
+        toast(res.msg, 'info');
+      }
+    } catch (e) {
+      toast(`Could not delete: ${String(e)}`, 'error');
+    }
   };
 
   const f = filter.trim().toLowerCase();
@@ -373,8 +388,8 @@ function ResumeSection() {
       const res = await api.resume.save({ enabled, text });
       setSaved(res.settings);
       toast(enabled
-        ? 'Resume saved — new scans will grade background fit.'
-        : 'Resume saved.', 'success');
+        ? 'Resume saved — current scores are cleared and re-graded (with background fit) on your next search.'
+        : 'Resume saved — current scores are cleared and re-graded on your next search.', 'success');
     } catch (e) {
       toast(`Could not save: ${String(e)}`, 'error');
     } finally {
@@ -642,14 +657,24 @@ function EngineSection({ health, loading, checkedAt, onRecheck }: {
   );
 }
 
-function DangerZone() {
+function DangerZone({ scanRunning, onCleared }: { scanRunning: boolean; onCleared: () => void }) {
+  const toast = useToast();
   const [confirming, setConfirming] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [done, setDone] = useState(false);
 
   const handleClear = async () => {
     setClearing(true);
-    try { await api.admin.clearJobs(); setDone(true); setConfirming(false); } finally { setClearing(false); }
+    try {
+      await api.admin.clearJobs();
+      setDone(true);
+      setConfirming(false);
+      onCleared();
+    } catch (e) {
+      toast(`Could not clear: ${String(e)}`, 'error');
+    } finally {
+      setClearing(false);
+    }
   };
 
   // Deliberately the ONLY boxed element on the page — quarantined by contrast.
@@ -668,7 +693,7 @@ function DangerZone() {
             <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>Cancel</Button>
           </div>
         ) : (
-          <Button variant="danger" size="sm" onClick={() => setConfirming(true)} style={{ flexShrink: 0 }}>Clear all jobs</Button>
+          <Button variant="danger" size="sm" onClick={() => setConfirming(true)} disabled={scanRunning} title={scanRunning ? 'A scan is running — try again once it finishes.' : undefined} style={{ flexShrink: 0 }}>Clear all jobs</Button>
         )}
       </div>
     </section>
@@ -693,13 +718,24 @@ export default function Settings() {
   }, []);
   useEffect(() => { loadSources(); }, [loadSources]);
 
+  // A one-off check, not a live subscription (Settings has no run/SSE
+  // infra) — enough to know, at the moment the page loads, whether the
+  // Danger Zone's "Clear all" should start out disabled.
+  const [scanRunning, setScanRunning] = useState(false);
+  useEffect(() => {
+    api.runs.list(1).then(res => setScanRunning(Boolean(res.runs[0] && !res.runs[0].finished_at))).catch(() => {});
+  }, []);
+
   const [health, setHealth] = useState<HealthCheck | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
-  const checkHealth = useCallback(async () => {
+  // Mount does the cheap check (DB + a quick LLM ping); "Re-check" runs the
+  // deep probe (also exercises the model) — no need to pay that cost on every
+  // page load.
+  const checkHealth = useCallback(async (deep = false) => {
     setHealthLoading(true);
     try {
-      const res = await api.health.check();
+      const res = await api.health.check(deep);
       setHealth(res); setCheckedAt(Date.now());
       if (!res.ok) toast('Some health checks failed.', 'error');
     } catch (e) { toast(`Health check failed: ${String(e)}`, 'error'); } finally { setHealthLoading(false); }
@@ -745,9 +781,9 @@ export default function Settings() {
           <FreshnessSection />
         </section>
         <section style={strip}>
-          <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={checkHealth} />
+          <EngineSection health={health} loading={healthLoading} checkedAt={checkedAt} onRecheck={() => checkHealth(true)} />
         </section>
-        <DangerZone />
+        <DangerZone scanRunning={scanRunning} onCleared={loadSources} />
       </div>
     </div>
   );

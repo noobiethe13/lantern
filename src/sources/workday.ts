@@ -53,6 +53,18 @@ export function parseWorkdayPostedOn(text: unknown, now: number): number | null 
   return null;
 }
 
+/** Decode a Workday `externalPath`'s primary location segment
+ *  (`/job/California---Irvine/…` -> "California, Irvine") — used for the "N
+ *  Locations" case, where `locationsText` is just a count with no location
+ *  detail. `---` separates location components; a remaining `-` within a
+ *  component is a space. */
+function decodeExternalPathLocation(externalPath: string): string | null {
+  const m = externalPath.match(/^\/job\/([^/]+)\//);
+  if (!m) return null;
+  const decoded = m[1].replace(/---/g, ', ').replace(/-/g, ' ').trim();
+  return decoded || null;
+}
+
 function externalId(posting: Record<string, unknown>, externalPath: string): string {
   const bullets = posting['bulletFields'];
   if (Array.isArray(bullets) && typeof bullets[0] === 'string' && bullets[0].trim()) {
@@ -85,13 +97,29 @@ export function parseWorkday(
     if (!title || !externalPath.startsWith('/')) continue;
 
     const locationsText = (j['locationsText'] as string)?.trim() ?? '';
+    // "N Locations" (11/20 postings on a sampled page) is a bare count with no
+    // location detail — stored verbatim it's unmatchable against any allowed
+    // location, so every such posting was dropped by L1. Decode the primary
+    // location from the path instead and flag how many more there are;
+    // `remote` is left undefined since a count alone can't say whether any
+    // (or all) of the N locations are remote.
+    const nLocations = locationsText.match(/^(\d+)\s*Locations?$/i);
+    let location = locationsText;
+    let remote: boolean | undefined = /remote/i.test(`${title} ${locationsText}`);
+    if (nLocations) {
+      const count = Number(nLocations[1]);
+      const primary = decodeExternalPathLocation(externalPath);
+      location = primary ? `${primary} (+${count - 1} more)` : locationsText;
+      remote = undefined;
+    }
+
     jobs.push({
       external_id: externalId(j, externalPath),
       title,
       url: `https://${host}/${site}${externalPath}`,
       company,
-      location: locationsText,
-      remote: /remote/i.test(`${title} ${locationsText}`),
+      location,
+      remote,
       posted_at: parseWorkdayPostedOn(j['postedOn'], now),
     });
   }
@@ -112,6 +140,11 @@ export class WorkdayAdapter implements SourceAdapter {
     ctx.emitProgress(`Fetching ${cfg.display_name} (Workday)…`);
 
     let total = 0;
+    // Workday only reports `total` on page 0 — later pages report 0, which
+    // previously ended the loop right after page 1 (40 of 1,527 postings on a
+    // live Salesforce board). Capture it once, from page 0, and otherwise
+    // stop on a short raw page (the reliable end-of-results signal).
+    let reportedTotal: number | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       if (ctx.abortSignal.aborted) break;
       const offset = page * PAGE_SIZE;
@@ -121,14 +154,17 @@ export class WorkdayAdapter implements SourceAdapter {
         method: 'POST',
         body: { appliedFacets: {}, limit: PAGE_SIZE, offset, searchText: '' },
         retries: 1,
-      })) as { total?: number };
+      })) as { total?: number; jobPostings?: unknown[] };
+
+      if (page === 0 && typeof json.total === 'number') reportedTotal = json.total;
 
       const jobs = parseWorkday(json, host, site, cfg.display_name, Date.now());
       for (const job of jobs) yield job;
       total += jobs.length;
 
-      const reported = typeof json.total === 'number' ? json.total : 0;
-      if (jobs.length === 0 || offset + PAGE_SIZE >= reported) break;
+      const rawPageLength = Array.isArray(json.jobPostings) ? json.jobPostings.length : 0;
+      const reachedReportedTotal = reportedTotal !== null && offset + PAGE_SIZE >= reportedTotal;
+      if (rawPageLength === 0 || rawPageLength < PAGE_SIZE || reachedReportedTotal) break;
     }
 
     ctx.emitProgress(`${cfg.display_name}: ${total} jobs`, total);

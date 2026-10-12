@@ -22,9 +22,18 @@ export function parsePersonioXml(xml: string, company: string, host: string): Jo
     const title = pos.find('name').first().text().trim();
     if (!id || !title) return;
 
+    // `department` is not a location and must not be joined in (it was
+    // previously joined as "Munich · Product and Tech", which meant an
+    // allow-list of just [berlin] rejected the job even though Berlin is one
+    // of its additionalOffices). Every additionalOffices > office is a real
+    // secondary work location and belongs alongside the primary office.
     const office = pos.find('office').first().text().trim();
-    const department = pos.find('department').first().text().trim();
-    const location = [office, department].filter(Boolean).join(' · ');
+    const additionalOffices: string[] = [];
+    pos.find('additionalOffices').find('office').each((_j, o) => {
+      const t = $(o).text().trim();
+      if (t) additionalOffices.push(t);
+    });
+    const location = [...new Set([office, ...additionalOffices].filter(Boolean))].join('; ');
 
     const createdAt = pos.find('createdAt').first().text().trim();
     const posted = createdAt ? Date.parse(createdAt) : NaN;
@@ -64,7 +73,7 @@ export class PersonioAdapter implements SourceAdapter {
     const feedUrl = `https://${host}/xml?language=en`;
     ctx.emitProgress(`Fetching ${display_name} (Personio)…`);
 
-    const xml = await fetchText(feedUrl, { allowedHosts: [host] });
+    const xml = await fetchText(feedUrl, { allowedHosts: [host], retries: 2 });
     const jobs = parsePersonioXml(xml, display_name, host);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

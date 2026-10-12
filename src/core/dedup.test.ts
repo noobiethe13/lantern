@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeCompany, roleTokens, rolesMatch } from './dedup';
+import { normalizeCompany, roleTokens, rolesMatch, shouldFold } from './dedup';
 
 describe('normalizeCompany', () => {
   test('lowercases', () => {
@@ -76,5 +76,56 @@ describe('rolesMatch', () => {
     // "Engineer" is a subset of "Mechanical Engineer" but only 1 token —
     // the subset rule requires ≥2 tokens to avoid this kind of false positive.
     expect(rolesMatch('Engineer', 'Mechanical Engineer')).toBe(false);
+  });
+
+  test('a level word on one side only is a different role, not a rewording', () => {
+    expect(rolesMatch('Senior Software Engineer', 'Software Engineer')).toBe(false);
+    expect(rolesMatch('Software Engineer Intern', 'Software Engineer')).toBe(false);
+  });
+
+  test('abbreviated level word (with/without trailing dot) still blocks a bare title', () => {
+    expect(rolesMatch('Sr. DevOps Engineer', 'DevOps Engineer')).toBe(false);
+  });
+
+  test('ladder numerals distinguish otherwise-identical titles', () => {
+    expect(rolesMatch('Software Engineer III, Mobile', 'Software Engineer II, Mobile')).toBe(false);
+  });
+
+  test('legitimate case: work-mode suffix still matches (not a level word)', () => {
+    expect(rolesMatch('Software Engineer (Remote)', 'Software Engineer')).toBe(true);
+  });
+
+  test('legitimate case: same abbreviated level word with/without trailing dot matches', () => {
+    expect(rolesMatch('Sr Flutter Engineer', 'Sr. Flutter Engineer')).toBe(true);
+  });
+});
+
+describe('shouldFold', () => {
+  test('same role, same (normalized) location -> fold', () => {
+    expect(shouldFold(
+      { title: 'Software Engineer', location: 'Berlin, Germany' },
+      { title: 'Software Engineer', location: '  berlin, germany ' },
+    )).toBe(true);
+  });
+
+  test('same role, different location -> do not fold', () => {
+    expect(shouldFold(
+      { title: 'Software Engineer', location: 'London, UK' },
+      { title: 'Software Engineer', location: 'Berlin, Germany' },
+    )).toBe(false);
+  });
+
+  test('same role, one side missing location -> fold (nothing to contradict)', () => {
+    expect(shouldFold(
+      { title: 'Software Engineer', location: null },
+      { title: 'Software Engineer', location: 'Berlin, Germany' },
+    )).toBe(true);
+  });
+
+  test('different role (level mismatch) -> never folds regardless of location', () => {
+    expect(shouldFold(
+      { title: 'Senior Software Engineer', location: 'Berlin, Germany' },
+      { title: 'Software Engineer', location: 'Berlin, Germany' },
+    )).toBe(false);
   });
 });

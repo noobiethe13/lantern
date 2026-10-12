@@ -29,12 +29,34 @@ buffering:
 ```ts
 interface SourceAdapter {
   fetch(ctx: SourceContext): AsyncIterable<Job>;
+  enrich?(job: Job, ctx: SourceContext): Promise<Partial<Job> | null>;
 }
 ```
 
 `SourceContext` carries what the adapter needs from the current search: the source
 config, the criteria-derived `keywords` and `locations`, whether remote is
-required, a progress callback, and an abort signal.
+required, `maxAgeDays` (the freshness window in days when the freshness gate is on,
+otherwise undefined — for APIs with a recency filter, such as LinkedIn's `f_TPR`),
+a progress callback, and an abort signal. The runner normalizes `keywords` before
+handing them over: trimmed, lowercased, deduplicated, and with any keyword that
+contains another as whole words dropped ("flutter developer" next to "flutter").
+
+What the runner does around an adapter:
+
+- **Per-source deadline.** Each source gets its own abort signal and an 8-minute
+  deadline covering fetch and enrichment. On timeout the signal fires, the source
+  is marked `last_status = 'timeout'`, and the scan moves on. Long paginated
+  fetches should check `ctx.abortSignal` between pages.
+- **Contract validation.** Every yielded job is checked against `JobShape`
+  (`src/core/job.ts`). A job that fails (for example an empty URL or title) is
+  skipped and counted in the source's `source_done` message, never stored.
+- **Enrichment.** `enrich` is optional, for detail that costs one request per job
+  (LinkedIn's JD). The runner calls it only for jobs that passed L1 and have no
+  `jd_text` (and no JD already stored for that URL), sequentially, up to 40 calls
+  per source per run, and merges the returned patch before storing. It should
+  return null rather than throw on its own fetch failures; a throw is logged and
+  treated as null. Per-run state such as a circuit breaker must be reset at the
+  top of `fetch()`, since adapters are long-lived singletons.
 
 Four rules are load-bearing (the full list is in
 [`.claude/rules/source-adapters.md`](../.claude/rules/source-adapters.md)):
@@ -84,13 +106,13 @@ Per-company boards (each needs a slug in [`seed-sources.yml`](../src/config/seed
 |---|---|:---:|:---:|
 | `greenhouse` | Greenhouse | sometimes | via `?content=true` |
 | `ashby` | Ashby | ✓ | structured comp |
-| `lever` | Lever | ✓ | annual ranges |
+| `lever` | Lever | ✓ | description + `lists[]` sections + additional |
 | `recruitee` | Recruitee | — | ✓ |
-| `smartrecruiters` | SmartRecruiters | — | deferred |
+| `smartrecruiters` | SmartRecruiters | — | deferred (links are `jobs.smartrecruiters.com/{company}/{postingId}`) |
 | `workable` | Workable | — | deferred |
 | `personio` | Personio | — | ✓ |
 | `bamboohr` | BambooHR | — | per-job detail |
-| `workday` | Workday | — | composite tenant+site |
+| `workday` | Workday | — | deferred (composite tenant + site; `total` only on page 0) |
 
 Keyword aggregators:
 
@@ -100,7 +122,7 @@ Keyword aggregators:
 | `arbeitnow` | Arbeitnow | keyless | on |
 | `himalayas` | Himalayas | keyless | on |
 | `jobicy` | Jobicy (remote) | keyless | on |
-| `linkedin` | LinkedIn guest | keyless, gated | off |
+| `linkedin` | LinkedIn guest | keyless, gated (JD via `enrich`) | off |
 | `google_jobs` | Google Jobs (SerpAPI) | API key | off |
 
 Lantern ships around 320 seeded per-company boards, weighted toward Greenhouse
@@ -108,9 +130,20 @@ and Ashby, so a fresh install has coverage on the first scan. The seed list is a
 maintained default (you are not expected to edit it), and boards seed lazily the
 first time you run a scan.
 
+A per-company entry marked `enabled: false` in the seed list is a board the
+maintainers have retired (its slug 404s). Seeding is `INSERT OR IGNORE`, plus a
+one-directional sync: such an entry turns the matching row off on the next scan.
+The sync never turns anything on, and it skips keyword aggregators, whose
+`enabled: false` means "opt-in", not "retired".
+
 Two sources are held back by default. `linkedin` uses an unofficial keyless guest
 endpoint (gray-area, aggressively rate-limited), and `google_jobs` needs your own
-SerpAPI key. Both are enabled from Settings.
+SerpAPI key. Both are enabled from Settings. The API never echoes a stored
+`apiKey` back: `config_json` in responses carries a masked `••••` + last-four
+value, and saving the masked value keeps the stored key.
+
+Deleting a source from Settings turns it off instead when it still has saved jobs
+or is a seeded default (which would just be re-added on the next scan).
 
 ## Adding a board or a type
 

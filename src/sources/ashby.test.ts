@@ -58,4 +58,104 @@ describe('parseAshby', () => {
     const json = { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1' }] };
     expect(parseAshby(json, 'Acme')[0].jd_text).toBeUndefined();
   });
+
+  describe('workplaceType/isRemote -> remote + location suffix', () => {
+    test('remote: true when workplaceType is "Remote", even located "Europe"', () => {
+      // Live case: Linear, 30/30 workplaceType:"Remote" postings located "Europe"/"North America".
+      const json = { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1', location: 'Europe', workplaceType: 'Remote' }] };
+      const job = parseAshby(json, 'Acme')[0];
+      expect(job.remote).toBe(true);
+      expect(job.location).toBe('Europe');
+    });
+
+    test('Hybrid workplaceType wins over a true isRemote (Linear\'s hybrid London role)', () => {
+      const json = {
+        jobs: [{
+          id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1',
+          location: 'London', workplaceType: 'Hybrid', isRemote: true,
+        }],
+      };
+      const job = parseAshby(json, 'Acme')[0];
+      expect(job.remote).toBe(false);
+      expect(job.location).toBe('London (Hybrid)');
+    });
+
+    test('Onsite workplaceType appends " (On-site)" and remote is false', () => {
+      const json = { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1', location: 'Dubai', workplaceType: 'Onsite' }] };
+      const job = parseAshby(json, 'Acme')[0];
+      expect(job.remote).toBe(false);
+      expect(job.location).toBe('Dubai (On-site)');
+    });
+
+    test('hybrid/onsite never suffix an empty base location — it must stay empty (lenient in L1)', () => {
+      const hybrid = parseAshby(
+        { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1', workplaceType: 'Hybrid' }] },
+        'Acme'
+      )[0];
+      expect(hybrid.location).toBe('');
+      const onsite = parseAshby(
+        { jobs: [{ id: '2', title: 'Y', jobUrl: 'https://jobs.ashbyhq.com/acme/2', workplaceType: 'Onsite' }] },
+        'Acme'
+      )[0];
+      expect(onsite.location).toBe('');
+    });
+
+    test('falls back to isRemote only when workplaceType is absent', () => {
+      const json = { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1', location: 'Anywhere', isRemote: true }] };
+      expect(parseAshby(json, 'Acme')[0].remote).toBe(true);
+    });
+
+    test('workplaceType and isRemote both absent -> remote false', () => {
+      const json = { jobs: [{ id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1', location: 'Somewhere' }] };
+      expect(parseAshby(json, 'Acme')[0].remote).toBe(false);
+    });
+  });
+
+  describe('location: secondaryLocations + postal country', () => {
+    test('joins primary + secondaryLocations[].location, deduped', () => {
+      const json = {
+        jobs: [{
+          id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1',
+          location: 'London',
+          secondaryLocations: [{ location: 'Stockholm' }, { location: 'London' }],
+        }],
+      };
+      expect(parseAshby(json, 'Acme')[0].location).toBe('London; Stockholm');
+    });
+
+    test('appends address.postalAddress.addressCountry when the string lacks it', () => {
+      // Live case: sarvam, location "Bengaluru", addressCountry "India".
+      const json = {
+        jobs: [{
+          id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1',
+          location: 'Bengaluru',
+          address: { postalAddress: { addressCountry: 'India' } },
+        }],
+      };
+      expect(parseAshby(json, 'Acme')[0].location).toBe('Bengaluru, India');
+    });
+
+    test('does not double-append when the country is already present', () => {
+      const json = {
+        jobs: [{
+          id: '1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/1',
+          location: 'Bengaluru, India',
+          address: { postalAddress: { addressCountry: 'India' } },
+        }],
+      };
+      expect(parseAshby(json, 'Acme')[0].location).toBe('Bengaluru, India');
+    });
+  });
+
+  describe('incomplete postings', () => {
+    test('skips a posting with no jobUrl', () => {
+      const json = { jobs: [{ id: '1', title: 'X' }] };
+      expect(parseAshby(json, 'Acme')).toEqual([]);
+    });
+
+    test('skips a posting with no title', () => {
+      const json = { jobs: [{ id: '1', jobUrl: 'https://jobs.ashbyhq.com/acme/1' }] };
+      expect(parseAshby(json, 'Acme')).toEqual([]);
+    });
+  });
 });

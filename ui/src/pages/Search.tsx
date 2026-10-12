@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type CSSProperties } from 'react';
+import { useState, useEffect, useRef, useCallback, memo, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
@@ -9,8 +9,17 @@ import { useSSE, type ScanEvent } from '@/lib/sse';
 import { Button, Spinner, Badge } from '@/components/ui';
 import { EmptyLantern, Embers } from '@/components/brand';
 
-function eventColor(type: ScanEvent['type']): string {
-  switch (type) {
+// An l2_done event whose pass was aborted (fatal provider error) or that logged
+// grading errors is real trouble, not a plain success — don't draw it green.
+function isL2Trouble(event: ScanEvent): boolean {
+  if (event.type !== 'l2_done') return false;
+  const d = event.data;
+  return Boolean(d?.aborted) || (typeof d?.errors === 'number' && d.errors > 0);
+}
+
+function eventColor(event: ScanEvent): string {
+  if (isL2Trouble(event)) return 'var(--danger)';
+  switch (event.type) {
     case 'source_done': case 'l2_done': case 'done': return 'var(--success)';
     case 'source_error': case 'error': return 'var(--danger)';
     case 'l2_progress': case 'l2_start': case 'scan_done': return 'var(--accent-text)';
@@ -18,9 +27,10 @@ function eventColor(type: ScanEvent['type']): string {
   }
 }
 
-function EventIcon({ type }: { type: ScanEvent['type'] }) {
-  const p = { size: 13, style: { color: eventColor(type) } };
-  switch (type) {
+function EventIcon({ event }: { event: ScanEvent }) {
+  const p = { size: 13, style: { color: eventColor(event) } };
+  if (isL2Trouble(event)) return <XCircle {...p} />;
+  switch (event.type) {
     case 'source_done': return <CheckCircle2 {...p} />;
     case 'source_error': case 'error': return <XCircle {...p} />;
     case 'l2_progress': return <Sparkles {...p} />;
@@ -30,20 +40,30 @@ function EventIcon({ type }: { type: ScanEvent['type'] }) {
   }
 }
 
-interface LogEntry { id: number; event: ScanEvent; ts: number; }
+// Formatted once when the entry is appended, not on every re-render — a scan
+// emits ~1.5-2K events and re-formatting the timestamp on each was O(n^2).
+function formatTs(ts: number): string {
+  return new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
-function LogLine({ entry }: { entry: LogEntry }) {
-  const ts = new Date(entry.ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const color = eventColor(entry.event.type);
+interface LogEntry { id: number; event: ScanEvent; tsLabel: string; }
+
+const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
+  const color = eventColor(entry.event);
   const isPlain = color === 'var(--text-faint)';
+  const trouble = isL2Trouble(entry.event);
+  const errorDetail = trouble && typeof entry.event.data?.error === 'string' ? entry.event.data.error : null;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '3px 0', animation: 'fadeIn 150ms cubic-bezier(0.22,1,0.36,1)' }}>
-      <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: '11px', flexShrink: 0, marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>{ts}</span>
-      <span style={{ flexShrink: 0, marginTop: 1 }}><EventIcon type={entry.event.type} /></span>
-      <span style={{ fontSize: '12.5px', color: isPlain ? 'var(--text-muted)' : color, lineHeight: 1.4 }}>{entry.event.msg}</span>
+      <span style={{ color: 'var(--text-faint)', fontFamily: 'var(--font-mono)', fontSize: '11px', flexShrink: 0, marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>{entry.tsLabel}</span>
+      <span style={{ flexShrink: 0, marginTop: 1 }}><EventIcon event={entry.event} /></span>
+      <span style={{ fontSize: '12.5px', color: isPlain ? 'var(--text-muted)' : color, lineHeight: 1.4 }}>
+        {entry.event.msg}
+        {errorDetail && <span style={{ color: 'var(--danger)' }}> — {errorDetail}</span>}
+      </span>
     </div>
   );
-}
+});
 
 function duration(run: Run): string {
   if (!run.finished_at) return '…';
@@ -85,7 +105,10 @@ function DistillTrail({ run }: { run: Run }) {
 }
 
 // Raw stage counts live in the tooltip; the row itself tells the distilled story.
-function runTooltip(run: Run): string {
+// Only the latest run's verdicts are still live — an older run's were wiped by
+// every scan since (each re-stamps last_run_id), so its row can't reopen a
+// results view; it can only re-run the same query.
+function runTooltip(run: Run, isLatest: boolean): string {
   const bits = [
     `${run.jobs_found.toLocaleString()} found`,
     `${run.jobs_new.toLocaleString()} new`,
@@ -93,11 +116,19 @@ function runTooltip(run: Run): string {
     `${run.jobs_l2_pass.toLocaleString()} matched`,
   ];
   if (run.errors.length > 0) bits.push(`${run.errors.length} source error${run.errors.length === 1 ? '' : 's'}`);
-  return `${bits.join(' · ')} — view this run's matches`;
+  const action = isLatest
+    ? "view this run's matches"
+    : run.query
+    ? 'search this again'
+    : "this run's matches can't be reconstructed";
+  return `${bits.join(' · ')} — ${action}`;
 }
 
-function RecentRuns({ runs, onView, onOpenRun }: { runs: Run[]; onView: () => void; onOpenRun: (id: number) => void }) {
+function RecentRuns({ runs, onView, onOpenLatest, onRefillQuery }: {
+  runs: Run[]; onView: () => void; onOpenLatest: (id: number) => void; onRefillQuery: (query: string) => void;
+}) {
   if (runs.length === 0) return null;
+  const latestId = runs[0]?.id;
   return (
     <section style={{ marginTop: 'var(--space-3xl)' }}>
       <h2 style={{ margin: '0 0 var(--space-sm)', fontSize: '13px', fontWeight: 600, color: 'var(--text-faint)', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: 'var(--font-ui)' }}>
@@ -105,31 +136,35 @@ function RecentRuns({ runs, onView, onOpenRun }: { runs: Run[]; onView: () => vo
       </h2>
       <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
         {/* cap at 5 rows — the home page composition shouldn't scroll; Jobs has the full history */}
-        {runs.slice(0, 5).map(run => (
-          <div
-            key={run.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenRun(run.id)}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenRun(run.id); } }}
-            title={runTooltip(run)}
-            className="run-row"
-            style={{ display: 'grid', gap: 18, padding: '12px 6px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center', cursor: 'pointer', transition: 'background 140ms ease' }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '13px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {run.query || <span style={{ color: 'var(--text-muted)' }}>Re-scan of previous criteria</span>}
+        {runs.slice(0, 5).map(run => {
+          const isLatest = run.id === latestId;
+          const action = () => isLatest ? onOpenLatest(run.id) : run.query && onRefillQuery(run.query);
+          return (
+            <div
+              key={run.id}
+              role="button"
+              tabIndex={0}
+              onClick={action}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); action(); } }}
+              title={runTooltip(run, isLatest)}
+              className="run-row"
+              style={{ display: 'grid', gap: 18, padding: '12px 6px', borderBottom: '1px solid var(--border-subtle)', alignItems: 'center', cursor: 'pointer', transition: 'background 140ms ease' }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '13px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {run.query || <span style={{ color: 'var(--text-muted)' }}>Re-scan of previous criteria</span>}
+                </div>
+                <div className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>
+                  {timeAgo(run.started_at)} · {duration(run)}
+                  {run.errors.length > 0 && (
+                    <span style={{ color: 'var(--warning)' }}> · {run.errors.length} error{run.errors.length === 1 ? '' : 's'}</span>
+                  )}
+                </div>
               </div>
-              <div className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>
-                {timeAgo(run.started_at)} · {duration(run)}
-                {run.errors.length > 0 && (
-                  <span style={{ color: 'var(--warning)' }}> · {run.errors.length} error{run.errors.length === 1 ? '' : 's'}</span>
-                )}
-              </div>
+              <DistillTrail run={run} />
             </div>
-            <DistillTrail run={run} />
-          </div>
-        ))}
+          );
+        })}
       </div>
       <button onClick={onView} className="text-link" style={{ marginTop: 'var(--space-md)' }}>
         View all matches <ArrowRight size={14} />
@@ -160,27 +195,60 @@ function Ignition() {
   );
 }
 
+// Cuts a list to `cap` chips + a dim "+N" overflow badge (titled with the
+// hidden values) instead of silently dropping them — a criterion L1 still
+// applies (e.g. a 4th excluded company) shouldn't vanish from the chips.
+function overflowBadge(hidden: string[], key: string) {
+  if (hidden.length === 0) return null;
+  return (
+    <span key={key} title={hidden.join(', ')}>
+      <Badge tone="dim">+{hidden.length}</Badge>
+    </span>
+  );
+}
+
+function experienceLabel(e: { min: number | null; max: number | null }): string | null {
+  if (e.min == null && e.max == null) return null;
+  if (e.min != null && e.max != null) return e.min === e.max ? `${e.min} yrs` : `${e.min}–${e.max} yrs`;
+  if (e.min != null) return `${e.min}+ yrs`;
+  return `≤ ${e.max} yrs`;
+}
+
 // "Here's what Lantern understood" — the structured criteria Claude parsed from
 // the natural-language search, so the interpretation is transparent.
 function InterpretedChips({ c }: { c: InterpretedCriteria }) {
+  const expLabel = c.experience_years ? experienceLabel(c.experience_years) : null;
   const hasAny =
     c.title.positive.length || c.location.remote_required || c.location.allowed.length ||
     c.location.block?.length || c.location.always_allow?.length ||
     c.salary_min_usd || c.seniority.allowed.length || c.title.negative.length ||
-    c.exclude_companies.length;
+    c.exclude_companies.length || expLabel;
   if (!hasAny) return null;
+  const positive = c.title.positive.slice(0, 4);
+  const allowed = c.location.allowed.slice(0, 3);
+  const alwaysAllow = (c.location.always_allow ?? []).slice(0, 2);
+  const block = (c.location.block ?? []).slice(0, 3);
+  const negative = c.title.negative.slice(0, 3);
+  const excluded = c.exclude_companies.slice(0, 3);
   return (
     <div style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', animation: 'fadeIn 220ms ease' }}>
       <span style={{ fontSize: '12px', color: 'var(--text-faint)', marginRight: 2 }}>Understood as</span>
-      {c.title.positive.slice(0, 4).map(k => <Badge key={`p-${k}`} tone="accent">{k}</Badge>)}
+      {positive.map(k => <Badge key={`p-${k}`} tone="accent">{k}</Badge>)}
+      {overflowBadge(c.title.positive.slice(4), 'p-more')}
       {c.location.remote_required && <Badge tone="blue">remote</Badge>}
-      {c.location.allowed.slice(0, 3).map(l => <Badge key={`l-${l}`} tone="neutral">{l}</Badge>)}
-      {(c.location.always_allow ?? []).slice(0, 2).map(l => <Badge key={`aa-${l}`} tone="neutral">always {l}</Badge>)}
-      {(c.location.block ?? []).slice(0, 3).map(l => <Badge key={`bl-${l}`} tone="danger">not {l}</Badge>)}
+      {allowed.map(l => <Badge key={`l-${l}`} tone="neutral">{l}</Badge>)}
+      {overflowBadge(c.location.allowed.slice(3), 'l-more')}
+      {alwaysAllow.map(l => <Badge key={`aa-${l}`} tone="neutral">always {l}</Badge>)}
+      {overflowBadge((c.location.always_allow ?? []).slice(2), 'aa-more')}
+      {block.map(l => <Badge key={`bl-${l}`} tone="danger">not {l}</Badge>)}
+      {overflowBadge((c.location.block ?? []).slice(3), 'bl-more')}
       {c.salary_min_usd ? <Badge tone="success">≥ {formatMoney(c.salary_min_usd, c.salary_currency)}</Badge> : null}
+      {expLabel && <Badge tone="violet">{expLabel}</Badge>}
       {c.seniority.allowed.map(s => <Badge key={`s-${s}`} tone="violet">{s}</Badge>)}
-      {c.title.negative.slice(0, 3).map(n => <Badge key={`n-${n}`} tone="danger">no {n}</Badge>)}
-      {c.exclude_companies.slice(0, 3).map(x => <Badge key={`x-${x}`} tone="danger">not {x}</Badge>)}
+      {negative.map(n => <Badge key={`n-${n}`} tone="danger">no {n}</Badge>)}
+      {overflowBadge(c.title.negative.slice(3), 'n-more')}
+      {excluded.map(x => <Badge key={`x-${x}`} tone="danger">not {x}</Badge>)}
+      {overflowBadge(c.exclude_companies.slice(3), 'x-more')}
     </div>
   );
 }
@@ -206,9 +274,11 @@ export default function SearchPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [lastResult, setLastResult] = useState<Run | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [interpreted, setInterpreted] = useState<InterpretedCriteria | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [showRecent, setShowRecent] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
   const logCounter = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -229,7 +299,9 @@ export default function SearchPage() {
 
   // On mount, reconnect to an in-progress scan if one is running (e.g. the user
   // navigated away and came back) so live progress resumes instead of the page
-  // looking idle/complete. A run is in-progress while finished_at is null.
+  // looking idle/complete. A run is in-progress while finished_at is null — and
+  // the server now recovers runs orphaned by a crash at boot (marks them
+  // finished), so an unfinished row here really is a live run, never a stale one.
   useEffect(() => {
     loadRuns().then(rs => {
       const active = rs.find(r => !r.finished_at);
@@ -238,15 +310,18 @@ export default function SearchPage() {
     loadRecent();
   }, [loadRuns, loadRecent]);
 
-  useSSE(activeRunId, (event: ScanEvent) => {
-    setLog(prev => [...prev, { id: logCounter.current++, event, ts: Date.now() }]);
+  const { reconnecting } = useSSE(activeRunId, (event: ScanEvent) => {
+    setLog(prev => [...prev, { id: logCounter.current++, event, tsLabel: formatTs(Date.now()) }]);
     // 'scan_done' is the L1→L2 handoff (not terminal); keep showing progress.
     // The run is finished only on 'l2_done' (or 'done' for an already-finished
     // run, or 'error').
     if (event.type === 'l2_done' || event.type === 'done' || event.type === 'error') {
-      loadRuns().then(() => {
-        api.runs.list(1).then(r => setLastResult(r.runs[0] ?? null));
-      });
+      setScanError(event.type === 'error' ? event.msg : null);
+      const id = activeRunId ?? event.runId;
+      Promise.resolve(id ? api.runs.get(id) : null)
+        .then(run => setLastResult(run))
+        .catch(() => { /* the roster reload below still keeps recent runs fresh */ });
+      loadRuns();
       loadRecent();
       setScanning(false);
     }
@@ -258,14 +333,16 @@ export default function SearchPage() {
 
   // Polling backstop: the SSE stream is the primary signal, but if it drops and
   // can't recover we'd be stuck showing "Scanning" forever. While scanning, poll
-  // the latest run; once it has a finished_at, finalize regardless of SSE.
+  // THIS run specifically (never "the latest run" — a new search's own run row
+  // doesn't exist yet a few seconds in, while nl-filter is still interpreting
+  // the query, so "latest" would still be the previous, already-finished run).
   useEffect(() => {
-    if (!scanning) return;
+    if (!scanning || activeRunId === null) return;
     const iv = setInterval(async () => {
       try {
-        const { runs: fresh } = await api.runs.list(1);
-        if (fresh[0]?.finished_at) {
-          setLastResult(fresh[0]);
+        const run = await api.runs.get(activeRunId);
+        if (run.finished_at) {
+          setLastResult(run);
           setScanning(false);
           loadRuns();
           loadRecent();
@@ -273,7 +350,7 @@ export default function SearchPage() {
       } catch { /* transient — try again next tick */ }
     }, 4000);
     return () => clearInterval(iv);
-  }, [scanning, loadRuns, loadRecent]);
+  }, [scanning, activeRunId, loadRuns, loadRecent]);
 
   // The raw query drives the search. The backend interprets it into criteria via
   // Claude (location, salary, seniority, exclusions — all from the sentence), so
@@ -287,20 +364,20 @@ export default function SearchPage() {
     setScanning(true);
     setLog([]);
     setLastResult(null);
+    setScanError(null);
     setInterpreted(null);
     setActiveRunId(null);
+    // Stay in the scanning state until the 202 comes back with the run id —
+    // there's no run row to poll or reconnect to before then.
     try {
       const res = await api.runs.startScan(query);
       setInterpreted(res.criteria);
-      let retries = 12;
-      while (retries-- > 0) {
-        await new Promise(r => setTimeout(r, 600));
-        const { runs: fresh } = await api.runs.list(1);
-        if (fresh[0] && !fresh[0].finished_at) { setActiveRunId(fresh[0].id); break; }
-      }
+      setActiveRunId(res.runId);
     } catch (err) {
       setScanning(false);
-      setLog(prev => [...prev, { id: logCounter.current++, event: { runId: 0, type: 'error', msg: String(err) }, ts: Date.now() }]);
+      const msg = String(err);
+      setScanError(msg);
+      setLog(prev => [...prev, { id: logCounter.current++, event: { runId: 0, type: 'error', msg }, tsLabel: formatTs(Date.now()) }]);
     }
   };
 
@@ -316,6 +393,16 @@ export default function SearchPage() {
     .filter(q => q.toLowerCase() !== keyword.trim().toLowerCase())
     .filter(q => keyword.trim() === '' || q.toLowerCase().includes(keyword.trim().toLowerCase()))
     .slice(0, 5);
+  // Clamp against the live list — it re-filters as you type, so a stale index
+  // from a longer list must not point past the end (or linger when it's gone).
+  const activeSuggestion = activeIdx >= 0 && activeIdx < suggestions.length ? activeIdx : -1;
+
+  const pickSuggestion = (q: string) => {
+    setKeyword(q);
+    setShowRecent(false);
+    setActiveIdx(-1);
+    inputRef.current?.focus();
+  };
 
   return (
     <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '100vh', maxWidth: 740, margin: '0 auto', padding: '0 var(--space-xl)' }}>
@@ -358,14 +445,32 @@ export default function SearchPage() {
           <input
             ref={inputRef}
             aria-label="Describe the role you want"
+            role="combobox"
+            aria-expanded={showRecent && suggestions.length > 0}
+            aria-controls="recent-searches"
+            aria-activedescendant={activeSuggestion >= 0 ? `recent-option-${activeSuggestion}` : undefined}
             value={keyword}
-            onChange={e => { setKeyword(e.target.value); setShowRecent(true); }}
+            onChange={e => { setKeyword(e.target.value); setShowRecent(true); setActiveIdx(-1); }}
             onFocus={() => setFocused(true)}
             onClick={() => setShowRecent(true)}
-            onBlur={() => { setFocused(false); window.setTimeout(() => setShowRecent(false), 150); }}
+            onBlur={() => { setFocused(false); window.setTimeout(() => { setShowRecent(false); setActiveIdx(-1); }, 150); }}
             onKeyDown={e => {
-              if (e.key === 'Enter') handleScan();
-              else if (e.key === 'Escape') setShowRecent(false);
+              const open = showRecent && suggestions.length > 0;
+              if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.preventDefault();
+                setActiveIdx(i => {
+                  const cur = i >= 0 && i < suggestions.length ? i : -1;
+                  const n = suggestions.length;
+                  if (e.key === 'ArrowDown') return cur < n - 1 ? cur + 1 : 0;
+                  return cur > 0 ? cur - 1 : n - 1;
+                });
+              } else if (e.key === 'Enter') {
+                if (open && activeSuggestion >= 0) { pickSuggestion(suggestions[activeSuggestion]); }
+                else handleScan();
+              } else if (e.key === 'Escape') {
+                setShowRecent(false);
+                setActiveIdx(-1);
+              }
             }}
             disabled={scanning}
             autoFocus
@@ -381,15 +486,18 @@ export default function SearchPage() {
             </span>
           )}
           {showRecent && !scanning && suggestions.length > 0 && (
-            <div role="listbox" aria-label="Recent searches" className="recent-pop">
+            <div id="recent-searches" role="listbox" aria-label="Recent searches" className="recent-pop">
               {suggestions.map((q, i) => (
                 <button
                   key={i}
+                  id={`recent-option-${i}`}
                   type="button"
                   role="option"
-                  aria-selected={false}
-                  className="recent-item"
-                  onMouseDown={e => { e.preventDefault(); setKeyword(q); setShowRecent(false); inputRef.current?.focus(); }}
+                  tabIndex={-1}
+                  aria-selected={i === activeSuggestion}
+                  className={`recent-item${i === activeSuggestion ? ' active' : ''}`}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onMouseDown={e => { e.preventDefault(); pickSuggestion(q); }}
                 >
                   <Clock size={13} style={{ color: 'var(--text-faint)', flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q}</span>
@@ -460,7 +568,7 @@ export default function SearchPage() {
             border-radius: var(--radius-md); cursor: pointer;
             color: var(--text); font-family: var(--font-ui); font-size: 14px; text-align: left;
           }
-          .recent-item:hover { background: var(--surface-2); }
+          .recent-item:hover, .recent-item.active { background: var(--surface-2); }
         `}</style>
       </div>
       <p style={{ margin: 'var(--space-sm) 0 0', fontSize: '12.5px', color: 'var(--text-faint)' }}>
@@ -478,6 +586,11 @@ export default function SearchPage() {
             <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'glow-pulse 1.4s ease-in-out infinite' }} />
             Fetching sources and scoring matches…
           </div>
+          {reconnecting && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '12.5px', color: 'var(--warning)' }}>
+              <Spinner size={12} /> Reconnecting…
+            </div>
+          )}
         </div>
       )}
 
@@ -489,8 +602,17 @@ export default function SearchPage() {
                 <Spinner size={12} /> Connecting…
               </div>
             )}
-            {log.map(entry => <LogLine key={entry.id} entry={entry} />)}
+            {/* render only the tail — a scan emits ~1.5-2K events and formatting/
+                mounting every line each render was O(n^2); the full count still
+                accumulates in state, just not all painted */}
+            {(log.length > 300 ? log.slice(log.length - 300) : log).map(entry => <LogLine key={entry.id} entry={entry} />)}
           </div>
+        </div>
+      )}
+
+      {scanError && !scanning && (
+        <div style={{ marginTop: 'var(--space-lg)', display: 'flex', alignItems: 'center', gap: 8, fontSize: '13.5px', color: 'var(--danger)' }}>
+          <XCircle size={15} /> {scanError}
         </div>
       )}
 
@@ -512,8 +634,9 @@ export default function SearchPage() {
       ) : (
         <RecentRuns
           runs={runs}
-          onView={() => navigate('/jobs')}
-          onOpenRun={id => navigate(`/jobs?run=${id}`)}
+          onView={() => navigate('/jobs?fit=1')}
+          onOpenLatest={id => navigate(`/jobs?run=${id}&fit=1`)}
+          onRefillQuery={q => { setKeyword(q); inputRef.current?.focus(); }}
         />
       )}
 

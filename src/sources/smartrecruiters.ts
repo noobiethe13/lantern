@@ -5,25 +5,34 @@ const SR_ALLOWED_HOSTS = ['api.smartrecruiters.com'];
 const SR_PAGE_SIZE = 100;
 const SR_MAX_PAGES = 50; // safety cap (5000 postings @ 100/page)
 
+const REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
+
+/** ISO 3166-1 alpha-2 → English display name ("in" → "India"), or null when
+ *  `code` isn't a 2-letter region code. SR's `location.country` is lowercase. */
+function regionName(code: unknown): string | null {
+  if (typeof code !== 'string' || !/^[a-z]{2}$/i.test(code)) return null;
+  try {
+    return REGION_NAMES.of(code.toUpperCase()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function buildPostingsUrl(slug: string, offset: number): string {
   return `https://api.smartrecruiters.com/v1/companies/${slug}/postings?limit=${SR_PAGE_SIZE}&offset=${offset}&status=PUBLIC`;
 }
 
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
 /**
- * Parse a SmartRecruiters `/postings` page. The public posting URL is derived
- * from `j.ref` (an `api.smartrecruiters.com/v1/companies/<slug>/postings/<id>`
- * link) rewritten to the public `jobs.smartrecruiters.com/<slug>/postings/<id>`
- * host. If `ref` is missing or off-host we synthesise one from the company slug
- * + posting id; entries with no resolvable URL are dropped.
+ * Parse a SmartRecruiters `/postings` page. The public posting URL is
+ * `jobs.smartrecruiters.com/<companyIdentifier>/<postingId>` — no
+ * "/postings/" segment and no title slug (a previous version rewrote
+ * `j.ref`'s `/v1/companies/<slug>/postings/<id>` path verbatim onto the
+ * public host, keeping the "/postings/" segment, which 404s there).
+ * `j.company.identifier` is the posting's own casing of the slug (e.g.
+ * "BoschGroup"); `identifier` — the source's configured slug — is the
+ * fallback when a posting omits it.
  */
-export function parseSmartRecruiters(json: unknown, company: string): Job[] {
+export function parseSmartRecruiters(json: unknown, company: string, identifier: string): Job[] {
   const items = (json as { content?: unknown[] })?.content;
   if (!Array.isArray(items)) return [];
 
@@ -31,41 +40,27 @@ export function parseSmartRecruiters(json: unknown, company: string): Job[] {
   for (const it of items) {
     const j = it as Record<string, unknown>;
     const title = (j['name'] as string) ?? '';
+    const postingId = j['id'];
+    if (!title || !postingId) continue;
+
+    const jCompany = j['company'] as Record<string, unknown> | undefined;
+    const srIdentifier =
+      typeof jCompany?.['identifier'] === 'string' && jCompany['identifier'] ? (jCompany['identifier'] as string) : identifier;
+    const url = `https://jobs.smartrecruiters.com/${srIdentifier}/${postingId}`;
 
     const loc = (j['location'] as Record<string, unknown>) || {};
     const fullLocation =
       (loc['fullLocation'] as string) ||
-      [loc['city'], loc['region'], loc['country']].filter(Boolean).join(', ');
+      [loc['city'], loc['region'], regionName(loc['country'])].filter(Boolean).join(', ');
     const remote = loc['remote'] ? 'Remote' : '';
     const location = [fullLocation, remote].filter(Boolean).join(', ');
-
-    let url = '';
-    if (typeof j['ref'] === 'string') {
-      try {
-        const ref = new URL(j['ref'] as string);
-        if (
-          ref.protocol === 'https:' &&
-          ref.hostname === 'api.smartrecruiters.com' &&
-          ref.pathname.startsWith('/v1/companies/')
-        ) {
-          url = `https://jobs.smartrecruiters.com/${ref.pathname.slice('/v1/companies/'.length)}`;
-        }
-      } catch {
-        // malformed ref → fall through to synthesis
-      }
-    }
-    if (!url && j['id']) {
-      const companySlug = slugify(company);
-      if (companySlug) url = `https://jobs.smartrecruiters.com/${companySlug}/${j['id']}-${slugify(title)}`;
-    }
-    if (!title || !url) continue;
 
     // TODO(jd_text deferred): the postings list endpoint has no description; the
     // full jobAd needs a per-posting fetch (`/postings/{id}`). Deferred to avoid
     // N extra requests per company — so SmartRecruiters jobs reach L2 without a
     // description. Revisit if SR boards become a meaningful share of results.
     jobs.push({
-      external_id: String(j['id'] ?? ''),
+      external_id: String(postingId ?? ''),
       title,
       url,
       company,
@@ -93,9 +88,9 @@ export class SmartRecruitersAdapter implements SourceAdapter {
     for (let page = 0; page < SR_MAX_PAGES; page++) {
       if (ctx.abortSignal.aborted) break;
       const apiUrl = buildPostingsUrl(identifier, page * SR_PAGE_SIZE);
-      const json = await fetchJson(apiUrl, { allowedHosts: SR_ALLOWED_HOSTS });
+      const json = await fetchJson(apiUrl, { allowedHosts: SR_ALLOWED_HOSTS, retries: 2 });
       const pageItems = (json as { content?: unknown[] })?.content;
-      const jobs = parseSmartRecruiters(json, display_name);
+      const jobs = parseSmartRecruiters(json, display_name, identifier);
       for (const job of jobs) {
         yield job;
       }

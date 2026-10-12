@@ -30,8 +30,18 @@ export interface DedupItem {
   vec: Float32Array;
   // Higher = preferred as the cluster's canonical (kept + L2-scored). The runner
   // ranks by information richness (has JD, salary disclosed). Ties break on the
-  // lowest id (≈ earliest inserted), so the choice is deterministic.
+  // lowest id (≈ earliest inserted), so the choice is deterministic. Overridden
+  // by `triaged` below — priority only decides ordering AMONG rows with the same
+  // triage status.
   priority: number;
+  // True when the user has already triaged this row (status changed off 'new',
+  // has notes, or has an attachment) — it's their own work product. Triaged rows
+  // are preferred as a cluster's canonical over priority, and — critically —
+  // must NEVER be folded into another row as the duplicate: a merge sets
+  // duplicate_of, and every jobs-list view (including status filters) hides
+  // duplicate_of rows, so folding a triaged row would silently disappear an
+  // "applied"/"interview" job the user is tracking.
+  triaged: boolean;
 }
 
 export interface DuplicateCluster {
@@ -45,6 +55,12 @@ export interface DuplicateCluster {
  * transitive chaining — a duplicate must be ≥ threshold to the canonical it's
  * attached to, never merely to some intermediate, which keeps drift out. Only
  * clusters that actually have ≥1 duplicate are returned. Pure: no DB, no model.
+ *
+ * Triaged rows (see DedupItem.triaged) get two guarantees: they sort before
+ * untriaged rows so they win canonical-selection ties, AND they're never
+ * eligible to be picked up as another seed's duplicate — so a triaged row is
+ * always either a cluster's canonical or its own standalone (never-clustered)
+ * row, never hidden behind someone else's duplicate_of.
  */
 export function clusterDuplicates(
   items: DedupItem[],
@@ -62,8 +78,11 @@ export function clusterDuplicates(
   for (const group of byCompany.values()) {
     if (group.length < 2) continue;
 
-    // Highest priority first (canonical preference), lowest id breaks ties.
-    const ordered = [...group].sort((a, b) => b.priority - a.priority || a.id - b.id);
+    // Triaged rows first (canonical preference), then highest priority, then
+    // lowest id to break remaining ties.
+    const ordered = [...group].sort(
+      (a, b) => Number(b.triaged) - Number(a.triaged) || b.priority - a.priority || a.id - b.id,
+    );
     const assigned = new Set<number>();
 
     for (const seed of ordered) {
@@ -71,7 +90,9 @@ export function clusterDuplicates(
       assigned.add(seed.id);
       const duplicateIds: number[] = [];
       for (const other of ordered) {
-        if (assigned.has(other.id)) continue;
+        // A triaged row can only ever be a seed (or stand alone) — never merged
+        // away as someone else's duplicate. See the triaged guarantee above.
+        if (other.triaged || assigned.has(other.id)) continue;
         if (cosineSim(seed.vec, other.vec) >= threshold) {
           assigned.add(other.id);
           duplicateIds.push(other.id);

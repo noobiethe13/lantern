@@ -1,22 +1,40 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { fetchJson } from '../core/fetch';
-import { htmlToText, toMillis } from './aggregator-util';
+import { htmlToText, toMillis, sleep } from './aggregator-util';
+import { pickLocation } from './gated-util';
 
 const HIMALAYAS_ALLOWED_HOSTS = ['himalayas.app'];
-const PER_KEYWORD_LIMIT = 100;
-const MAX_KEYWORDS = 8;
+// The API silently caps `limit` at 20 regardless of what's requested, so
+// pagination (not a bigger limit) is how we get past the first 20 of a
+// keyword's results (e.g. 188 total for "flutter", only 18-20 per page).
+const MAX_PAGES = 5;
+const PAGE_DELAY_MS = 500;
+const MAX_KEYWORDS = 5;
 
-function buildUrl(keyword: string): string {
-  return `https://himalayas.app/jobs/api/search?q=${encodeURIComponent(keyword)}&limit=${PER_KEYWORD_LIMIT}`;
+interface HimalayasPage {
+  offset?: number;
+  limit?: number;
+  totalCount?: number;
+  jobs?: unknown[];
+}
+
+function buildUrl(keyword: string, page: number, country?: string): string {
+  const params = new URLSearchParams({ q: keyword });
+  if (page > 1) params.set('page', String(page));
+  if (country) params.set('country', country);
+  return `https://himalayas.app/jobs/api/search?${params.toString()}`;
 }
 
 /**
- * Parse a Himalayas `/jobs/api/search` response. Jobs live under `jobs`; the
- * apply URL is `applicationLink` and the stable id is `guid`. Himalayas is a
- * remote-only board. Salary is only mapped when the currency is USD.
+ * Parse a Himalayas `/jobs/api/search` response page. Jobs live under `jobs`;
+ * the apply URL is `applicationLink` and the stable id is `guid`. Himalayas is
+ * a remote-only board, but `locationRestrictions` still narrows WHO can be
+ * hired: an empty array means hire-anywhere ("Worldwide"), not "unknown".
+ * Salary is only mapped when `salaryPeriod` is annual/yearly — an hourly or
+ * weekly rate would otherwise be mis-read as a yearly one.
  */
 export function parseHimalayas(json: unknown): Job[] {
-  const items = (json as { jobs?: unknown[] })?.jobs;
+  const items = (json as HimalayasPage)?.jobs;
   if (!Array.isArray(items)) return [];
 
   const jobs: Job[] = [];
@@ -27,6 +45,8 @@ export function parseHimalayas(json: unknown): Job[] {
     const company = (j['companyName'] as string)?.trim() ?? '';
     if (!title || !url || !company) continue;
 
+    const period = typeof j['salaryPeriod'] === 'string' ? j['salaryPeriod'].toLowerCase() : '';
+    const isAnnual = period === 'annual' || period === 'yearly';
     const currency = typeof j['currency'] === 'string' ? (j['currency'] as string) : null;
     const minSalary = j['minSalary'];
     const maxSalary = j['maxSalary'];
@@ -37,15 +57,15 @@ export function parseHimalayas(json: unknown): Job[] {
       title,
       url,
       company,
-      location: Array.isArray(locations) ? locations.join(', ') : '',
+      location: Array.isArray(locations) ? (locations.length > 0 ? locations.join(', ') : 'Worldwide') : '',
       remote: true,
       // Keep the native amount + its currency tag rather than dropping non-USD
       // pay (L1 only compares like-for-like currencies; the rest defers to L2).
-      salary_min_usd: typeof minSalary === 'number' ? Math.round(minSalary) : null,
-      salary_max_usd: typeof maxSalary === 'number' ? Math.round(maxSalary) : null,
-      salary_currency: currency,
+      salary_min_usd: isAnnual && typeof minSalary === 'number' ? Math.round(minSalary) : null,
+      salary_max_usd: isAnnual && typeof maxSalary === 'number' ? Math.round(maxSalary) : null,
+      salary_currency: isAnnual ? currency : null,
       posted_at: toMillis(j['pubDate']),
-      jd_text: htmlToText(j['description'] as string),
+      jd_text: htmlToText(j['description'] as string) || undefined,
     });
   }
   return jobs;
@@ -60,24 +80,74 @@ export class HimalayasAdapter implements SourceAdapter {
       ctx.emitProgress('Himalayas: no title keyword set — skipping');
       return;
     }
+    // A named place (e.g. "India") scopes results to who's eligible there,
+    // instead of a global firehose mostly restricted to other countries.
+    const namedLocation = pickLocation(ctx);
     ctx.emitProgress(`Fetching Himalayas for ${keywords.join(', ')}…`);
 
     const seen = new Set<string>();
     let total = 0;
+    let attempts = 0;
+    let failures = 0;
+
     for (const keyword of keywords) {
       if (ctx.abortSignal.aborted) break;
-      const json = await fetchJson(buildUrl(keyword), {
-        allowedHosts: HIMALAYAS_ALLOWED_HOSTS,
-        // Aggregators can be slow; without this they hit the 10s default and abort.
-        timeoutMs: 30_000,
-        retries: 2,
-      });
-      for (const job of parseHimalayas(json)) {
-        if (seen.has(job.url)) continue;
-        seen.add(job.url);
-        total++;
-        yield job;
+      let country = namedLocation || undefined;
+
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        if (ctx.abortSignal.aborted) break;
+        if (page > 1) await sleep(PAGE_DELAY_MS);
+
+        attempts++;
+        let json: HimalayasPage;
+        try {
+          json = (await fetchJson(buildUrl(keyword, page, country), {
+            allowedHosts: HIMALAYAS_ALLOWED_HOSTS,
+            // Aggregators can be slow; without this they hit the 10s default and abort.
+            timeoutMs: 30_000,
+            retries: 2,
+          })) as HimalayasPage;
+        } catch {
+          failures++;
+          // The named location may be a city Himalayas doesn't recognise as a
+          // country — retry this same page once unscoped before giving up on it.
+          if (country) {
+            country = undefined;
+            page--;
+            continue;
+          }
+          ctx.emitProgress(`Himalayas: "${keyword}" page ${page} request failed`);
+          break;
+        }
+
+        if (country && (json.totalCount ?? 0) === 0) {
+          country = undefined;
+          page--;
+          continue;
+        }
+
+        for (const job of parseHimalayas(json)) {
+          if (seen.has(job.url)) continue;
+          seen.add(job.url);
+          total++;
+          yield job;
+        }
+
+        // Pages intermittently come back short of `limit` mid-list (e.g. 18/20 at
+        // totalCount 188) without that meaning the list is exhausted — stop on an
+        // actually-empty page or once offset+limit reaches totalCount, not on a
+        // merely-short one (that used to end pagination early, before the last
+        // page's worth of results).
+        const rawLen = json.jobs?.length ?? 0;
+        const limit = json.limit ?? 20;
+        const offset = json.offset ?? 0;
+        const totalCount = json.totalCount ?? 0;
+        if (rawLen === 0 || offset + limit >= totalCount) break;
       }
+    }
+
+    if (attempts > 0 && failures === attempts) {
+      throw new Error('Himalayas: all requests failed');
     }
     ctx.emitProgress(`Himalayas: ${total} jobs`, total);
   }

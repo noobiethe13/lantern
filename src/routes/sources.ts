@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { assertValidSlug } from '../core/fetch';
+import { zodErrorBody } from '../server/errors';
+import { isSeededSource } from '../config/seeds';
 
 export const sources = new Hono();
 
@@ -46,7 +48,7 @@ const SLUG_LABELS: Record<(typeof SOURCE_TYPES)[number], string> = {
 // slug-safe sentinel so the (type, identifier) uniqueness constraint holds.
 // LinkedIn is gated/unofficial (default-disabled in the UI) but still a
 // keyword-driven aggregator.
-const AGGREGATOR_TYPES = new Set([
+export const AGGREGATOR_TYPES: ReadonlySet<string> = new Set([
   'remoteok', 'arbeitnow', 'himalayas', 'linkedin', 'google_jobs', 'jobicy',
 ]);
 
@@ -78,17 +80,43 @@ const UpdateSourceSchema = z.object({
   config_json: z.record(z.unknown()).optional(),
 });
 
+const MASK_PREFIX = '••••';
+
+function maskApiKey(key: string): string {
+  return MASK_PREFIX + key.slice(-4);
+}
+
+// C6: never echo a stored apiKey back to the client — it's readable via DNS
+// rebinding and any log/error surface, and the UI never needs to display it.
+function maskConfigJson(configJson: string | null): string | null {
+  if (!configJson) return configJson;
+  let cfg: Record<string, unknown>;
+  try {
+    cfg = JSON.parse(configJson);
+  } catch {
+    return configJson;
+  }
+  if (typeof cfg['apiKey'] === 'string' && cfg['apiKey']) {
+    return JSON.stringify({ ...cfg, apiKey: maskApiKey(cfg['apiKey'] as string) });
+  }
+  return configJson;
+}
+
+function maskSourceRow<T extends { config_json?: unknown }>(row: T): T {
+  return { ...row, config_json: maskConfigJson((row.config_json as string | null) ?? null) };
+}
+
 sources.get('/', c => {
   const rows = db.query<Record<string, unknown>, []>(
     'SELECT * FROM sources ORDER BY type, display_name'
   ).all();
-  return c.json({ sources: rows });
+  return c.json({ sources: rows.map(maskSourceRow) });
 });
 
 sources.post('/', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = CreateSourceSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   const { type, identifier, display_name, enabled, config_json } = parsed.data;
   const identifierError = validateIdentifier(type, identifier);
@@ -119,9 +147,9 @@ sources.post('/', async c => {
 
   const now = Date.now();
   try {
-    const result = db.query<{ id: number }, [string, string, string, number, string | null, number]>(
+    const result = db.query<Record<string, unknown>, [string, string, string, number, string | null, number]>(
       `INSERT INTO sources (type, identifier, display_name, enabled, config_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`
     ).get(
       type,
       identifier,
@@ -130,7 +158,7 @@ sources.post('/', async c => {
       config_json ? JSON.stringify(config_json) : null,
       now
     );
-    return c.json({ id: result!.id }, 201);
+    return c.json({ id: result!['id'], source: maskSourceRow(result!) }, 201);
   } catch (err) {
     if (String(err).includes('UNIQUE')) return c.json({ error: 'Source already exists' }, 409);
     throw err;
@@ -140,10 +168,23 @@ sources.post('/', async c => {
 sources.patch('/:id', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = UpdateSourceSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   const { display_name, enabled, config_json } = parsed.data;
   const id = Number(c.req.param('id'));
+
+  const existing = db
+    .query<{ config_json: string | null }, [number]>('SELECT config_json FROM sources WHERE id = ?')
+    .get(id);
+  if (!existing) return c.json({ error: 'Source not found' }, 404);
+
+  // C6: a PATCH that round-trips the masked placeholder (e.g. the UI submitting
+  // the form unchanged) must not overwrite the real stored key with the mask.
+  let finalConfig = config_json;
+  if (finalConfig && typeof finalConfig['apiKey'] === 'string' && (finalConfig['apiKey'] as string).startsWith(MASK_PREFIX)) {
+    const prevCfg = existing.config_json ? (JSON.parse(existing.config_json) as Record<string, unknown>) : {};
+    finalConfig = { ...finalConfig, apiKey: prevCfg['apiKey'] };
+  }
 
   type Binding = string | number | null;
   const sets: string[] = [];
@@ -151,16 +192,41 @@ sources.patch('/:id', async c => {
 
   if (display_name !== undefined) { sets.push('display_name = ?'); params.push(display_name); }
   if (enabled !== undefined) { sets.push('enabled = ?'); params.push(enabled ? 1 : 0); }
-  if (config_json !== undefined) { sets.push('config_json = ?'); params.push(JSON.stringify(config_json)); }
+  if (finalConfig !== undefined) { sets.push('config_json = ?'); params.push(JSON.stringify(finalConfig)); }
 
   if (sets.length > 0) {
     db.run(`UPDATE sources SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
   }
-  return c.json({ ok: true });
+  const row = db.query<Record<string, unknown>, [number]>('SELECT * FROM sources WHERE id = ?').get(id);
+  return c.json({ ok: true, source: maskSourceRow(row!) });
 });
 
 sources.delete('/:id', c => {
-  db.run('DELETE FROM sources WHERE id = ?', [Number(c.req.param('id'))]);
-  return c.json({ ok: true });
+  const id = Number(c.req.param('id'));
+  const row = db
+    .query<{ id: number; type: string; identifier: string }, [number]>(
+      'SELECT id, type, identifier FROM sources WHERE id = ?',
+    )
+    .get(id);
+  if (!row) return c.json({ error: 'Source not found' }, 404);
+
+  const jobCount = db
+    .query<{ n: number }, [number]>('SELECT COUNT(*) AS n FROM jobs WHERE source_id = ?')
+    .get(id)?.n ?? 0;
+
+  // jobs.source_id has no ON DELETE and foreign_keys=ON, so deleting a source
+  // with saved jobs would throw SQLITE_CONSTRAINT_FOREIGNKEY. A seeded source
+  // (present in seed-sources.yml) would also just reappear on the next scan
+  // (seedSources() runs INSERT OR IGNORE). Both cases soft-disable instead.
+  if (jobCount > 0 || isSeededSource(row.type, row.identifier)) {
+    db.run('UPDATE sources SET enabled = 0 WHERE id = ?', [id]);
+    const msg = jobCount > 0
+      ? `Turned off instead of deleted — it has ${jobCount} saved job${jobCount === 1 ? '' : 's'}`
+      : "Turned off instead of deleted — it's a default source and would be re-added on the next scan";
+    return c.json({ ok: true, disabled: true, msg });
+  }
+
+  db.run('DELETE FROM sources WHERE id = ?', [id]);
+  return c.json({ ok: true, deleted: true });
 });
 

@@ -39,6 +39,10 @@ function scoreAndPersist(row: LegitimacyRow, now: number): void {
 /**
  * Score every job the run surfaced. Deterministic and LLM-free, so it runs
  * between scan and L2 — badges are ready while L2 is still scoring.
+ *
+ * Wrapped in a single transaction: one autocommitted UPDATE per row measured
+ * ~2.1s per 5,000 rows (vs ~5ms batched) on a file-backed WAL DB, which freezes
+ * the event loop — and therefore the API/SSE — for that whole span on a big run.
  */
 export function applyLegitimacyPass(runId: number): number {
   const rows = db
@@ -48,7 +52,10 @@ export function applyLegitimacyPass(runId: number): number {
     .all(runId);
 
   const now = Date.now();
-  for (const row of rows) scoreAndPersist(row, now);
+  const apply = db.transaction(() => {
+    for (const row of rows) scoreAndPersist(row, now);
+  });
+  apply();
   return rows.length;
 }
 

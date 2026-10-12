@@ -8,8 +8,8 @@ function unit(theta: number): Float32Array {
   return new Float32Array([Math.cos(theta), Math.sin(theta)]);
 }
 
-function item(id: number, companyNorm: string, theta: number, priority = 0): DedupItem {
-  return { id, companyNorm, vec: unit(theta), priority };
+function item(id: number, companyNorm: string, theta: number, priority = 0, triaged = false): DedupItem {
+  return { id, companyNorm, vec: unit(theta), priority, triaged };
 }
 
 describe('clusterDuplicates', () => {
@@ -86,5 +86,30 @@ describe('clusterDuplicates', () => {
       { canonicalId: 1, duplicateIds: [2] },
     ]);
     expect(clusterDuplicates(items, 0.99)).toEqual([]);
+  });
+
+  test('a triaged row wins canonical over a higher-priority untriaged row', () => {
+    const clusters = clusterDuplicates([
+      item(1, 'acme', 0, /* priority */ 5, /* triaged */ false),
+      item(2, 'acme', 0.01, /* priority */ 0, /* triaged */ true),
+    ]);
+    expect(clusters).toEqual([{ canonicalId: 2, duplicateIds: [1] }]);
+  });
+
+  test('a triaged row is never folded away as a duplicate, even as the lower-priority near-identical match', () => {
+    const clusters = clusterDuplicates([
+      item(10, 'acme', 0, 2, false), // untriaged canonical
+      item(50, 'acme', 0.001, 2, true), // triaged, cosine ~1 to id 10
+    ]);
+    // id 50 must NOT appear as anyone's duplicate.
+    for (const c of clusters) expect(c.duplicateIds).not.toContain(50);
+  });
+
+  test('two near-identical triaged rows both stay standalone (neither folds into the other)', () => {
+    const clusters = clusterDuplicates([
+      item(1, 'acme', 0, 0, true),
+      item(2, 'acme', 0.001, 0, true),
+    ]);
+    expect(clusters).toEqual([]);
   });
 });

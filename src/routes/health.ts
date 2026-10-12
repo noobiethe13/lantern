@@ -5,6 +5,11 @@ import { llm } from '../llm';
 export const health = new Hono();
 
 health.get('/', async c => {
+  // Cheap by default: CLI presence/version only. `?deep=1` additionally runs a
+  // real model call — worth paying for on-demand, but never on every Settings
+  // mount or mid-scan poll (see healthcheck's own comment for why that used to
+  // stall SSE and running scans).
+  const deep = c.req.query('deep') === '1';
   const checks: Record<string, { ok: boolean; detail?: string; deprecation?: string }> = {};
 
   // DB check
@@ -18,7 +23,7 @@ health.get('/', async c => {
   // LLM provider check — delegated to the active provider so health reflects
   // whichever backend the user has selected in Settings.
   try {
-    const result = await llm.healthcheck();
+    const result = await llm.healthcheck({ deep });
     checks.llm = {
       ok: result.ok,
       detail: result.detail

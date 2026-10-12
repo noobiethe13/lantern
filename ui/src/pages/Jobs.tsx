@@ -4,8 +4,8 @@ import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
   ChevronUp, ChevronDown, ShieldAlert, Sparkles, Layers,
 } from 'lucide-react';
-import { api, formatMoney, type Job, type JobStatus, type Legitimacy, type SimilarJob } from '@/lib/api';
-import { Textarea, Spinner } from '@/components/ui';
+import { api, formatMoney, type Job, type JobStatus, type Legitimacy, type SimilarJob, type Run } from '@/lib/api';
+import { Textarea, Spinner, Button, useToast } from '@/components/ui';
 import { StatusPill } from '@/components/StatusPill';
 import { scoreColor } from '@/components/score';
 import { EmptyLantern } from '@/components/brand';
@@ -176,7 +176,7 @@ function RefineControl({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
@@ -273,6 +273,7 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
       role="button"
       tabIndex={0}
       aria-label={`${job.title} at ${job.company}`}
+      data-job-id={job.id}
       className={selected ? 'job-row job-row-selected jobs-grid' : 'job-row jobs-grid'}
       style={{
         display: 'grid', gridTemplateColumns: GRID, alignItems: 'baseline', columnGap: 18,
@@ -372,18 +373,47 @@ function MetaCell({ icon, label, value }: { icon: React.ReactNode; label: string
   );
 }
 
-function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
+const NOTES_MAX_LEN = 4000;
+
+function DetailPanel({ job, onClose, onStatusChange, onNotesSaved, onPrev, onNext }: {
   job: Job; onClose: () => void; onStatusChange: (s: JobStatus) => void;
+  onNotesSaved: (id: number, notes: string) => void;
   onPrev?: () => void; onNext?: () => void;
 }) {
+  const toast = useToast();
   const [notes, setNotes] = useState(job.notes ?? '');
   const [savingNotes, setSavingNotes] = useState(false);
   const [showFullJd, setShowFullJd] = useState(false);
   const [similar, setSimilar] = useState<SimilarJob[]>([]);
   const [duplicates, setDuplicates] = useState<Job[]>([]);
   const notesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // Pending (debounced, not-yet-sent) note edit — keyed by job id so a flush
+  // triggered by switching jobs saves the *right* job, not whichever is current.
+  const pendingNotesRef = useRef<{ id: number; val: string } | null>(null);
 
-  useEffect(() => { setNotes(job.notes ?? ''); setShowFullJd(false); }, [job.id, job.notes]);
+  // Sends whatever edit is pending (if any) right away, bypassing the debounce.
+  // Called both from the debounce timer itself and from the job-change/unmount
+  // cleanup below, so a fast Next/Prev never silently drops an in-flight edit.
+  const flushNotes = useCallback(() => {
+    clearTimeout(notesTimer.current);
+    const pending = pendingNotesRef.current;
+    if (!pending) return;
+    pendingNotesRef.current = null;
+    setSavingNotes(true);
+    api.jobs.setNotes(pending.id, pending.val)
+      .then(() => onNotesSaved(pending.id, pending.val))
+      .catch(e => toast(`Note didn't save: ${String(e instanceof Error ? e.message : e)}`, 'error'))
+      .finally(() => setSavingNotes(false));
+  }, [onNotesSaved, toast]);
+
+  useEffect(() => {
+    setNotes(job.notes ?? '');
+    setShowFullJd(false);
+    // Leaving this job (switch or unmount): flush its pending edit instead of
+    // dropping it — a shared timer used to mean typing in the next job within
+    // 800ms cancelled the previous job's unsaved note entirely.
+    return () => { flushNotes(); };
+  }, [job.id, flushNotes]);
 
   // Nearest-neighbour jobs by embedding. Best-effort: a stale/disabled embedding
   // store just yields an empty list, and the section hides itself.
@@ -407,19 +437,30 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
 
   const handleNotes = (val: string) => {
     setNotes(val);
+    pendingNotesRef.current = { id: job.id, val };
     clearTimeout(notesTimer.current);
-    notesTimer.current = setTimeout(async () => {
-      setSavingNotes(true);
-      await api.jobs.setNotes(job.id, val).catch(() => {});
-      setSavingNotes(false);
-    }, 800);
+    notesTimer.current = setTimeout(flushNotes, 800);
   };
 
   const v = job.l2_verdict;
-  const salary = job.salary_min_usd ?? v?.salary_min_usd;
-  // Currency tags the job's own amount; the L2 estimate fallback has no currency
-  // tag, so it renders as USD.
-  const salaryCurrency = job.salary_min_usd != null ? job.salary_currency : null;
+  // Native min/max (whichever the source gave) always win over the L2 USD
+  // estimate, and always keep the job's own currency — a native max-only amount
+  // (Himalayas/RemoteOK/Ashby) must never be paired with an L2 USD min, which
+  // would silently relabel a foreign-currency figure as dollars.
+  const hasNativeSalary = job.salary_min_usd != null || job.salary_max_usd != null;
+  let salaryValue: React.ReactNode | null = null;
+  if (hasNativeSalary) {
+    const cur = job.salary_currency;
+    if (job.salary_min_usd != null && job.salary_max_usd != null) {
+      salaryValue = <>{formatMoney(job.salary_min_usd, cur)}–{formatMoney(job.salary_max_usd, cur)}</>;
+    } else if (job.salary_min_usd != null) {
+      salaryValue = <>{formatMoney(job.salary_min_usd, cur)}+</>;
+    } else {
+      salaryValue = <>up to {formatMoney(job.salary_max_usd!, cur)}</>;
+    }
+  } else if (v?.salary_min_usd != null) {
+    salaryValue = <>~{formatMoney(v.salary_min_usd, 'USD')} <span style={{ fontSize: '10.5px', color: 'var(--text-faint)' }}>est.</span></>;
+  }
   const locationValue = job.remote === 1 ? 'Remote' : job.location || '—';
   // Drop empty/whitespace reasons so a verdict with no real reason text doesn't
   // render an empty "why it matched" section.
@@ -431,11 +472,8 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
   const cells: { icon: React.ReactNode; label: string; value: React.ReactNode }[] = [
     { icon: job.remote === 1 ? <Globe size={12} /> : <MapPin size={12} />, label: 'Location', value: locationValue },
   ];
-  if (salary != null) {
-    cells.push({
-      icon: <Banknote size={12} />, label: 'Salary',
-      value: <span className="tnum">{formatMoney(salary, salaryCurrency)}{job.salary_max_usd ? `–${formatMoney(job.salary_max_usd, salaryCurrency)}` : '+'}</span>,
-    });
+  if (salaryValue != null) {
+    cells.push({ icon: <Banknote size={12} />, label: 'Salary', value: <span className="tnum">{salaryValue}</span> });
   }
   if (v?.seniority) {
     cells.push({ icon: <GaugeCircle size={12} />, label: 'Seniority', value: <span style={{ textTransform: 'capitalize' }}>{v.seniority}</span> });
@@ -507,7 +545,7 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
         </div>
       </div>
 
-      <div className="panel-stagger" style={{ position: 'relative', zIndex: 1, flex: 1, overflowY: 'auto', padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)' }}>
+      <div className="panel-stagger" tabIndex={-1} style={{ position: 'relative', zIndex: 1, flex: 1, overflowY: 'auto', padding: '20px 22px 24px', display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)', outline: 'none' }}>
         {/* Meta strip — inline cells divided by hairlines, one scannable row. */}
         <div style={{ display: 'flex', alignItems: 'stretch', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '12px 0', background: 'var(--surface-2)' }}>
           {cells.map((cell, i) => (
@@ -597,7 +635,7 @@ function DetailPanel({ job, onClose, onStatusChange, onPrev, onNext }: {
 
         <div>
           <SectionLabel>Notes {savingNotes && <span style={{ color: 'var(--accent-text)', textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>· saving</span>}</SectionLabel>
-          <Textarea value={notes} onChange={e => handleNotes(e.target.value)} placeholder="Add notes…" rows={3} style={{ fontFamily: 'var(--font-ui)', fontSize: '13px' }} />
+          <Textarea value={notes} onChange={e => handleNotes(e.target.value)} placeholder="Add notes…" rows={3} maxLength={NOTES_MAX_LEN} style={{ fontFamily: 'var(--font-ui)', fontSize: '13px' }} />
         </div>
 
         <div>
@@ -707,12 +745,32 @@ function EmptyState({ hasFilters }: { hasFilters: boolean }) {
   );
 }
 
+// Distinct from EmptyState: this is "the request failed", not "there's nothing
+// here" — wrong copy on a 500 would read as if the search genuinely had no
+// results.
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '72px 24px', gap: 10, textAlign: 'center', animation: 'rise 500ms cubic-bezier(0.22,1,0.36,1) both' }}>
+      <EmptyLantern size={120} dim />
+      <p style={{ color: 'var(--text)', fontSize: '15px', margin: 0, fontFamily: 'var(--font-serif)' }}>
+        Couldn't load <em style={{ color: 'var(--danger)' }}>jobs</em>
+      </p>
+      <p style={{ color: 'var(--text-faint)', fontSize: '13px', margin: 0, maxWidth: '38ch' }}>{message}</p>
+      <Button variant="outline" size="sm" onClick={onRetry} style={{ marginTop: 6 }}>Retry</Button>
+    </div>
+  );
+}
+
 export default function Jobs() {
   const [params, setParams] = useSearchParams();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Latest run, while it's still scoring (finished_at null) — drives the
+  // "scoring in progress" hint and the poll that refreshes the list on completion.
+  const [scanningRun, setScanningRun] = useState<Run | null>(null);
 
   const status = params.get('status') ?? '';
   const l1 = params.get('l1') === '1';
@@ -743,8 +801,15 @@ export default function Jobs() {
 
   const clearFilters = () => mutate(p => { for (const k of ['fit', 'remote', 'l1', 'l2', 'source_type', 'run']) p.delete(k); });
 
+  // Guards against out-of-order responses: debounced typing + fast tab clicks
+  // can fire overlapping requests, and without this an older response landing
+  // after a newer one would overwrite it with stale rows.
+  const loadSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await api.jobs.list({
         status: status || undefined,
@@ -757,19 +822,68 @@ export default function Jobs() {
         q: q || undefined,
         limit: PAGE_LIMIT,
       });
+      if (seq !== loadSeq.current) return; // a newer request has already resolved
       setJobs(res.jobs);
       setTotal(res.total);
+    } catch (e) {
+      if (seq !== loadSeq.current) return;
+      setLoadError(String(e instanceof Error ? e.message : e));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [status, l1, l2, fit, remote, run, sourceTypeRaw, q]);
 
   useEffect(() => { load(); }, [load]);
 
+  // A search wipes verdicts before scanning, so /jobs mid-scan would otherwise
+  // show every row frozen at L1/unscored with no explanation and never refresh.
+  // Poll the latest run while it's unfinished; reload once L2 completes.
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const pollRun = (id: number) => {
+      timer = setTimeout(async () => {
+        if (!live) return;
+        try {
+          const latest = await api.runs.get(id);
+          if (!live) return;
+          if (latest.finished_at != null) {
+            setScanningRun(null);
+            load();
+          } else {
+            setScanningRun(latest);
+            pollRun(id);
+          }
+        } catch {
+          // transient — try again on the next tick rather than getting stuck
+          pollRun(id);
+        }
+      }, 4000);
+    };
+
+    api.runs.list(1).then(({ runs }) => {
+      if (!live) return;
+      const latest = runs[0];
+      if (latest && latest.finished_at == null) {
+        setScanningRun(latest);
+        pollRun(latest.id);
+      } else {
+        setScanningRun(null);
+      }
+    }).catch(() => {});
+
+    return () => { live = false; clearTimeout(timer); };
+  }, [load]);
+
   const handleStatusChange = async (job: Job, newStatus: JobStatus) => {
     setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: newStatus } : j));
     await api.jobs.setStatus(job.id, newStatus).catch(() => load());
   };
+
+  const handleNotesSaved = useCallback((id: number, notes: string) => {
+    setJobs(prev => prev.map(j => j.id === id ? { ...j, notes } : j));
+  }, []);
 
   const selected = jobs.find(j => j.id === selectedId) ?? null;
 
@@ -779,8 +893,19 @@ export default function Jobs() {
   const selRef = useRef(selectedId); selRef.current = selectedId;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
+      // A popover (StatusPill dropdown, Refine) already handled this Escape and
+      // called preventDefault — without this check, closing a popover with Esc
+      // would also close the whole detail panel underneath it.
+      if (e.defaultPrevented) return;
+      // Ctrl/Cmd/Alt+J/K etc. are browser/OS shortcuts, not triage shortcuts.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // Focus inside the detail panel (its scrollable body is focusable
+      // precisely so this check works) or an open popover: let the key do its
+      // native thing (e.g. scroll the description) instead of moving selection.
+      if (target?.closest('.detail-panel, [role="listbox"], [role="dialog"]')) return;
       if (e.key === 'Escape') { setSelectedId(null); return; }
       const list = jobsRef.current;
       if (list.length === 0) return;
@@ -788,11 +913,15 @@ export default function Jobs() {
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         const idx = cur ? list.findIndex(j => j.id === cur) : -1;
-        setSelectedId(list[Math.min(idx + 1, list.length - 1)].id);
+        const next = list[Math.min(idx + 1, list.length - 1)];
+        setSelectedId(next.id);
+        document.querySelector(`[data-job-id="${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         const idx = cur ? list.findIndex(j => j.id === cur) : list.length;
-        setSelectedId(list[Math.max(idx - 1, 0)].id);
+        const next = list[Math.max(idx - 1, 0)];
+        setSelectedId(next.id);
+        document.querySelector(`[data-job-id="${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
       }
     };
     window.addEventListener('keydown', onKey);
@@ -830,6 +959,7 @@ export default function Jobs() {
             <p style={{ margin: '10px 0 0', fontSize: '13.5px', color: 'var(--text-muted)' }}>
               <span className="tnum" style={{ color: 'var(--text)' }}>{total.toLocaleString()}</span> {total === 1 ? 'role' : 'roles'}
               <span style={{ color: 'var(--text-faint)' }}> · ranked by fit</span>
+              {scanningRun && <span style={{ color: 'var(--accent-text)' }}> · scoring in progress</span>}
               {total > PAGE_LIMIT && <span style={{ color: 'var(--text-faint)' }}> · showing top {PAGE_LIMIT}</span>}
             </p>
           )}
@@ -877,6 +1007,8 @@ export default function Jobs() {
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '90px 0' }}><Spinner size={20} /></div>
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={load} />
       ) : jobs.length === 0 ? (
         <EmptyState hasFilters={hasFilters} />
       ) : (
@@ -905,6 +1037,7 @@ export default function Jobs() {
             job={selected}
             onClose={() => setSelectedId(null)}
             onStatusChange={s => handleStatusChange(selected, s)}
+            onNotesSaved={handleNotesSaved}
             onPrev={idx > 0 ? () => setSelectedId(jobs[idx - 1].id) : undefined}
             onNext={idx >= 0 && idx < jobs.length - 1 ? () => setSelectedId(jobs[idx + 1].id) : undefined}
           />

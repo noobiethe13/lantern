@@ -36,3 +36,17 @@ paths:
   (`{verdicts:[{job_id,...}]}`) and maps results back by `job_id` (an id missing
   from a successful response is a per-job error, not an abort). Fatal-abort +
   consecutive-failure guards operate per-batch. Don't revert to per-job L2 calls.
+- **Scan lock staleness.** `scan_locks` staleness is decided by pid liveness
+  (`process.kill(pid, 0)`), NOT a fixed age — a live long-running scan is never
+  stolen just because it's been over an hour. Two things narrow that: (1) an
+  absolute 12h age ceiling (`SCAN_LOCK_MAX_AGE_MS`) reclaims a lock regardless of
+  pid liveness, as a backstop against a foreign OS pid the kernel reused for an
+  unrelated live process; (2) `recoverInterruptedScans` (boot only) treats a lock
+  whose pid equals our own freshly-started `process.pid` as stale too — no scan
+  of this process can legitimately be running yet at startup, so that can only be
+  pid reuse, not "our own still-running scan" (which IS how `tryAcquireScanLock`/
+  `getScanningState` read a matching own-pid at runtime). Whenever a stale lock is
+  cleared — at boot or by `tryAcquireScanLock` mid-run — any run left with
+  `finished_at IS NULL` is immediately marked finished with an "interrupted"
+  `errors_json` entry (`markOrphanRunsInterrupted`), so a crash never leaves the
+  Search page stuck on "Scanning" forever.

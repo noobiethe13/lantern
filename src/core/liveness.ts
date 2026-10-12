@@ -10,8 +10,7 @@ const HARD_EXPIRED = [
   /job (listing )?not found/i,
   /the page you are looking for doesn.t exist/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
-  /closed on \d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i,
-  /closed on (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}/i,
+  // No bare "closed on <date>": it also matches "our offices are closed on July 4".
   /diese stelle (ist )?(nicht mehr|bereits) besetzt/i,
   /offre (expirée|n'est plus disponible)/i,
 ];
@@ -28,8 +27,9 @@ const MIN_CONTENT = 300;
 
 // Hosts that render job pages client-side: a plain fetch returns a near-empty
 // JS shell, so thin content there proves nothing about the posting's state.
-// Grow this list as more SPA boards are observed.
-const SPA_HOSTS = ['ashbyhq.com', 'apply.workable.com'];
+// Grow this list as more SPA boards are observed. BambooHR and Workday postings
+// come from lantern's own adapters and are served as client-rendered shells.
+const SPA_HOSTS = ['ashbyhq.com', 'apply.workable.com', 'bamboohr.com', 'myworkdayjobs.com'];
 
 function isSpaHost(url: string): boolean {
   try {
@@ -53,14 +53,21 @@ export function classifyLiveness(i: LivenessInput): LivenessResult {
   if (i.status === 404 || i.status === 410)
     return { result: 'expired', reason: `HTTP ${i.status}` };
 
+  // Any other non-2xx (403 bot wall, 429 rate limit, 503, LinkedIn's 999) says
+  // nothing about the posting — its thin error body must not read as "expired".
+  if (i.status < 200 || i.status >= 300)
+    return { result: 'uncertain', reason: `HTTP ${i.status}` };
+
   if (EXPIRED_URL.some(p => p.test(i.finalUrl)))
     return { result: 'expired', reason: `redirect to ${i.finalUrl}` };
 
-  const expBody = HARD_EXPIRED.find(p => p.test(i.bodyText));
-  if (expBody) return { result: 'expired', reason: `pattern ${expBody.source}` };
-
+  // A visible apply control outranks body text: live pages often ship inline
+  // i18n/template strings like "This job is no longer available" that are hidden.
   if (i.applyControls.some(c => APPLY_RX.some(p => p.test(c))))
     return { result: 'active', reason: 'visible apply control' };
+
+  const expBody = HARD_EXPIRED.find(p => p.test(i.bodyText));
+  if (expBody) return { result: 'expired', reason: `pattern ${expBody.source}` };
 
   const list = LISTING_PAGE.find(p => p.test(i.bodyText));
   if (list) return { result: 'expired', reason: `listing redirect ${list.source}` };

@@ -22,17 +22,40 @@ function detailUrl(slug: string, id: string): string {
   return `https://${host(slug)}/careers/${encodeURIComponent(id)}/detail`;
 }
 
-function joinLocation(loc: Record<string, unknown> | undefined, remote: boolean): string {
-  const parts = [loc?.['city'], loc?.['state'], loc?.['addressCountry'] ?? loc?.['country']]
-    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+/**
+ * Both `location` and `atsLocation` can appear on the same payload — `location`
+ * is frequently all-null (`{city:null,state:null}`) while `atsLocation`
+ * ({city,state/province,country}) carries the real value. Fall back
+ * field-by-field so a partially-null `location` still picks up what
+ * `atsLocation` has. An empty result previously passed every L1 location
+ * rule (a US-only role reaching L2 on an India search).
+ */
+function joinLocation(
+  loc: Record<string, unknown> | undefined,
+  atsLoc: Record<string, unknown> | undefined,
+  remote: boolean,
+): string {
+  const city = loc?.['city'] ?? atsLoc?.['city'];
+  const state = loc?.['state'] ?? atsLoc?.['state'] ?? atsLoc?.['province'];
+  const country = loc?.['addressCountry'] ?? loc?.['country'] ?? atsLoc?.['country'];
+  const parts = [city, state, country].filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
   if (remote && !parts.some(p => /remote/i.test(p))) parts.push('Remote');
   return parts.join(', ');
+}
+
+/** BambooHR's `isRemote` is often null/undefined even on a posting with no
+ *  fixed office; `locationType` is a more reliable signal (seen as `"1"` or
+ *  the number `1`, depending on endpoint, on remote postings in live data). */
+function isBambooRemote(j: Record<string, unknown>): boolean {
+  const locationType = j['locationType'];
+  return j['isRemote'] === true || locationType === '1' || locationType === 1;
 }
 
 export interface BambooListItem {
   id: string;
   title: string;
   isRemote: boolean;
+  location: string;
 }
 
 /** Enumerate open roles from a `/careers/list` response. Drops entries missing
@@ -47,7 +70,13 @@ export function parseBambooList(json: unknown): BambooListItem[] {
     const id = j['id'] != null ? String(j['id']) : '';
     const title = (j['jobOpeningName'] as string)?.trim() ?? '';
     if (!id || !title) continue;
-    out.push({ id, title, isRemote: j['isRemote'] === true });
+    const remote = isBambooRemote(j);
+    const location = joinLocation(
+      j['location'] as Record<string, unknown> | undefined,
+      j['atsLocation'] as Record<string, unknown> | undefined,
+      remote,
+    );
+    out.push({ id, title, isRemote: remote, location });
   }
   return out;
 }
@@ -72,7 +101,7 @@ export function bambooDetailToJob(
 
   const shareUrl = typeof opening['jobOpeningShareUrl'] === 'string' ? (opening['jobOpeningShareUrl'] as string) : '';
   const url = shareUrl || `https://${host(slug)}/careers/${id}`;
-  const remote = opening['isRemote'] === true;
+  const remote = isBambooRemote(opening);
   const jd = htmlToText(opening['description'] as string);
 
   return {
@@ -80,7 +109,11 @@ export function bambooDetailToJob(
     title,
     url,
     company,
-    location: joinLocation(opening['location'] as Record<string, unknown> | undefined, remote),
+    location: joinLocation(
+      opening['location'] as Record<string, unknown> | undefined,
+      opening['atsLocation'] as Record<string, unknown> | undefined,
+      remote,
+    ),
     remote,
     posted_at: toMillis(opening['datePosted']),
     jd_text: jd || undefined,
@@ -95,6 +128,7 @@ export function bambooListItemToJob(item: BambooListItem, company: string, slug:
     title: item.title,
     url: `https://${host(slug)}/careers/${item.id}`,
     company,
+    location: item.location,
     remote: item.isRemote,
   };
 }
@@ -113,12 +147,15 @@ export class BambooHrAdapter implements SourceAdapter {
     );
 
     let total = 0;
+    let detailAttempts = 0;
+    let detailFailures = 0;
     for (let i = 0; i < list.length; i++) {
       if (ctx.abortSignal.aborted) break;
       const item = list[i];
 
       let job: Job | null = null;
       if (i < PER_TENANT_DETAIL_CAP) {
+        detailAttempts++;
         try {
           const detail = await fetchJson(detailUrl(identifier, item.id), {
             allowedHosts,
@@ -126,14 +163,25 @@ export class BambooHrAdapter implements SourceAdapter {
             retries: 1,
           });
           job = bambooDetailToJob(detail, display_name, identifier, item.id);
-        } catch {
-          // detail fetch failed → fall back to the list item (no jd_text)
+        } catch (err) {
+          // Falls back to the list item (no jd_text/rich location) — but
+          // count it and say so instead of swallowing it silently.
+          detailFailures++;
+          ctx.emitProgress(
+            `${display_name}: detail fetch failed for job ${item.id}, falling back to list data (${err instanceof Error ? err.message : String(err)})`,
+          );
         }
       }
       job ??= bambooListItemToJob(item, display_name, identifier);
 
       total++;
       yield job;
+    }
+
+    if (detailAttempts > 0 && detailFailures === detailAttempts) {
+      throw new Error(
+        `BambooHR "${display_name}": all ${detailFailures} detail fetches failed — every job fell back to list-only data (no description/rich location)`,
+      );
     }
 
     ctx.emitProgress(`${display_name}: ${total} jobs`, total);

@@ -5,6 +5,9 @@ export const FETCH_TIMEOUT_MS = 10_000;
 const RETRY_BASE_DELAY_MS = 500;
 const RETRY_MAX_DELAY_MS = 10_000;
 const RETRY_AFTER_CAP_MS = 30_000;
+// A stalled or misbehaving board must not let a response body grow
+// unbounded in memory — cap it and throw a clear error past this size.
+const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 
 export interface FetchOpts {
   /** Allowlist of permitted hostnames (lowercase). If omitted, only the
@@ -30,11 +33,14 @@ export interface FetchOpts {
 
 const PRIVATE_HOST_RX = [
   /^localhost$/i,
+  /^0\./, // 0.0.0.0/8 — "this network" / unspecified
   /^127\./,
   /^10\./,
   /^192\.168\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^169\.254\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // 100.64.0.0/10 — CGNAT / shared address space
+  /^::$/, // IPv6 unspecified address
   /^::1$/,
   /^fe80:/i,
   /^fc[0-9a-f]{2}:/i,
@@ -59,16 +65,59 @@ export function assertSafeHttpUrl(url: string, opts: FetchOpts = {}): URL {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
     throw new Error(`unsupported scheme: ${parsed.protocol}`);
   }
-  // `URL.hostname` returns IPv6 addresses wrapped in brackets — strip them
-  // so the regex table can match both v4 and v6 forms uniformly.
-  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (PRIVATE_HOST_RX.some(rx => rx.test(host))) {
+  // `URL.hostname` returns IPv6 addresses wrapped in brackets and may carry a
+  // trailing dot (a valid DNS root-label separator — `localhost.` is the same
+  // host as `localhost` but would slip past the `^localhost$` anchor) —
+  // normalize both before matching.
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (isPrivateHost(host)) {
     throw new Error(`refusing to fetch private/loopback host: ${host}`);
   }
   if (opts.allowedHosts && !opts.allowedHosts.includes(host)) {
     throw new Error(`host ${host} not in allowlist (${opts.allowedHosts.join(', ')})`);
   }
   return parsed;
+}
+
+/** True when `host` (already bracket/trailing-dot stripped) is a private,
+ *  loopback, or link-local address — directly, or via an IPv4 address
+ *  embedded in an IPv6 literal (IPv4-mapped `::ffff:a.b.c.d`, or NAT64
+ *  `64:ff9b::a.b.c.d` per RFC 6052) that the flat regex table can't see on
+ *  its own. */
+function isPrivateHost(host: string): boolean {
+  if (PRIVATE_HOST_RX.some(rx => rx.test(host))) return true;
+  const embedded = extractEmbeddedIPv4(host);
+  return embedded !== null && PRIVATE_HOST_RX.some(rx => rx.test(embedded));
+}
+
+/** Unwrap an IPv4 address embedded in an IPv6 literal (IPv4-mapped or
+ *  NAT64), or null when `host` isn't one of those forms. */
+function extractEmbeddedIPv4(host: string): string | null {
+  const groups = parseIPv6Groups(host);
+  if (!groups) return null;
+  const isV4Mapped = groups.slice(0, 5).every(g => g === 0) && groups[5] === 0xffff;
+  const isNat64 = groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every(g => g === 0);
+  if (!isV4Mapped && !isNat64) return null;
+  const [hi, lo] = groups.slice(6);
+  return `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+}
+
+/** Expand a (possibly `::`-compressed) IPv6 literal into 8 16-bit groups, or
+ *  null when `host` isn't one. `host` has already been through `new
+ *  URL()`'s IPv6 parser/serializer, so any colon-containing hostname
+ *  reaching here is guaranteed well-formed canonical IPv6 — this just
+ *  re-expands it for the embedded-IPv4 check above. */
+function parseIPv6Groups(host: string): number[] | null {
+  if (!host.includes(':')) return null;
+  const halves = host.split('::');
+  if (halves.length > 2) return null;
+  const parseSide = (s: string): number[] => (s === '' ? [] : s.split(':').map(g => parseInt(g, 16)));
+  const head = parseSide(halves[0]);
+  const tail = halves.length === 2 ? parseSide(halves[1]) : [];
+  if (head.some(Number.isNaN) || tail.some(Number.isNaN)) return null;
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return null;
+  return [...head, ...Array(halves.length === 2 ? missing : 0).fill(0), ...tail];
 }
 
 /**
@@ -102,6 +151,15 @@ export class HttpStatusError extends Error {
   }
 }
 
+/** A response body exceeded {@link MAX_RESPONSE_BYTES}. Not retryable — a
+ *  huge body is a property of the resource, not a transient failure. */
+export class ResponseTooLargeError extends Error {
+  constructor(maxBytes: number) {
+    super(`response body exceeded ${maxBytes}-byte cap`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
 /** Parse a Retry-After header (delta-seconds or HTTP-date) to a capped delay
  *  in ms, or null when absent/unparseable. */
 function parseRetryAfterMs(header: string | null): number | null {
@@ -117,12 +175,40 @@ function parseRetryAfterMs(header: string | null): number | null {
   return null;
 }
 
+/**
+ * Read a response body to text, aborting with {@link ResponseTooLargeError}
+ * once `maxBytes` is exceeded so a huge or endlessly-streamed body can't be
+ * buffered into memory unbounded. Reads via the stream reader (not
+ * `res.text()`) so the cap can apply mid-stream rather than after the fact.
+ */
+async function readBodyCapped(res: Response, maxBytes: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return await res.text();
+  const decoder = new TextDecoder();
+  let text = '';
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new ResponseTooLargeError(maxBytes);
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return text;
+  } catch (err) {
+    await reader.cancel().catch(() => {});
+    throw err;
+  }
+}
+
 /** First ~300 chars of the response body, whitespace-collapsed, for error
  *  messages — "HTTP 503" alone hides whether the board returned a captcha
  *  page, a JSON error, or an HTML maintenance notice. */
 async function bodySnippet(res: Response): Promise<string> {
   try {
-    const text = await res.text();
+    const text = await readBodyCapped(res, MAX_RESPONSE_BYTES);
     return text.replace(/\s+/g, ' ').trim().slice(0, 300);
   } catch {
     return '';
@@ -130,9 +216,22 @@ async function bodySnippet(res: Response): Promise<string> {
 }
 
 function isRetryable(err: unknown): boolean {
+  if (err instanceof ResponseTooLargeError) return false;
   if (err instanceof HttpStatusError) {
     return err.status === 429 || err.status >= 500;
   }
+  // JSON.parse only runs after readBodyCapped's reader signals `done` with no
+  // exception — i.e. the body read to completion. A SyntaxError here is
+  // therefore a malformed/unexpected response BODY, not a truncated one (a
+  // connection reset mid-read throws its own network-level error out of
+  // reader.read() before JSON.parse ever runs) — the same bytes come back on
+  // retry, so retrying just wastes an attempt.
+  if (err instanceof SyntaxError) return false;
+  // fetch's own redirect:'error' contract (buildRequestInit) throws when the
+  // server issues a redirect — Bun surfaces this as a plain Error whose message
+  // starts with "UnexpectedRedirect". Deterministic (the same URL redirects the
+  // same way every time), not a transient network condition.
+  if (err instanceof Error && err.message.includes('UnexpectedRedirect')) return false;
   // Anything else that escapes a fetch attempt is network-level (DNS failure,
   // connection reset, AbortError from our timeout) — worth retrying.
   return true;
@@ -160,7 +259,7 @@ function buildRequestInit(opts: FetchOpts, signal: AbortSignal): RequestInit {
   return init;
 }
 
-async function fetchOnce(url: string, opts: FetchOpts): Promise<Response> {
+async function fetchOnce(url: string, opts: FetchOpts, kind: 'json' | 'text'): Promise<unknown> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? FETCH_TIMEOUT_MS);
   try {
@@ -174,7 +273,13 @@ async function fetchOnce(url: string, opts: FetchOpts): Promise<Response> {
         snippet ? `HTTP ${res.status} — ${snippet}` : `HTTP ${res.status}`,
       );
     }
-    return res;
+    // Read (and for JSON, parse) the body here, inside the same try/finally
+    // as the request — the abort timer is still armed, so a server that
+    // sends headers then stalls the body gets aborted instead of hanging
+    // fetchJson/fetchText forever. A body-read/parse failure throws from
+    // inside this attempt too, so it's covered by fetchWithRetry's loop.
+    const text = await readBodyCapped(res, MAX_RESPONSE_BYTES);
+    return kind === 'json' ? JSON.parse(text) : text;
   } finally {
     clearTimeout(t);
   }
@@ -186,14 +291,14 @@ async function fetchOnce(url: string, opts: FetchOpts): Promise<Response> {
  * up front — a guard rejection is permanent and never retried. Backs
  * {@link fetchJson} / {@link fetchText}; not exported.
  */
-async function fetchWithRetry(url: string, opts: FetchOpts): Promise<Response> {
+async function fetchWithRetry(url: string, opts: FetchOpts, kind: 'json' | 'text'): Promise<unknown> {
   assertSafeHttpUrl(url, opts);
   const retries = opts.retries ?? 0;
   const base = opts.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
 
   for (let attempt = 0; ; attempt++) {
     try {
-      return await fetchOnce(url, opts);
+      return await fetchOnce(url, opts, kind);
     } catch (err) {
       if (attempt >= retries || !isRetryable(err)) throw err;
       const retryAfter = err instanceof HttpStatusError ? err.retryAfterMs : null;
@@ -204,8 +309,7 @@ async function fetchWithRetry(url: string, opts: FetchOpts): Promise<Response> {
 }
 
 export async function fetchJson(url: string, opts: FetchOpts = {}): Promise<unknown> {
-  const res = await fetchWithRetry(url, opts);
-  return await res.json();
+  return fetchWithRetry(url, opts, 'json');
 }
 
 /**
@@ -214,6 +318,5 @@ export async function fetchJson(url: string, opts: FetchOpts = {}): Promise<unkn
  * rather than JSON. Same SSRF guard and `redirect: 'error'` contract.
  */
 export async function fetchText(url: string, opts: FetchOpts = {}): Promise<string> {
-  const res = await fetchWithRetry(url, opts);
-  return await res.text();
+  return fetchWithRetry(url, opts, 'text') as Promise<string>;
 }

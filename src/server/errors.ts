@@ -1,3 +1,22 @@
+import type { ZodError } from 'zod';
+
+/** C3 error body contract: `error` is always a human-readable string. */
+export interface ApiErrorBody {
+  error: string;
+  issues?: Array<{ path: string; message: string }>;
+}
+
+/**
+ * Turns a ZodError into the C3 error body — a readable "path: message" summary
+ * in `error` (so the UI never renders "[object Object]"), plus the structured
+ * `issues` list for callers that want to highlight specific fields.
+ */
+export function zodErrorBody(err: ZodError): ApiErrorBody {
+  const issues = err.issues.map(i => ({ path: i.path.join('.'), message: i.message }));
+  const error = issues.map(i => (i.path ? `${i.path}: ${i.message}` : i.message)).join('; ') || 'Invalid request';
+  return { error, issues };
+}
+
 export type SourceFetchErrorKind =
   | 'http'      // Network / HTTP-level failure (timeout, DNS, 5xx, etc.)
   | 'gated'     // Host hard-blocks scraping (robots, captcha, anti-bot wall)

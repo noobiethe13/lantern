@@ -4,35 +4,87 @@
 
 const JD_MAX_CHARS = 8_000;
 
-const ENTITIES: Record<string, string> = {
-  '&nbsp;': ' ',
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&apos;': "'",
+// Named entities aggregator feeds actually use, beyond the basic five. Keyed by
+// the entity name (lowercase, no & or ;) so lookup is case-insensitive.
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  mdash: '—',
+  ndash: '–',
+  rsquo: '’',
+  lsquo: '‘',
+  rdquo: '”',
+  ldquo: '“',
+  hellip: '…',
 };
+
+const ENTITY_RX = /&(#x?[0-9a-f]+|[a-z]+\d*);/gi;
+// Broad on purpose (matches the strip-tags regex below) — used only to decide
+// whether a second strip pass is needed after entity decoding.
+const TAG_RX = /<[^>]+>/;
+
+/**
+ * Decode HTML entities: named (from {@link NAMED_ENTITIES}) and numeric, both
+ * decimal (`&#8212;`) and hex (`&#x26;`), via `String.fromCodePoint`. Unknown
+ * named entities are left as-is rather than dropped.
+ */
+export function decodeEntities(text: string): string {
+  return text.replace(ENTITY_RX, (m, body: string) => {
+    if (body[0] === '#') {
+      const isHex = body[1] === 'x' || body[1] === 'X';
+      const code = parseInt(body.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+      if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return m;
+      try {
+        return String.fromCodePoint(code);
+      } catch {
+        return m;
+      }
+    }
+    const decoded = NAMED_ENTITIES[body.toLowerCase()];
+    return decoded ?? m;
+  });
+}
+
+function stripTags(text: string): string {
+  return text
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+}
 
 /**
  * Strip HTML to readable plain text for storage in `jd_text`. Aggregator feeds
  * return HTML descriptions; we keep the DB lean and avoid feeding raw markup to
  * the L2 LLM (which only previews the first 4KB anyway). Not a security
  * boundary — the LLM-prompt cap/sanitise lives in `verdictPrompt`.
+ *
+ * Entity-escaped HTML (a description whose HTML markup is itself HTML-entity
+ * encoded, e.g. Greenhouse's `content`) hides its tags from a single strip
+ * pass until entities are decoded — so this strips, decodes entities, and
+ * strips again only if that decoding revealed literal tags. The length cap
+ * applies once, to the final text, not to a still-encoded intermediate pass.
+ * Idempotent on already-clean text, so calling it twice (as greenhouse.ts
+ * does, to fully unwind double-encoded content) is safe.
  */
 export function htmlToText(html: string | undefined | null, cap = JD_MAX_CHARS): string {
   if (!html) return '';
-  const text = html
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&#?\w+;/g, m => ENTITIES[m.toLowerCase()] ?? m)
+  let text = decodeEntities(stripTags(html));
+  if (TAG_RX.test(text)) text = decodeEntities(stripTags(text));
+  text = text
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   return text.length > cap ? text.slice(0, cap) : text;
+}
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**

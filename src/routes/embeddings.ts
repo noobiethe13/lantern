@@ -5,6 +5,7 @@ import {
   EmbeddingSettingsSchema,
   type EmbeddingSettings,
 } from '../core/embed';
+import { zodErrorBody } from '../server/errors';
 
 export const embeddingSettings = new Hono();
 
@@ -34,7 +35,7 @@ embeddingSettings.get('/', (c) => {
 embeddingSettings.put('/', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = EmbeddingSettingsSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
 
   db.run(
     `INSERT INTO settings (key, value_json, updated_at) VALUES ('embeddings', ?, ?)

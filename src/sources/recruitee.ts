@@ -3,6 +3,32 @@ import { assertValidSlug, fetchJson } from '../core/fetch';
 import { htmlToText } from './aggregator-util';
 
 /**
+ * Build the location string from every `locations[]` entry (city, state,
+ * country — same shape Recruitee's own single-location fields use), not just
+ * the first — `offer.location` is a preformatted string covering only
+ * `locations[0]`, silently dropping the rest on a multi-location posting.
+ * Falls back to the single-location fields for older payloads without
+ * `locations[]`.
+ */
+function buildRecruiteeLocation(offer: Record<string, unknown>): string {
+  const locs = Array.isArray(offer['locations']) ? (offer['locations'] as unknown[]) : [];
+  const formatted = locs
+    .map(l => {
+      const loc = (l as Record<string, unknown>) ?? {};
+      const city = (loc['city'] as string) || (loc['name'] as string) || '';
+      const state = (loc['state'] as string) || '';
+      const country = (loc['country'] as string) || '';
+      return [city, state, country].filter(Boolean).join(', ');
+    })
+    .filter(Boolean);
+  if (formatted.length > 0) return [...new Set(formatted)].join('; ');
+
+  const city = (offer['city'] as string) || '';
+  const country = (offer['country'] as string) || '';
+  return (offer['location'] as string) || [city, country].filter(Boolean).join(', ');
+}
+
+/**
  * Recruitee exposes a public per-tenant offers API at
  * `https://<slug>.recruitee.com/api/offers/`. The tenant subdomain is the
  * variable part; we build the exact host from the validated slug and pin it as
@@ -38,11 +64,19 @@ export function parseRecruitee(json: unknown, company: string, host: string): Jo
     }
     if (!title || !url) continue;
 
-    const city = (offer['city'] as string) || '';
-    const country = (offer['country'] as string) || '';
-    const remote = offer['remote'] ? 'Remote' : '';
-    const location =
-      (offer['location'] as string) || [city, country, remote].filter(Boolean).join(', ');
+    const remote = offer['remote'] === true;
+    let location = buildRecruiteeLocation(offer);
+    // `hybrid`/`on_site` aren't mutually exclusive with each other or with
+    // `remote` (they're independent "which work modes are offered" flags) —
+    // only suffix when the posting isn't itself remote, so L1's onsite regex
+    // can still act on a non-remote posting without mislabeling a remote one.
+    // Only append when there's a base location to qualify — an empty location
+    // must stay empty (L1 treats a blank location as lenient/pass-through; a bare
+    // "(Hybrid)"/"(On-site)" string is not a real place and would defeat that).
+    if (!remote && location) {
+      if (offer['on_site'] === true) location = `${location} (On-site)`;
+      else if (offer['hybrid'] === true) location = `${location} (Hybrid)`;
+    }
 
     const jd = htmlToText(
       [offer['description'] as string, offer['requirements'] as string]
@@ -56,6 +90,7 @@ export function parseRecruitee(json: unknown, company: string, host: string): Jo
       url,
       company,
       location,
+      remote,
       jd_text: jd || undefined,
       posted_at: offer['published_at']
         ? new Date(offer['published_at'] as string).getTime()
@@ -78,7 +113,7 @@ export class RecruiteeAdapter implements SourceAdapter {
     const apiUrl = `https://${host}/api/offers/`;
     ctx.emitProgress(`Fetching ${display_name} (Recruitee)…`);
 
-    const json = await fetchJson(apiUrl, { allowedHosts: [host] });
+    const json = await fetchJson(apiUrl, { allowedHosts: [host], retries: 2 });
     const jobs = parseRecruitee(json, display_name, host);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

@@ -9,7 +9,7 @@
 # per-company tier is necessarily a maintained slug list. Add more under the
 # matching board type. Slug = the tenant in the public board URL.
 sources:
-  # Greenhouse (170)
+  # Greenhouse (190)
   - { type: greenhouse,      identifier: 6sense,            display_name: "6sense",            enabled: true }
   - { type: greenhouse,      identifier: a16z,              display_name: "a16z",              enabled: true }
   - { type: greenhouse,      identifier: abnormalsecurity,  display_name: "Abnormal Security", enabled: true }
@@ -180,7 +180,28 @@ sources:
   - { type: greenhouse,      identifier: wayve,             display_name: "Wayve",             enabled: true }
   - { type: greenhouse,      identifier: webflow,           display_name: "Webflow",           enabled: true }
   - { type: greenhouse,      identifier: wrike,             display_name: "Wrike",             enabled: true }
-  # Ashby (111)
+  # India coverage (live-probed 2026-09-25); Canonical is worldwide home-based remote, Flutter-heavy
+  - { type: greenhouse,      identifier: addepar1,                       display_name: "Addepar",           enabled: true }
+  - { type: greenhouse,      identifier: agoda,                          display_name: "Agoda",             enabled: true }
+  - { type: greenhouse,      identifier: canonical,                      display_name: "Canonical",         enabled: true }
+  - { type: greenhouse,      identifier: coinbase,                       display_name: "Coinbase",          enabled: true }
+  - { type: greenhouse,      identifier: coupang,                        display_name: "Coupang",           enabled: true }
+  - { type: greenhouse,      identifier: devrev,                         display_name: "DevRev",            enabled: true }
+  - { type: greenhouse,      identifier: glance,                         display_name: "Glance",            enabled: true }
+  - { type: greenhouse,      identifier: groww,                          display_name: "Groww",             enabled: true }
+  - { type: greenhouse,      identifier: growwreferrals,                 display_name: "Groww",             enabled: true }
+  - { type: greenhouse,      identifier: headoutlinkedin,                display_name: "Headout",           enabled: true }
+  - { type: greenhouse,      identifier: kraftonindia,                   display_name: "KRAFTON India",     enabled: true }
+  - { type: greenhouse,      identifier: mitsogoinc,                     display_name: "Mitsogo (Hexnode)", enabled: true }
+  - { type: greenhouse,      identifier: razorpaysoftwareprivatelimited, display_name: "Razorpay",          enabled: true }
+  - { type: greenhouse,      identifier: skillzinc,                      display_name: "Skillz",            enabled: true }
+  - { type: greenhouse,      identifier: talkdesk2,                      display_name: "Talkdesk",          enabled: true }
+  - { type: greenhouse,      identifier: thoughtworks,                   display_name: "Thoughtworks",      enabled: true }
+  - { type: greenhouse,      identifier: tide,                           display_name: "Tide",              enabled: true }
+  - { type: greenhouse,      identifier: truecaller,                     display_name: "Truecaller",        enabled: true }
+  - { type: greenhouse,      identifier: valtech,                        display_name: "Valtech",           enabled: true }
+  - { type: greenhouse,      identifier: zenoti,                         display_name: "Zenoti",            enabled: true }
+  # Ashby (124)
   - { type: ashby,           identifier: abridge,      display_name: "Abridge",       enabled: true }
   - { type: ashby,           identifier: airbyte,      display_name: "Airbyte",       enabled: true }
   - { type: ashby,           identifier: AlephAlpha,   display_name: "Aleph Alpha",   enabled: true }
@@ -292,7 +313,21 @@ sources:
   - { type: ashby,           identifier: writer,       display_name: "Writer",        enabled: true }
   - { type: ashby,           identifier: zapier,       display_name: "Zapier",        enabled: true }
   - { type: ashby,           identifier: zed,          display_name: "Zed",           enabled: true }
-  # Lever (11)
+  # India coverage (live-probed 2026-09-25)
+  - { type: ashby,           identifier: aiprise,     display_name: "AiPrise",         enabled: true }
+  - { type: ashby,           identifier: almabase,    display_name: "Almabase",        enabled: true }
+  - { type: ashby,           identifier: atlan,       display_name: "Atlan",           enabled: true }
+  - { type: ashby,           identifier: bidgely-inc, display_name: "Bidgely",         enabled: true }
+  - { type: ashby,           identifier: broccoli,    display_name: "Broccoli AI",     enabled: true }
+  - { type: ashby,           identifier: Commure,     display_name: "Commure",         enabled: true }
+  - { type: ashby,           identifier: coram-ai,    display_name: "Coram AI",        enabled: true }
+  - { type: ashby,           identifier: glomo,       display_name: "Glomopay",        enabled: true }
+  - { type: ashby,           identifier: lgads,       display_name: "LG Ad Solutions", enabled: true }
+  - { type: ashby,           identifier: openai,      display_name: "OpenAI",          enabled: true }
+  - { type: ashby,           identifier: plane,       display_name: "Plane",           enabled: true }
+  - { type: ashby,           identifier: sarvam,      display_name: "Sarvam AI",       enabled: true }
+  - { type: ashby,           identifier: spotdraft,   display_name: "SpotDraft",       enabled: true }
+  # Lever (27)
   - { type: lever,           identifier: anchorage,  display_name: "Anchorage",   enabled: true }
   - { type: lever,           identifier: highspot,   display_name: "Highspot",    enabled: true }
   - { type: lever,           identifier: kavak,      display_name: "Kavak",       enabled: true }
@@ -304,7 +339,24 @@ sources:
   - { type: lever,           identifier: ro,         display_name: "Ro",          enabled: true }
   - { type: lever,           identifier: spotify,    display_name: "Spotify",     enabled: true }
   - { type: lever,           identifier: toptal,     display_name: "Toptal",      enabled: true }
-  # Recruitee (7)
+  # India coverage (live-probed 2026-09-25)
+  - { type: lever,           identifier: brillio-2,               display_name: "Brillio",                 enabled: true }
+  - { type: lever,           identifier: cred,                    display_name: "CRED",                    enabled: true }
+  - { type: lever,           identifier: dozee,                   display_name: "Dozee",                   enabled: true }
+  - { type: lever,           identifier: epifi,                   display_name: "Fi Money",                enabled: true }
+  - { type: lever,           identifier: fampay,                  display_name: "FamPay",                  enabled: true }
+  - { type: lever,           identifier: gohighlevel,             display_name: "HighLevel",               enabled: true }
+  - { type: lever,           identifier: hevodata,                display_name: "Hevo Data",               enabled: true }
+  - { type: lever,           identifier: jumpcloud,               display_name: "JumpCloud",               enabled: true }
+  - { type: lever,           identifier: meesho,                  display_name: "Meesho",                  enabled: true }
+  - { type: lever,           identifier: netomi,                  display_name: "Netomi",                  enabled: true }
+  - { type: lever,           identifier: paytm,                   display_name: "Paytm",                   enabled: true }
+  - { type: lever,           identifier: smarsh,                  display_name: "Smarsh",                  enabled: true }
+  - { type: lever,           identifier: smart-working-solutions, display_name: "Smart Working Solutions", enabled: true }
+  - { type: lever,           identifier: stable-money1,           display_name: "Stable Money",            enabled: true }
+  - { type: lever,           identifier: weekdayworks,            display_name: "Weekday",                 enabled: true }
+  - { type: lever,           identifier: zeta,                    display_name: "Zeta",                    enabled: true }
+  # Recruitee (9)
   - { type: recruitee,       identifier: bunq,           display_name: "bunq",            enabled: true }
   - { type: recruitee,       identifier: channable,      display_name: "Channable",       enabled: true }
   - { type: recruitee,       identifier: floryn,         display_name: "Floryn",          enabled: true }
@@ -312,7 +364,10 @@ sources:
   - { type: recruitee,       identifier: nmbrs,          display_name: "Nmbrs",           enabled: true }
   - { type: recruitee,       identifier: onlinedialogue, display_name: "Online Dialogue", enabled: true }
   - { type: recruitee,       identifier: vandebron,      display_name: "Vandebron",       enabled: true }
-  # SmartRecruiters (7)
+  # India coverage (live-probed 2026-09-25)
+  - { type: recruitee,       identifier: careersdeltacapita, display_name: "Delta Capita", enabled: true }
+  - { type: recruitee,       identifier: lenskartcareers,    display_name: "Lenskart",     enabled: true }
+  # SmartRecruiters (12)
   - { type: smartrecruiters, identifier: BoschGroup,  display_name: "Bosch Group", enabled: true }
   - { type: smartrecruiters, identifier: Continental, display_name: "Continental", enabled: true }
   - { type: smartrecruiters, identifier: Experian,    display_name: "Experian",    enabled: true }
@@ -320,6 +375,12 @@ sources:
   - { type: smartrecruiters, identifier: NielsenIQ,   display_name: "NielsenIQ",   enabled: true }
   - { type: smartrecruiters, identifier: Visa,        display_name: "Visa",        enabled: true }
   - { type: smartrecruiters, identifier: Wise,        display_name: "Wise",        enabled: true }
+  # India coverage (live-probed 2026-09-25) — list endpoint has no JD, so L2 grades these on title
+  - { type: smartrecruiters, identifier: Freshworks,             display_name: "Freshworks",          enabled: true }
+  - { type: smartrecruiters, identifier: ServiceNow,             display_name: "ServiceNow",          enabled: true }
+  - { type: smartrecruiters, identifier: STICSoftSolutions,      display_name: "STIC Soft Solutions", enabled: true }
+  - { type: smartrecruiters, identifier: VivifyHealthcarePvtLtd, display_name: "Vivify Healthcare",   enabled: true }
+  - { type: smartrecruiters, identifier: WEQTechnologies,        display_name: "WEQ Technologies",    enabled: true }
   # Personio (9)
   - { type: personio,        identifier: clark,     display_name: "CLARK",     enabled: true }
   - { type: personio,        identifier: everphone, display_name: "Everphone", enabled: true }
@@ -330,21 +391,29 @@ sources:
   - { type: personio,        identifier: pitch,     display_name: "Pitch",     enabled: true }
   - { type: personio,        identifier: userlane,  display_name: "Userlane",  enabled: true }
   - { type: personio,        identifier: workpath,  display_name: "Workpath",  enabled: true }
-  # Workable (4)
+  # Workable (5)
   - { type: workable,        identifier: epignosis, display_name: "Epignosis", enabled: true }
   - { type: workable,        identifier: kahoot,    display_name: "Kahoot",    enabled: true }
   - { type: workable,        identifier: persado,   display_name: "Persado",   enabled: true }
   - { type: workable,        identifier: skroutz,   display_name: "Skroutz",   enabled: true }
+  # India coverage (live-probed 2026-09-25)
+  - { type: workable,        identifier: xenon7, display_name: "Xenon7", enabled: true }
   # BambooHR (per-company; slug = the subdomain in {slug}.bamboohr.com).
   # Starter set — only live-probed tenants with >0 openings are listed (BambooHR
   # skews to SMBs, so this list grows by curation, like the Greenhouse tier above).
   - { type: bamboohr,        identifier: trundl,    display_name: "Trundl",    enabled: true }
   - { type: bamboohr,        identifier: bitly,     display_name: "Bitly",     enabled: true }
+  # India coverage (live-probed 2026-09-25)
+  - { type: bamboohr,        identifier: infrrd, display_name: "Infrrd", enabled: true }
   # Workday (per-company; needs tenant slug + datacenter + career-site name from
   # the {tenant}.{dc}.myworkdayjobs.com/{site} careers URL, carried in config).
   # Starter set — expand once Workday's maintenance window clears and per-tenant
   # site names are discovered.
   - { type: workday, identifier: salesforce, display_name: "Salesforce", enabled: true, config: { site: External_Career_Site, dc: wd12 } }
+  # India coverage (live-probed 2026-09-25); Workday page-2 pagination bug is being fixed in parallel by another agent
+  - { type: workday, identifier: kyndryl,     display_name: "Kyndryl",                enabled: true, config: { site: KyndrylProfessionalCareers, dc: wd5 } }
+  - { type: workday, identifier: ringcentral, display_name: "RingCentral",            enabled: true, config: { site: RingCentral_Careers,        dc: wd1 } }
+  - { type: workday, identifier: warnerbros,  display_name: "Warner Bros. Discovery", enabled: true, config: { site: global,                     dc: wd5 } }
   # Keyword-global aggregators — the role/keyword drives the query; no per-company slug.
   - { type: remoteok,   identifier: remoteok,   display_name: "RemoteOK (remote)",  enabled: true }
   - { type: arbeitnow,  identifier: arbeitnow,  display_name: "Arbeitnow (EU)",     enabled: true }

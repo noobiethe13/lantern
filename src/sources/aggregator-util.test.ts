@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { htmlToText, toMillis, matchesAny } from './aggregator-util';
+import { htmlToText, toMillis, matchesAny, decodeEntities, sleep } from './aggregator-util';
 
 describe('htmlToText', () => {
   test('strips tags and decodes common entities', () => {
@@ -21,6 +21,78 @@ describe('htmlToText', () => {
   test('returns empty string for nullish input', () => {
     expect(htmlToText(undefined)).toBe('');
     expect(htmlToText(null)).toBe('');
+  });
+
+  test('strips tags hidden behind entity-escaped HTML (Arbeitnow/RemoteOK shape)', () => {
+    // The description's own HTML markup is itself HTML-entity-encoded — a
+    // single strip pass sees no literal "<" to remove.
+    const escaped = '&lt;p&gt;Hello &amp;amp; world&lt;/p&gt;&lt;p&gt;Second&lt;/p&gt;';
+    expect(htmlToText(escaped)).toBe('Hello & world\nSecond');
+  });
+
+  test('decodes numeric and extended named entities', () => {
+    expect(htmlToText('caf&#233; &#x2014; resum&#233;')).toBe('café — resumé');
+    expect(htmlToText('a &mdash; b &ndash; c &hellip; &lsquo;d&rsquo;')).toBe(
+      'a — b – c … ‘d’',
+    );
+  });
+
+  test('is idempotent on already-clean text (greenhouse calls it twice)', () => {
+    const clean = htmlToText('<p>We are looking for a <b>Backend Engineer</b>.</p><p>Remote OK.</p>');
+    expect(htmlToText(clean)).toBe(clean);
+  });
+
+  test('resolves entity-escaped markup + entities in one call; a second call is idempotent (greenhouse.ts pattern)', () => {
+    // greenhouse.ts calls htmlToText(htmlToText(content)) on its entity-encoded
+    // `content` field. Escaped tags trigger the conditional second strip+decode
+    // pass inside a single call, which here also fully resolves the escaped
+    // "&amp;amp;" alongside them — so the redundant second call is a safe no-op.
+    const doubleEncoded = '&lt;p&gt;Terms &amp;amp; conditions apply&lt;/p&gt;';
+    const once = htmlToText(doubleEncoded);
+    expect(once).toBe('Terms & conditions apply');
+    expect(htmlToText(once)).toBe(once);
+  });
+
+  test('a lone double-encoded entity with no revealed tags needs greenhouse.ts\'s second call', () => {
+    // Without any escaped markup to trigger the bonus second decode pass, one
+    // level of double-encoding survives a single call — this is exactly why
+    // greenhouse.ts wraps its own content in htmlToText(htmlToText(...)).
+    const once = htmlToText('Terms &amp;amp; conditions apply');
+    expect(once).toBe('Terms &amp; conditions apply');
+    expect(htmlToText(once)).toBe('Terms & conditions apply');
+  });
+
+  test('caps only the final decoded/stripped text, not a still-encoded pass', () => {
+    const escaped = '&lt;p&gt;' + 'x'.repeat(20) + '&lt;/p&gt;';
+    // Raw input is longer than 10 chars only because of markup/entities; the
+    // decoded+stripped text itself is exactly 20 chars.
+    expect(htmlToText(escaped, 10)).toHaveLength(10);
+    expect(htmlToText(escaped, 30)).toBe('x'.repeat(20));
+  });
+});
+
+describe('decodeEntities', () => {
+  test('decodes named entities', () => {
+    expect(decodeEntities('Tom &amp; Jerry')).toBe('Tom & Jerry');
+    expect(decodeEntities('&lt;tag&gt; &quot;q&quot; &apos;a&apos;')).toBe('<tag> "q" \'a\'');
+  });
+
+  test('decodes decimal and hex numeric entities via String.fromCodePoint', () => {
+    expect(decodeEntities('&#38;')).toBe('&');
+    expect(decodeEntities('&#x26;')).toBe('&');
+    expect(decodeEntities('&#8212;')).toBe('—');
+  });
+
+  test('leaves unknown entities untouched', () => {
+    expect(decodeEntities('&notarealentity;')).toBe('&notarealentity;');
+  });
+});
+
+describe('sleep', () => {
+  test('resolves after roughly the given delay', async () => {
+    const start = Date.now();
+    await sleep(5);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(0);
   });
 });
 

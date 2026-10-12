@@ -53,7 +53,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant = 'default', size = 'md', loading, children, style, onMouseEnter, onMouseLeave, ...props }, ref) => {
+  ({ variant = 'default', size = 'md', loading, children, style, disabled, onMouseEnter, onMouseLeave, ...props }, ref) => {
     return (
       <button
         ref={ref}
@@ -64,8 +64,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           gap: '6px',
           fontFamily: 'inherit',
           fontWeight: 550,
-          cursor: props.disabled || loading ? 'not-allowed' : 'pointer',
-          opacity: props.disabled || loading ? 0.5 : 1,
+          cursor: disabled || loading ? 'not-allowed' : 'pointer',
+          opacity: disabled || loading ? 0.5 : 1,
           transition: `background 150ms ${EASE}, color 150ms ${EASE}, border-color 150ms ${EASE}`,
           whiteSpace: 'nowrap',
           ...buttonStyles[variant],
@@ -73,19 +73,19 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           ...style,
         }}
         onMouseEnter={e => {
-          if (!props.disabled && !loading) {
+          if (!disabled && !loading) {
             Object.assign((e.currentTarget as HTMLButtonElement).style, buttonHover[variant]);
           }
           onMouseEnter?.(e);
         }}
         onMouseLeave={e => {
-          if (!props.disabled && !loading) {
+          if (!disabled && !loading) {
             Object.assign((e.currentTarget as HTMLButtonElement).style, buttonStyles[variant], style);
           }
           onMouseLeave?.(e);
         }}
-        disabled={props.disabled || loading}
         {...props}
+        disabled={disabled || loading}
       >
         {loading && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
         {children}

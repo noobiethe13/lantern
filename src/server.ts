@@ -11,10 +11,66 @@ import { llmSettings } from './routes/llm-settings';
 import { resumeSettings } from './routes/resume';
 import { embeddingSettings } from './routes/embeddings';
 import { freshnessSettings } from './routes/freshness';
+import { recoverInterruptedScans } from './runner/scan';
 
 // db import in routes triggers runMigrations via client.ts singleton
 
+// A process killed mid-scan (crash, Ctrl+C, a `bun --watch` reload) can leave
+// behind a scan_locks row and a run with finished_at still NULL; without this,
+// every future search 409s forever and the Search page hangs on "Scanning" (L1
+// in review notes). Safe to call unconditionally at startup — it only clears
+// state a dead process left behind, never a lock this process itself just took.
+recoverInterruptedScans();
+
 const app = new Hono();
+
+// Host allowlist for every /api/* request (any method, any port — the Vite dev
+// proxy uses changeOrigin so Host arrives as localhost:3000 regardless of which
+// port the browser's page is actually on). Defends against DNS rebinding: a page
+// can make the browser open a connection to 127.0.0.1 while the Host header still
+// names the attacker's domain, since the browser sends Host based on the URL it
+// believes it's fetching, not the IP it actually connected to. For state-changing
+// requests, also reject a foreign Origin (or a declared cross-site fetch) — this
+// is what actually blocks "simple"/no-cors cross-origin requests, which skip the
+// preflight entirely and so aren't stopped by the cors() middleware below (that
+// middleware only controls whether the BROWSER exposes the response to JS, not
+// whether the request itself runs server-side).
+const ALLOWED_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+
+function hostnameOf(hostHeader: string): string {
+  // Host header is "hostname[:port]"; IPv6 literals are bracketed ("[::1]:3000").
+  if (hostHeader.startsWith('[')) {
+    const end = hostHeader.indexOf(']');
+    return (end === -1 ? hostHeader : hostHeader.slice(1, end)).toLowerCase();
+  }
+  const colon = hostHeader.lastIndexOf(':');
+  return (colon === -1 ? hostHeader : hostHeader.slice(0, colon)).toLowerCase();
+}
+
+app.use('/api/*', async (c, next) => {
+  if (!ALLOWED_HOSTNAMES.has(hostnameOf(c.req.header('host') ?? ''))) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const method = c.req.method;
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    if (c.req.header('sec-fetch-site') === 'cross-site') {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+    const origin = c.req.header('origin');
+    if (origin && !ALLOWED_ORIGINS.has(origin)) {
+      return c.json({ error: 'forbidden' }, 403);
+    }
+  }
+
+  await next();
+});
 
 // Allow Vite dev server to call the API during development
 app.use('/api/*', cors({ origin: ['http://localhost:5173', 'http://localhost:3000'] }));
@@ -31,9 +87,22 @@ app.route('/api/settings/resume', resumeSettings);
 app.route('/api/settings/embeddings', embeddingSettings);
 app.route('/api/settings/freshness', freshnessSettings);
 
-// Serve the built Vite SPA — static files first, then fall through to index.html
-app.use('/*', serveStatic({ root: './ui/dist' }));
-app.use('/*', serveStatic({ path: './ui/dist/index.html' }));
+// Anything under /api/* that didn't match a route above (wrong method, unknown
+// path) must 404 as JSON — registered after every real API route but before
+// static serving, otherwise it fell through to the SPA fallback and came back as
+// index.html with a 200.
+app.all('/api/*', c => c.json({ error: 'not found' }, 404));
+
+app.onError((err, c) => {
+  console.error('[server] unhandled error:', err);
+  return c.json({ error: 'internal error' }, 500);
+});
+
+// Serve the built Vite SPA — static files first, then fall through to index.html.
+// GET only (Hono auto-derives HEAD from a registered GET) — a POST/PUT/DELETE to
+// a non-API path has no business being answered with the SPA shell.
+app.get('/*', serveStatic({ root: './ui/dist' }));
+app.get('/*', serveStatic({ path: './ui/dist/index.html' }));
 
 export default {
   port: 3000,

@@ -22,7 +22,7 @@ const XML = `<?xml version="1.0" encoding="utf-8"?>
 </workzag-jobs>`;
 
 describe('parsePersonioXml', () => {
-  test('parses positions and synthesises the posting URL from id', () => {
+  test('parses positions and synthesises the posting URL from id (location excludes department)', () => {
     const jobs = parsePersonioXml(XML, 'Acme', HOST);
     expect(jobs).toHaveLength(2);
     expect(jobs[0]).toMatchObject({
@@ -30,9 +30,38 @@ describe('parsePersonioXml', () => {
       title: 'Senior Frontend Engineer',
       url: 'https://acme.jobs.personio.de/job/101?language=en',
       company: 'Acme',
-      location: 'Berlin · Engineering',
+      // Previously joined as "Berlin · Engineering" — department is not a
+      // location and must not gate an office allow-list match.
+      location: 'Berlin',
     });
     expect(jobs[0].posted_at).toBe(Date.parse('2026-05-20T10:00:00+00:00'));
+  });
+
+  test('includes every additionalOffices > office alongside the primary office', () => {
+    // Live shape: office "Munich" with additionalOffices > office "Berlin" —
+    // an allow-list of just [berlin] previously missed this job entirely
+    // because "department" polluted the joined location and additionalOffices
+    // was ignored.
+    const xml = `<workzag-jobs>
+      <position>
+        <id>1</id><name>Staff Software Engineer, Data Platform</name>
+        <office>Munich</office>
+        <department>Product and Tech</department>
+        <additionalOffices><office>Berlin</office></additionalOffices>
+      </position>
+    </workzag-jobs>`;
+    expect(parsePersonioXml(xml, 'Acme', HOST)[0].location).toBe('Munich; Berlin');
+  });
+
+  test('dedupes when additionalOffices repeats the primary office', () => {
+    const xml = `<workzag-jobs>
+      <position>
+        <id>1</id><name>X</name>
+        <office>Berlin</office>
+        <additionalOffices><office>Berlin</office><office>Munich</office></additionalOffices>
+      </position>
+    </workzag-jobs>`;
+    expect(parsePersonioXml(xml, 'Acme', HOST)[0].location).toBe('Berlin; Munich');
   });
 
   test('posted_at is null when createdAt is absent', () => {

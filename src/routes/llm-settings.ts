@@ -2,14 +2,20 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { db } from '../db/client';
 import { llm, resetLlmCache } from '../llm';
-import { LLM_TASKS } from '../llm/provider';
+import { LLM_TASKS, MODEL_OVERRIDE_RE } from '../llm/provider';
 
 export const llmSettings = new Hono();
 
 // Since the Phase 8 strip-down, claude-code is the only provider. The settings
-// surface carries nothing but optional per-task model overrides.
+// surface carries nothing but optional per-task model overrides. The override
+// is later spliced into the CLI argv right after `--model` (claude-code.ts), so
+// it's validated against MODEL_OVERRIDE_RE rather than a bare length check — an
+// unvalidated string could otherwise be re-parsed by the CLI as a flag (e.g.
+// "--dangerously-skip-permissions").
 const LlmSettingsSchema = z.object({
-  per_task_overrides: z.record(z.enum(LLM_TASKS), z.string().min(1).max(120)).optional(),
+  per_task_overrides: z
+    .record(z.enum(LLM_TASKS), z.string().regex(MODEL_OVERRIDE_RE, 'not a valid model id'))
+    .optional(),
 });
 
 type LlmSettingsBody = z.infer<typeof LlmSettingsSchema>;
@@ -36,7 +42,7 @@ llmSettings.get('/', c => {
 llmSettings.put('/', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = LlmSettingsSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid settings', issues: parsed.error.issues }, 400);
 
   const now = Date.now();
   db.run(

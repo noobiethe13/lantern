@@ -8,6 +8,15 @@ import { deserializeVector, embedTexts, serializeVector } from '../core/embed';
 // vectors depending on which pass embeds it first. Keeping that shape and the
 // persist-once logic in one place removes that drift hazard.
 
+// Texts per embedTexts() call for the missing-row backfill below. The ONNX
+// forward pass pads every text in a batch to the longest one and holds
+// intermediate tensors for the whole batch at once — peak memory scales
+// ~linearly with batch size (measured ≈13 MB/text), so embedding e.g. 1,000
+// un-embedded survivors in ONE call can need 6-13 GB and get OOM-killed on a
+// first big run. A fixed chunk size caps peak memory regardless of how many
+// rows are missing.
+export const EMBED_CHUNK_SIZE = 32;
+
 export interface EmbeddableRow {
   id: number;
   title: string;
@@ -24,10 +33,14 @@ export function jobEmbeddingText(row: EmbeddableRow): string {
 
 /**
  * Resolve id → vector for the given rows, embedding (and persisting, embed-once)
- * any that lack a cached embedding BLOB. The missing rows are embedded in one
- * batched `embedTexts` call and written back in a single transaction, so a
- * re-scan reuses the stored vectors. Throws if the model can't load — callers
- * treat embeddings as best-effort and fall back.
+ * any that lack a cached embedding BLOB. Missing rows are embedded and persisted
+ * in chunks of {@link EMBED_CHUNK_SIZE} (one `embedTexts` call + one transaction
+ * per chunk) rather than a single all-at-once pass, so a big first run bounds its
+ * peak memory AND survives a later failure — vectors from earlier chunks are
+ * already committed by the time a later chunk throws, so a re-scan resumes
+ * instead of re-embedding everything. Throws if the model can't load (on the
+ * first chunk) or a later chunk fails — callers treat embeddings as best-effort
+ * and fall back.
  */
 export async function ensureEmbeddings(rows: EmbeddableRow[]): Promise<Map<number, Float32Array>> {
   const vecById = new Map<number, Float32Array>();
@@ -39,14 +52,18 @@ export async function ensureEmbeddings(rows: EmbeddableRow[]): Promise<Map<numbe
   }
 
   if (missing.length > 0) {
-    const vecs = await embedTexts(missing.map(jobEmbeddingText));
     const persist = db.prepare('UPDATE jobs SET embedding = ? WHERE id = ?');
-    const tx = db.transaction((pairs: { id: number; vec: Float32Array }[]) => {
+    const persistChunk = db.transaction((pairs: { id: number; vec: Float32Array }[]) => {
       for (const p of pairs) persist.run(serializeVector(p.vec), p.id);
     });
-    const pairs = missing.map((row, i) => ({ id: row.id, vec: vecs[i] }));
-    tx(pairs);
-    for (const p of pairs) vecById.set(p.id, p.vec);
+
+    for (let i = 0; i < missing.length; i += EMBED_CHUNK_SIZE) {
+      const chunk = missing.slice(i, i + EMBED_CHUNK_SIZE);
+      const vecs = await embedTexts(chunk.map(jobEmbeddingText));
+      const pairs = chunk.map((row, j) => ({ id: row.id, vec: vecs[j] }));
+      persistChunk(pairs);
+      for (const p of pairs) vecById.set(p.id, p.vec);
+    }
   }
 
   return vecById;

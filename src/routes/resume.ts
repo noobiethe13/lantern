@@ -8,6 +8,8 @@ import {
   resumeChangeAffectsVerdicts,
   type ResumeSettings,
 } from '../core/resume';
+import { getScanningState } from '../runner/scan';
+import { zodErrorBody } from '../server/errors';
 
 export const resumeSettings = new Hono();
 
@@ -44,7 +46,16 @@ resumeSettings.get('/', c => {
 resumeSettings.put('/', async c => {
   const body = await c.req.json().catch(() => ({}));
   const parsed = ResumeSettingsSchema.safeParse(body);
-  if (!parsed.success) return c.json({ error: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json(zodErrorBody(parsed.error), 400);
+
+  // A scan mid-L2-pass reads the resume text once per batch. Writing new
+  // settings here invalidates verdicts out from under it — later batches then
+  // grade against the NEW resume but write verdicts under a criteria state
+  // that was invalidated for the OLD one, and are never re-graded. Refuse
+  // until the scan finishes (mirrors the clear-jobs guard in admin.ts).
+  if (getScanningState()) {
+    return c.json({ error: 'A scan is in progress — wait for it to finish before changing resume settings' }, 409);
+  }
 
   const prev = readResumeSettings();
   db.run(
@@ -69,13 +80,21 @@ resumeSettings.put('/', async c => {
 // before saving.
 resumeSettings.post('/extract', async c => {
   const form = await c.req.formData().catch(() => null);
-  const file = form?.get('file');
+  if (!form) return c.json({ error: 'Malformed multipart body' }, 400);
+  const file = form.get('file');
   if (!(file instanceof File)) return c.json({ error: 'No file provided' }, 400);
   if (file.type !== 'application/pdf') return c.json({ error: 'Only PDF files are supported' }, 415);
   if (file.size > PDF_MAX_SIZE) return c.json({ error: 'File too large (10MB max)' }, 413);
 
+  const buf = new Uint8Array(await file.arrayBuffer());
+  // The client-declared MIME is just a header — confirm the real magic bytes
+  // before handing this to the PDF parser.
+  if (!(buf.length >= 5 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46 && buf[4] === 0x2d)) {
+    return c.json({ error: 'Only PDF files are supported' }, 415);
+  }
+
   try {
-    const text = (await extractPdfText(await file.arrayBuffer())).slice(0, RESUME_TEXT_MAX);
+    const text = (await extractPdfText(buf)).slice(0, RESUME_TEXT_MAX);
     if (!text) return c.json({ error: 'No extractable text found (scanned/image-only PDF?)' }, 422);
     return c.json({ text });
   } catch (err) {

@@ -313,16 +313,16 @@
   .app-sidebar { width: 60px !important; padding-left: 8px !important; padding-right: 8px !important; }
   .app-sidebar .nav-label,
   .app-sidebar .wordmark-text,
-  .app-sidebar .theme-label { display: none; }
+  .app-sidebar .lt-label { display: none; }
   .app-sidebar .nav-link,
-  .app-sidebar .theme-toggle { justify-content: center; }
+  .app-sidebar .lantern-toggle { justify-content: center; }
 }
 
 @media (max-width: 760px) {
   /* detail panel overlays instead of pushing content */
   .jobs-main { margin-right: auto !important; }
-  /* trim the jobs table to the essentials */
-  .jobs-grid { grid-template-columns: minmax(0,1fr) 96px 96px !important; }
+  /* trim the jobs table to the essentials: fit numeral, role (flex), status */
+  .jobs-grid { grid-template-columns: 46px minmax(0,1fr) 96px !important; }
   .col-location, .col-seen { display: none !important; }
 }
 

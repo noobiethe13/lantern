@@ -48,9 +48,9 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
 - **Backend**: Hono on Bun serves `/api/*` routes (jobs, runs, sources,
   attachments, health, settings) and the built UI from `ui/dist`. SSE drives
   live scan progress.
-- **Search flow**: `POST /api/runs/scan {query}` interprets the NL query via
-  Claude (`nl-filter`) → writes the derived `criteria` row → invalidates prior
-  L2 verdicts → runs the scan (which reads that criteria for L1/L2). The endpoint
+- **Search flow**: `POST /api/runs/scan {query}` takes the scan lock, then
+  interprets the NL query via Claude (`nl-filter`) → writes the derived `criteria`
+  row → invalidates prior L2 verdicts if the derived criteria changed → runs the scan (which reads that criteria for L1/L2). The endpoint
   also returns the parsed criteria so the UI can show "here's what Lantern
   understood". A no-query body does a plain re-scan of the existing criteria.
   `GET /api/runs/recent-queries` backs the search-box history dropdown.
@@ -59,15 +59,22 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   emit progress without buffering. Registry at `src/sources/index.ts`. Two
   kinds: **per-company boards** (need a slug; ignore the keyword) and
   **keyword-global aggregators** (no slug; read the role keyword from
-  `SourceContext.keywords`, populated by `scan.ts` from
+  `SourceContext.keywords`, populated by `scan.ts` from a normalized
   `criteria.title.positive`). Aggregators yield nothing when keywords are empty.
   Per-company adapters MUST populate `jd_text` (description) — L2 grades on it;
-  five do (greenhouse via `?content=true`, lever/ashby/recruitee/personio from
-  their existing payloads). SmartRecruiters + Workable JD are deferred TODOs.
+  six do (greenhouse via `?content=true`, lever/ashby/recruitee/personio from
+  their existing payloads, bamboohr via per-job detail). SmartRecruiters,
+  Workable and Workday JD are deferred TODOs. An adapter may implement optional
+  `enrich()` for per-job detail (LinkedIn's JD): the runner calls it only for L1
+  survivors without `jd_text`, sequentially, ≤40 per source per run. Each source
+  runs under its own abort signal + 8-min deadline (`last_status='timeout'`), and
+  every yielded job is validated with `JobShape` (invalid ones skipped + counted).
 - **Two-tier filter**: L1 deterministic rules (`src/core/filter.ts`) run inline
-  during scan and kill ~80% with zero LLM cost — title (uniform across sources),
-  location allow-list (+ remote), salary floor, company excludes, and a seniority
-  gate (drops senior+ titles only when criteria restricts to junior/mid). L2 LLM verdict
+  during scan and kill ~80% with zero LLM cost — whole-word term matching (never
+  substring) for title (uniform across sources), location (gazetteer + remote
+  eligibility), salary floor, company excludes, a seniority gate (drops senior+
+  titles only when criteria restricts to junior/mid), and a freshness gate — see
+  `docs/filtering-and-ranking.md`. L2 LLM verdict
   runs as a separate **sequential** pass over L1 survivors **scoped to the run**
   (`last_run_id`); verdicts (+ denormalized `l2_score`/`l2_fit`) are stored per
   job and invalidated whenever criteria change. (L2 grades jobs in batches of 20
@@ -78,13 +85,19 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   views by `l2_score DESC`. So each search shows its own ranked result set.
 - **Progress events** (`src/runner/progress.ts`): `scan_done` marks the L1→L2
   handoff and is **non-terminal** (the SSE stream stays open for L2 events);
-  `l2_done` is terminal. `runs.finished_at` is set only after L2 (in `runFull`),
+  `l2_done` (or `error`) is terminal. `runs.finished_at` is set only after L2
+  (`runL2Pass` writes it right before `l2_done`; `runFull`'s catch before `error`),
   never at L1-end — otherwise the run looks complete while L2 is still scoring.
 - **Liveness** (`src/core/liveness.ts`) is deferred from scan time — runs
-  only on shortlisted jobs, **fetch-only** (HTTP + cheerio; no browser fallback).
+  only on shortlisted jobs, **fetch-first** (HTTP + cheerio, SSRF-guarded on every
+  redirect hop); an `uncertain` result may fall back to the optional deterministic
+  browser tier (§6).
 - **Dedup**: `findFuzzyDuplicate` (`src/runner/scan.ts`) prefilters on the
   indexed `company_norm` column (written by `upsertJob`) — do NOT reintroduce
-  a full-table scan; at 300+ sources that is O(n²).
+  a full-table scan; at 300+ sources that is O(n²). It folds only via
+  `shouldFold` (same role incl. level tokens + compatible location). A re-scan of a
+  known URL whose `content_hash` changed refreshes the content and clears that
+  job's L2 verdict + embedding (triage fields, `posted_at`, `first_seen` kept).
 - **Frontend** (`ui/src/`): three pages — `/` (Search: NL hero + recent-query
   dropdown + "understood as" chips + live progress), `/jobs` (triage list +
   right-side detail panel), `/settings` (sources roster + LLM panel + health).
@@ -178,17 +191,19 @@ internal types — convert at the boundary in src/api/client.ts" -->
   the module itself.
 - Scan progress has two phases. `runScan` emits `scan_done` (NON-terminal) at the
   L1→L2 handoff; the SSE stream + `useSSE` hook stay open and only close on
-  `l2_done`/`done`/`error`. `runs.finished_at` is set after L2 in `runFull`, never
-  at L1-end. Emitting `done` or setting `finished_at` early makes the UI look
+  `l2_done`/`done`/`error`. `runs.finished_at` is set after L2 (by `runL2Pass`,
+  before it emits `l2_done`), never at L1-end. Emitting `done` or setting `finished_at` early makes the UI look
   complete / stuck while L2 is still scoring (the original bug).
 - Per-company adapters must map the description into `jd_text`, or L2 grades the
   job on title alone. The body is usually already in the fetched payload
-  (lever `descriptionPlain`, ashby `descriptionPlain`/`descriptionHtml`, recruitee
+  (lever `descriptionPlain` + `lists[]` + `additionalPlain` — requirements /
+  responsibilities live only in `lists[]`, ashby `descriptionPlain`/`descriptionHtml`, recruitee
   `description`, personio `<jobDescription>`); greenhouse needs `?content=true`
   and its `content` is entity-encoded HTML → `htmlToText(htmlToText(...))`.
 - Criteria is derived from the NL query, not user-edited. `POST /api/runs/scan`
   runs `nl-filter` → writes the `criteria` id=1 row → invalidates L2 verdicts
-  (`l2_verdict_json`/`l2_score`/`l2_fit`). There is no `/api/criteria` route and no
+  (`l2_verdict_json`/`l2_score`/`l2_fit`) when the derived YAML changed (an
+  identical query skips nl-filter and keeps verdicts). There is no `/api/criteria` route and no
   Settings criteria editor — don't reintroduce them.
 - L2 grades jobs in batches (`L2_BATCH_SIZE=20`) per `claude` call (`runL2Pass`,
   `batchVerdictPrompt`, `BatchVerdictShape`) to amortize the ~15K system/tool
@@ -235,8 +250,10 @@ internal types — convert at the boundary in src/api/client.ts" -->
   rejections never retried). Adapters needing resilience use these knobs — don't
   add a custom retry wrapper. Non-OK responses throw `HttpStatusError` carrying
   `status` and a ≤300-char body snippet.
-- Liveness strips `nav, header, footer` before collecting apply controls AND body
-  text (nav "Apply now" links were a false-active vector). Thin content on a SPA
+- Liveness strips `nav, header, footer, script, style, noscript, template` before
+  collecting apply controls AND body text (nav "Apply now" links were a
+  false-active vector, hidden i18n strings a false-expired one). Any non-2xx
+  classifies `uncertain`, never expired. Thin content on a SPA
   host (`SPA_HOSTS` in `core/liveness.ts`) classifies `uncertain`, never closed.
 - Adapters that can't fetch a description (LinkedIn guest cards, Workday cxs
   listing, SmartRecruiters/Workable list endpoints) must OMIT `jd_text` (leave it
@@ -264,6 +281,21 @@ internal types — convert at the boundary in src/api/client.ts" -->
   datacenter + career-site name in `config_json` (`{dc, site}` or `{host, site}`),
   because the single slug can't hold a site name with underscores. seed-sources.yml
   entries can include a `config:` object (seedSources serialises it to config_json).
+- bun's `mock.module` is process-global, last-registration-wins — not per-file.
+  Tests share ONE harness (`src/test-harness.ts`: mocked `db/client` + `llm/index`
+  over a shared `:memory:` db; call `resetDb()` in `beforeEach`). Never add another
+  `mock.module` for those modules; it silently repoints every other file's mocks.
+- Workday's cxs feed reports `total` only on page 0 (later pages say 0) — capture
+  it from the first page, don't stop paginating on a later page's `total`.
+- SmartRecruiters' public posting URL is `jobs.smartrecruiters.com/{company.identifier}/{postingId}`
+  — no `/postings/` segment (the `ref` API path copied onto the public host 404s).
+- `POST /api/runs/scan` acquires the scan lock BEFORE the nl-filter call (and
+  releases it on every early exit); `runFull` then owns and releases it. Seed sync
+  is one-directional: a per-company seed entry with `enabled: false` (a retired
+  slug) disables the DB row; aggregators' `enabled: false` means opt-in and is left alone.
+- `Bun.spawn` resolves a bare command against the PATH snapshot from Bun's own
+  startup unless `env` is passed — the claude provider passes `env: process.env`
+  so a CLI installed after the server started is found.
 
 ## Architectural notes — work with these, not against them
 

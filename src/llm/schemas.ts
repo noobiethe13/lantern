@@ -1,13 +1,37 @@
 import { z } from 'zod';
 
+const SENIORITY_LEVELS = ['junior', 'mid', 'senior', 'staff', 'principal', 'unknown'] as const;
+
 export const VerdictShape = z.object({
   fit: z.boolean(),
   score: z.number().min(0).max(1),
-  seniority: z.enum(['junior', 'mid', 'senior', 'staff', 'principal', 'unknown']),
+  // Falls back to "unknown" instead of failing the whole batch when the model
+  // drifts off-enum (e.g. "lead") — one bad job in a 20-job batch used to sink
+  // all 20. Preprocess (not .catch()) deliberately, AND deliberately passes
+  // `undefined` through untouched rather than also defaulting it: zod-to-json-schema
+  // decides a field is optional by probing `schema.safeParse(undefined).success`
+  // — a preprocess (or .catch()) that coerces a missing value into 'unknown' makes
+  // that probe succeed, which drops `seniority` from the emitted schema's
+  // `required` list (misleading the model into thinking the field can be omitted).
+  // Leaving `undefined` unconverted keeps that probe failing (still required) while
+  // still coercing any off-enum *value* the model does send.
+  seniority: z.preprocess(
+    (v) =>
+      v === undefined ? v : typeof v === 'string' && (SENIORITY_LEVELS as readonly string[]).includes(v) ? v : 'unknown',
+    z.enum(SENIORITY_LEVELS),
+  ),
   stack_match: z.array(z.string()),
   remote_confirmed: z.boolean(),
-  salary_min_usd: z.number().int().nullable(),
-  reasons: z.array(z.string()).min(1).max(3),
+  // A stray non-integer (the model occasionally doesn't round) is rounded
+  // instead of rejected. Preprocessing before the .int() check keeps the
+  // --json-schema output identical (still "integer"); only parsing is lenient.
+  salary_min_usd: z.preprocess(
+    (v) => (typeof v === 'number' ? Math.round(v) : v),
+    z.number().int().nullable(),
+  ),
+  // At least one reason is still required; a verdict that pads past 3 is
+  // trimmed rather than failing the whole batch.
+  reasons: z.array(z.string()).min(1).transform((arr) => arr.slice(0, 3)),
 });
 export type Verdict = z.infer<typeof VerdictShape>;
 
@@ -36,25 +60,42 @@ export const BatchVerdictWithResumeShape = z.object({
 });
 export type BatchVerdictWithResume = z.infer<typeof BatchVerdictWithResumeShape>;
 
+// Every free-text term list gets trimmed and blank-stripped — the model
+// occasionally emits a stray "" or padded entry, which would otherwise become
+// an always-matching (or always-blank) L1 term.
+const TermList = z.array(z.string()).transform((arr) => arr.map((s) => s.trim()).filter((s) => s.length > 0));
+
 export const NLFilterShape = z.object({
   title: z.object({
-    positive: z.array(z.string()),
-    negative: z.array(z.string()),
+    positive: TermList,
+    negative: TermList,
   }),
   location: z.object({
     remote_required: z.boolean(),
-    allowed: z.array(z.string()),
-    block: z.array(z.string()),
-    always_allow: z.array(z.string()),
+    allowed: TermList,
+    block: TermList,
+    always_allow: TermList,
   }),
   seniority: z.object({
     allowed: z.array(z.enum(['junior', 'mid', 'senior', 'staff', 'principal'])),
   }),
+  // Literal years-of-experience range, independent of seniority.allowed — L2's
+  // experience-ceiling rubric reads this directly since seniority levels alone
+  // lose precision ("1 to 3 yoe" collapses to ["junior","mid"], which no longer
+  // says "3" is the ceiling). null (not {min:null,max:null}) when unstated.
+  experience_years: z
+    .object({
+      min: z.number().int().nullable(),
+      max: z.number().int().nullable(),
+    })
+    .nullable(),
   salary_min_usd: z.number().int().nullable(),
   // ISO code the salary floor is expressed in (the _usd suffix above is legacy —
   // the amount is native to this currency). 'USD' when the user gave $ or a bare
   // number. L1 only applies the floor to jobs tagged with the same currency.
-  salary_currency: z.string(),
-  exclude_companies: z.array(z.string()),
+  // Uppercased defensively — a lowercase "usd" would never equal a job's
+  // stored (uppercase) currency, silently disabling the L1 salary floor.
+  salary_currency: z.string().transform((s) => s.trim().toUpperCase()),
+  exclude_companies: TermList,
 });
 export type NLFilter = z.infer<typeof NLFilterShape>;

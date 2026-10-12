@@ -12,14 +12,22 @@ import { pickKeywords, pickLocation } from './gated-util';
 const SERPAPI_ALLOWED_HOSTS = ['serpapi.com'];
 const MAX_KEYWORDS = 3;
 
-function buildUrl(keyword: string, location: string, apiKey: string): string {
+function buildUrl(keyword: string, location: string, remoteRequired: boolean, apiKey: string): string {
   const params = new URLSearchParams({
     engine: 'google_jobs',
     q: keyword,
     hl: 'en',
     api_key: apiKey,
   });
-  if (location) params.set('location', location);
+  if (location) {
+    params.set('location', location);
+  } else if (remoteRequired) {
+    // SerpAPI's `location` is resolved against a real gazetteer — "Remote"
+    // isn't in it (locations.json?q=Remote → []), so every request would
+    // silently fail. `ltype=1` is SerpAPI's own "remote jobs" filter, used
+    // when no specific place was named in the criteria.
+    params.set('ltype', '1');
+  }
   return `https://serpapi.com/search.json?${params.toString()}`;
 }
 
@@ -61,7 +69,7 @@ export function parseGoogleJobs(json: unknown): Job[] {
       company,
       location,
       remote: /\b(remote|anywhere|work from home)\b/i.test(`${location} ${title}`),
-      jd_text: htmlToText(description),
+      jd_text: htmlToText(description) || undefined,
     });
   }
   return jobs;
@@ -87,11 +95,12 @@ export class GoogleJobsAdapter implements SourceAdapter {
 
     const seen = new Set<string>();
     let total = 0;
+    let failures = 0;
     for (const keyword of keywords) {
       if (ctx.abortSignal.aborted) break;
       let json: unknown;
       try {
-        json = await fetchJson(buildUrl(keyword, location, apiKey), {
+        json = await fetchJson(buildUrl(keyword, location, !!ctx.remoteRequired, apiKey), {
           allowedHosts: SERPAPI_ALLOWED_HOSTS,
           timeoutMs: 30_000,
           retries: 2,
@@ -99,6 +108,7 @@ export class GoogleJobsAdapter implements SourceAdapter {
       } catch {
         // A quota/HTTP error on one keyword shouldn't abort the others. Don't echo
         // the error (the request URL carries the api_key) — keep the note generic.
+        failures++;
         ctx.emitProgress(`Google Jobs: "${keyword}" request failed (check SerpAPI key/quota)`);
         continue;
       }
@@ -108,6 +118,10 @@ export class GoogleJobsAdapter implements SourceAdapter {
         total++;
         yield job;
       }
+    }
+    if (failures === keywords.length) {
+      // Generic message only — never the request URL, which carries the api_key.
+      throw new Error('Google Jobs: all requests failed (check SerpAPI key/quota)');
     }
     ctx.emitProgress(`Google Jobs: ${total} jobs`, total);
   }

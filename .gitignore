@@ -19,6 +19,9 @@ models/
 # Bootstrap / per-session scratch
 .claude/session/
 
+# Scratch cwd created by seeds.test.ts (recreated each run)
+.seeds-test-cwd/
+
 # User-local Claude Code overrides (permissions, personal prefs)
 .claude/settings.local.json
 

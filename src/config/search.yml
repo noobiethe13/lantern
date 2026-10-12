@@ -1,15 +1,22 @@
 # Active search criteria — edit this file or use the UI to update
 # This file is loaded at scan time.
+# Every term matches as a whole word, case-insensitively, with -, _ and / read as
+# spaces: "us" does not match "Austin", "java" does not match "JavaScript",
+# "full stack" matches "Full-Stack" and "Fullstack". Blank terms are ignored.
 title:
   positive: []   # e.g. ["engineer", "developer", "typescript"]
   negative: []   # e.g. ["intern", "manager", "director"]
 location:
+  # Location terms also resolve through the gazetteer (src/core/geo.ts), so
+  # "india" matches "Bangalore" and "europe" matches "Berlin".
   remote_required: false
-  allowed: []        # e.g. ["Berlin", "London", "Remote"]
-  block: []          # regions to exclude, e.g. ["United States"]
-  always_allow: []   # home region that always passes, e.g. ["India"]
+  allowed: []        # places to work in, e.g. ["Berlin", "London"]. Constrains on-site jobs,
+                     # and (with always_allow) where a region-restricted remote job must be open to
+  block: []          # regions to exclude even for remote roles, e.g. ["United States"]
+  always_allow: []   # home region(s): always pass, and a remote job restricted
+                     # elsewhere ("Remote - US") fails, e.g. ["India"]
 seniority:
   allowed: []    # junior | mid | senior | staff | principal
 salary_min_usd: null      # native amount in salary_currency (the _usd suffix is legacy)
-salary_currency: USD       # ISO code of the floor; L1 only filters jobs tagged the same
+salary_currency: USD       # ISO code of the floor, any case. L1 only filters jobs tagged the same
 exclude_companies: []
