@@ -13,6 +13,11 @@ type RankRow = RankableJob & { embedding: Uint8Array | null };
 
 const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'] as const;
 
+const TOTAL_CAP = 10_000;
+const BROAD_ROWS = 5_000;
+
+const JOBS_RANK_ORDER = 'ORDER BY (j.l2_score IS NULL), j.l2_fit DESC, j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC, j.id DESC';
+
 // Query params are always strings (or absent) at this boundary — a negative
 // LIMIT is "unlimited" in SQLite (bypassing the cap) and a non-numeric value
 // throws SQLITE_MISMATCH once bound, so validate before it reaches the query.
@@ -39,10 +44,24 @@ jobs.get('/', c => {
   const conditions: string[] = [];
   const params: Binding[] = [];
 
+  // Index steering at 400k+ jobs. A filter that matches a small set should use its
+  // own index and sort the hits. One that matches a big share of the table (the
+  // latest run, status 'new', a large vendor) is faster written with a unary +,
+  // which keeps the planner off its index: it walks idx_jobs_rank in order and stops
+  // after one page instead of sorting every hit. SQLite has no statistics to tell
+  // the two apart, so a count capped at BROAD_ROWS (index-only, cheap) decides.
+  const steer = (predicate: string, binds: Binding[]): string => {
+    const n = db.query<{ n: number }, Binding[]>(
+      `SELECT COUNT(*) AS n FROM (SELECT 1 FROM jobs WHERE ${predicate} LIMIT ${BROAD_ROWS})`
+    ).get(...binds)?.n ?? 0;
+    return n >= BROAD_ROWS ? '+j.' : 'j.';
+  };
+
   if (status) {
     const statuses = status.split(',').filter(s => JOB_STATUSES.includes(s as typeof JOB_STATUSES[number]));
     if (statuses.length > 0) {
-      conditions.push(`j.status IN (${statuses.map(() => '?').join(',')})`);
+      const inList = `status IN (${statuses.map(() => '?').join(',')})`;
+      conditions.push(`${steer(inList, statuses)}${inList}`);
       params.push(...statuses);
     }
   }
@@ -61,29 +80,35 @@ jobs.get('/', c => {
   if (fit === '1') conditions.push('j.l2_fit = 1 AND j.l1_pass = 1');
   if (remote === '1') conditions.push('j.remote = 1');
   if (sourceType) {
-    // Comma-separated list → s.type IN (...). Supports multi-select source filter.
+    // Comma-separated list. Supports multi-select source filter.
     const types = sourceType.split(',').map(s => s.trim()).filter(Boolean);
     if (types.length > 0) {
-      conditions.push(`s.type IN (${types.map(() => '?').join(',')})`);
+      const inList = `source_id IN (SELECT id FROM sources WHERE type IN (${types.map(() => '?').join(',')}))`;
+      conditions.push(`${steer(inList, types)}${inList}`);
       params.push(...types);
     }
   }
   // Scope to a search: `latest` = the most recent run, or an explicit run id.
-  if (run === 'latest') {
-    conditions.push('j.last_run_id = (SELECT MAX(id) FROM runs)');
-  } else if (run && /^\d+$/.test(run)) {
-    conditions.push('j.last_run_id = ?');
-    params.push(Number(run));
+  const runId = run === 'latest'
+    ? db.query<{ id: number | null }, []>('SELECT MAX(id) AS id FROM runs').get()?.id ?? null
+    : run && /^\d+$/.test(run) ? Number(run) : undefined;
+  if (runId !== undefined) {
+    conditions.push(`${steer('last_run_id = ?', [runId])}last_run_id = ?`);
+    params.push(runId);
   }
   if (q) {
-    conditions.push('(j.title LIKE ? OR j.company LIKE ?)');
+    // The LIKE runs over the narrow idx_jobs_title_company once, so the page walk
+    // only checks rowids instead of reading every wide row for its title.
+    conditions.push('j.id IN (SELECT id FROM jobs WHERE title LIKE ? OR company LIKE ?)');
     params.push(`%${q}%`, `%${q}%`);
   }
   // Semantic near-duplicates fold into a canonical posting (jobs.duplicate_of) and
   // are hidden by default so the user sees one row per real job. include_duplicates=1
   // surfaces them (each carries duplicate_of so the UI can mark it).
+  // The unary + keeps the planner off idx_jobs_duplicate_of for this nearly-always-true
+  // term, so the unfiltered list walks idx_jobs_rank in order instead of sorting.
   if (c.req.query('include_duplicates') !== '1') {
-    conditions.push('j.duplicate_of IS NULL');
+    conditions.push('+j.duplicate_of IS NULL');
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -96,25 +121,26 @@ jobs.get('/', c => {
   // The UI masthead promises "ranked by fit" — honor it in every view:
   // L2-scored first (fits before non-fits, best leading), then L1 survivors, then
   // the rest by recency (id breaks ties so pages are stable). compareRank (core/preference.ts) must stay in step.
-  const orderBy = 'ORDER BY (j.l2_score IS NULL), j.l2_fit DESC, j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC, j.id DESC';
+  // Must match idx_jobs_rank (db/migrate.ts) term for term or the index stops serving it.
+  const orderBy = JOBS_RANK_ORDER;
+  const andWhere = (extra: string) => (where ? `${where} AND ${extra}` : `WHERE ${extra}`);
 
-  // With a learned taste (embeddings on, enough triaged jobs) the order is a blend,
-  // which SQL can't express, so rank in JS over id/score/vector only and fetch full
-  // rows for the requested page. Otherwise the plain SQL order and pagination apply.
+  // With a learned taste (embeddings on, enough triaged jobs) the order of L2-scored
+  // rows is a blend, which SQL can't express, so those are ranked in JS over
+  // id/score/vector. compareRank puts every scored row before every unscored one and
+  // orders the unscored exactly like SQL, so the unscored remainder of the page is
+  // a plain indexed SQL page — never rank the whole table in JS.
   const model = loadPreferenceModel();
   let rows: Record<string, unknown>[];
   let adjust: Map<number, number> | null = null;
   if (model) {
-    // Only L2-scored rows are blended (unscored ones sort by L1/recency), so the
-    // embedding BLOB is read for those alone.
-    const ranked = db.query<RankRow, Binding[]>(
-      `SELECT j.id, j.l2_score, j.l2_fit, j.l1_pass, j.first_seen,
-              CASE WHEN j.l2_score IS NOT NULL THEN j.embedding END AS embedding
-       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id ${where}`
+    const scored = db.query<RankRow, Binding[]>(
+      `SELECT j.id, j.l2_score, j.l2_fit, j.l1_pass, j.first_seen, j.embedding
+       FROM jobs j ${andWhere('j.l2_score IS NOT NULL')}`
     ).all(...params);
-    adjust = preferenceAdjustments(model, ranked.map(r => ({ id: r.id, vec: deserializeVector(r.embedding) })));
-    ranked.sort(compareRank(adjust));
-    const pageIds = ranked.slice(offset, offset + limit).map(r => r.id);
+    adjust = preferenceAdjustments(model, scored.map(r => ({ id: r.id, vec: deserializeVector(r.embedding) })));
+    scored.sort(compareRank(adjust));
+    const pageIds = scored.slice(offset, offset + limit).map(r => r.id);
     const byId = new Map<number, Record<string, unknown>>();
     if (pageIds.length > 0) {
       const pageRows = db.query<Record<string, unknown>, number[]>(
@@ -123,6 +149,12 @@ jobs.get('/', c => {
       for (const r of pageRows) byId.set(Number(r['id']), r);
     }
     rows = pageIds.flatMap(id => { const r = byId.get(id); return r ? [r] : []; });
+    const room = limit - rows.length;
+    if (room > 0) {
+      rows = rows.concat(db.query<Record<string, unknown>, Binding[]>(
+        `${fullRow} ${andWhere('j.l2_score IS NULL')} ${orderBy} LIMIT ? OFFSET ?`
+      ).all(...params, room, Math.max(0, offset - scored.length)));
+    }
   } else {
     rows = db.query<Record<string, unknown>, Binding[]>(
       `${fullRow}
@@ -132,11 +164,13 @@ jobs.get('/', c => {
     ).all(...params, limit, offset);
   }
 
-  // LEFT JOIN sources so a source_type filter (which references s.type) resolves
-  // here too — the WHERE clause is shared with the rows query above.
-  const total = db.query<{ n: number }, Binding[]>(
-    `SELECT COUNT(*) AS n FROM jobs j LEFT JOIN sources s ON s.id = j.source_id ${where}`
+  // Counting a broad filter exactly means reading every matching row; past
+  // TOTAL_CAP the UI says "10,000+" and the count stops there.
+  const counted = db.query<{ n: number }, Binding[]>(
+    `SELECT COUNT(*) AS n FROM (SELECT 1 FROM jobs j ${where} LIMIT ${TOTAL_CAP + 1})`
   ).get(...params)?.n ?? 0;
+  const total = Math.min(counted, TOTAL_CAP);
+  const totalCapped = counted > TOTAL_CAP;
 
   // pref_adjust: the score delta personalization applied (null = no model or no
   // vector), so the UI can say "like jobs you shortlisted" without recomputing.
@@ -144,7 +178,19 @@ jobs.get('/', c => {
     const delta = adjust?.get(Number(r['id']));
     return { ...parseJobRow(r), pref_adjust: delta === undefined ? null : Math.round(delta * 1000) / 1000 };
   });
-  return c.json({ jobs: withPref, total, limit, offset });
+  return c.json({ jobs: withPref, total, total_capped: totalCapped, limit, offset });
+});
+
+// How many jobs sit in each triage state, for the counts on the Jobs status tabs.
+// 'new' is omitted: it is nearly the whole table and its count says nothing.
+// Index-only (idx_jobs_status). Registered before '/:id'.
+jobs.get('/status-counts', c => {
+  const rows = db.query<{ status: string; n: number }, []>(
+    `SELECT status, COUNT(*) AS n FROM jobs
+     WHERE status IN ('shortlist','applied','interview','offer','rejected','hidden')
+     GROUP BY status`
+  ).all();
+  return c.json({ counts: Object.fromEntries(rows.map(r => [r.status, r.n])) });
 });
 
 // Registered before '/:id' so "calibration" is not read as a job id.

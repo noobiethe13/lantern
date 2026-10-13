@@ -109,7 +109,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_source       ON jobs(source_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status       ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_l1           ON jobs(l1_pass);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen   ON jobs(first_seen DESC);
-CREATE INDEX IF NOT EXISTS idx_jobs_last_run     ON jobs(last_run_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_run_l1  ON jobs(last_run_id, l1_pass);
 CREATE INDEX IF NOT EXISTS idx_jobs_l2_score     ON jobs(l2_score DESC);
 
 -- ── board_sightings ─────────────────────────────────────────────────

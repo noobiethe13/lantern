@@ -28,17 +28,25 @@ function pendingFor(run: Record<string, unknown>): number {
   return run['finished_at'] == null ? 0 : countUngraded(run['id'] as number);
 }
 
+// The list is polled (sidebar, Jobs, Search) and a 15k-board run can log ~1000
+// errors (~300KB), so it carries the count and a sample; GET /:id has them all.
+const LIST_ERROR_SAMPLE = 20;
+
 runs.get('/', c => {
   const limit = clampLimit(c.req.query('limit'));
   const rows = db.query<Record<string, unknown>, [number]>(
     `SELECT * FROM runs ORDER BY started_at DESC LIMIT ?`
   ).all(limit);
-  return c.json({ runs: rows.map(r => ({
-    ...r,
-    l2_pending: pendingFor(r),
-    errors: r.errors_json ? JSON.parse(r.errors_json as string) : [],
-    errors_json: undefined,
-  })) });
+  return c.json({ runs: rows.map(r => {
+    const errors: unknown[] = r.errors_json ? JSON.parse(r.errors_json as string) : [];
+    return {
+      ...r,
+      l2_pending: pendingFor(r),
+      errors: errors.slice(0, LIST_ERROR_SAMPLE),
+      error_count: errors.length,
+      errors_json: undefined,
+    };
+  }) });
 });
 
 // Distinct recent search queries for the search-box dropdown. Registered before
@@ -59,10 +67,12 @@ runs.get('/:id', c => {
     'SELECT * FROM runs WHERE id = ?'
   ).get(Number(c.req.param('id')));
   if (!row) return c.json({ error: 'not found' }, 404);
+  const errors: unknown[] = row.errors_json ? JSON.parse(row.errors_json as string) : [];
   return c.json({
     ...row,
     l2_pending: pendingFor(row),
-    errors: row.errors_json ? JSON.parse(row.errors_json as string) : [],
+    errors,
+    error_count: errors.length,
     errors_json: undefined,
   });
 });

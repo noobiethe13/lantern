@@ -227,3 +227,32 @@ test('GET /api/jobs: fully tied rows paginate by id, newest first', async () => 
   expect(await listIds('limit=4')).toEqual(expected);
   expect(await listIds('limit=2&offset=2')).toEqual(expected.slice(2));
 });
+
+test('GET /api/jobs/status-counts counts triage states only and is not read as a job id', async () => {
+  const src = insertSource();
+  insertJob(src, { status: 'shortlist' });
+  insertJob(src, { status: 'shortlist' });
+  insertJob(src, { status: 'hidden' });
+  insertJob(src);
+  const res = await req('/api/jobs/status-counts');
+  expect(res.status).toBe(200);
+  expect((await res.json()).counts).toEqual({ shortlist: 2, hidden: 1 });
+});
+
+test('GET /api/jobs filters by text, source type and run, and counts the matches', async () => {
+  const gh = insertSource({ type: 'greenhouse' });
+  const lv = insertSource({ type: 'lever' });
+  memDb.run(`INSERT INTO runs (id, started_at, trigger) VALUES (7, 1, 'manual'), (8, 2, 'manual')`);
+  const a = insertJob(gh, { title: 'Flutter Developer', last_run_id: 8 });
+  const b = insertJob(lv, { company: 'Flutterwave', last_run_id: 7 });
+  const c = insertJob(lv, { title: 'Backend Engineer', last_run_id: 8 });
+
+  const ids = async (qs: string) => {
+    const body = await (await req(`/api/jobs?${qs}`)).json();
+    return { ids: body.jobs.map((j: { id: number }) => j.id).sort(), total: body.total, capped: body.total_capped };
+  };
+  expect(await ids('q=flutter')).toEqual({ ids: [a, b].sort(), total: 2, capped: false });
+  expect((await ids('source_type=lever')).ids).toEqual([b, c].sort());
+  expect(await ids('run=latest&q=flutter')).toEqual({ ids: [a], total: 1, capped: false });
+  expect((await ids('run=7')).ids).toEqual([b]);
+});

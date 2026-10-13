@@ -16,6 +16,19 @@ export const SIGNAL_SQL = `CASE
   WHEN status IN ('hidden','rejected') THEN 'disliked'
 END`;
 
+const TRIAGED = `('shortlist','applied','interview','offer','hidden','rejected')`;
+
+/**
+ * Exactly the rows SIGNAL_SQL can classify, as two disjoint indexed reads (status
+ * index, partial applied_at index). Filtering on SIGNAL_SQL itself scanned every
+ * job on each Jobs request; an `A OR B` filter here falls back to that scan too.
+ */
+function triagedRows(cols: string): string {
+  return `SELECT ${cols} FROM jobs WHERE status IN ${TRIAGED}
+          UNION ALL
+          SELECT ${cols} FROM jobs WHERE applied_at IS NOT NULL AND status NOT IN ${TRIAGED}`;
+}
+
 /**
  * Read the user's taste from their triaged jobs' cached embeddings. Computed per
  * call rather than stored: it is a few hundred 384-d vectors at most (a person has
@@ -27,10 +40,9 @@ export function loadPreferenceModel(): PreferenceModel | null {
   if (!embeddingEnabled()) return null;
   const rows = db
     .query<{ embedding: Uint8Array; company: string; signal: TriageSignal }, []>(
-      `SELECT embedding, company, signal FROM (
-         SELECT id, embedding, COALESCE(company_norm, '') AS company, ${SIGNAL_SQL} AS signal
-         FROM jobs WHERE embedding IS NOT NULL
-       ) WHERE signal IS NOT NULL ORDER BY id DESC`,
+      `SELECT embedding, COALESCE(company_norm, '') AS company, ${SIGNAL_SQL} AS signal
+       FROM (${triagedRows('id, embedding, company_norm, status, applied_at')})
+       WHERE embedding IS NOT NULL ORDER BY id DESC`,
     )
     .all();
   const samples: PreferenceSample[] = [];
@@ -72,7 +84,8 @@ export function calibrationReport(): Calibration {
               AVG(l2_score) AS mean_score,
               COALESCE(SUM(l2_fit = 1), 0) AS fit,
               COALESCE(SUM(l2_fit = 0), 0) AS not_fit
-       FROM (SELECT ${SIGNAL_SQL} AS signal, l2_score, l2_fit FROM jobs)
+       FROM (SELECT ${SIGNAL_SQL} AS signal, l2_score, l2_fit
+             FROM (${triagedRows('status, applied_at, l2_score, l2_fit')}))
        WHERE signal IS NOT NULL GROUP BY signal`,
     )
     .all();

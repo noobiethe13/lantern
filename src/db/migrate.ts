@@ -217,4 +217,19 @@ export function runMigrations(db: Database): void {
   }
   db.run('CREATE INDEX IF NOT EXISTS idx_jobs_company_norm ON jobs(company_norm)');
   db.run('CREATE INDEX IF NOT EXISTS idx_jobs_duplicate_of ON jobs(duplicate_of)');
+
+  // The Jobs list's rank order as an index, term for term with JOBS_RANK_ORDER in
+  // routes/jobs.ts, so a page of the unfiltered list is an index walk instead of a
+  // sort over every job (seconds at 400k+ rows).
+  db.run(`CREATE INDEX IF NOT EXISTS idx_jobs_rank ON jobs(
+    (l2_score IS NULL), l2_fit DESC, l2_score DESC, l1_pass DESC, first_seen DESC, id DESC)`);
+  // A run's L1 survivors (countUngraded, ?run=…&fit=1) without visiting every job the
+  // run stamped. Supersedes the single-column idx_jobs_last_run.
+  db.run('CREATE INDEX IF NOT EXISTS idx_jobs_last_run_l1 ON jobs(last_run_id, l1_pass)');
+  db.run('DROP INDEX IF EXISTS idx_jobs_last_run');
+  // The Jobs text filter's LIKE scans this instead of the wide rows (routes/jobs.ts).
+  // Upserts rarely change title/company, so it costs little on the scan's write path.
+  db.run('CREATE INDEX IF NOT EXISTS idx_jobs_title_company ON jobs(title, company)');
+  // Applied jobs are a liked signal whatever their status (runner/preference.ts).
+  db.run('CREATE INDEX IF NOT EXISTS idx_jobs_applied ON jobs(applied_at) WHERE applied_at IS NOT NULL');
 }
