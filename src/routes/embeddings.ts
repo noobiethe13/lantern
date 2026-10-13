@@ -11,8 +11,8 @@ export const embeddingSettings = new Hono();
 
 // Local semantic-ranking toggle. Stored in the settings KV. Default ON; when off
 // the runner never loads the embedding model (no download). Unlike resume/criteria
-// changes, flipping this does NOT invalidate verdicts — embeddings only reorder
-// the L2 queue, they never change a verdict's content.
+// changes, flipping this does NOT invalidate verdicts — embeddings reorder the L2
+// queue and let semantic rescue add jobs to it, but never change a verdict's content.
 
 export function readEmbeddingSettings(): EmbeddingSettings {
   const row = db

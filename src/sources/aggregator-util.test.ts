@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { htmlToText, toMillis, matchesAny, decodeEntities, sleep } from './aggregator-util';
+import { htmlToText, toMillis, matchesAny, titleMatchesKeywords, postingMatchesKeywords, decodeEntities, sleep } from './aggregator-util';
 
 describe('htmlToText', () => {
   test('strips tags and decodes common entities', () => {
@@ -128,5 +128,30 @@ describe('matchesAny', () => {
 
   test('empty keyword list matches nothing', () => {
     expect(matchesAny([], 'anything')).toBe(false);
+  });
+});
+
+describe('postingMatchesKeywords', () => {
+  test('admits on a title match or a whole-word body match', () => {
+    expect(postingMatchesKeywords(['backend'], 'Backend Engineer', undefined)).toBe(true);
+    expect(postingMatchesKeywords(['backend'], 'Software Engineer II', 'Own our backend services.')).toBe(true);
+  });
+
+  test('body match is whole-word, not substring, and absent/empty keywords admit nothing', () => {
+    expect(postingMatchesKeywords(['java'], 'Software Engineer II', 'Strong JavaScript skills.')).toBe(false);
+    expect(postingMatchesKeywords(['backend'], 'Software Engineer II', undefined)).toBe(false);
+    expect(postingMatchesKeywords([], 'Backend Engineer', 'backend')).toBe(false);
+  });
+});
+
+describe('titleMatchesKeywords', () => {
+  test('matches whole words/phrases only, not substrings', () => {
+    expect(titleMatchesKeywords(['java'], 'Senior Java Developer')).toBe(true);
+    expect(titleMatchesKeywords(['java'], 'JavaScript Engineer')).toBe(false);
+    expect(titleMatchesKeywords(['backend engineer'], 'Senior Backend Engineer, IAM')).toBe(true);
+  });
+
+  test('empty keyword list matches nothing', () => {
+    expect(titleMatchesKeywords([], 'Anything')).toBe(false);
   });
 });

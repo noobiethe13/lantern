@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 import { GATED_USER_AGENT } from './gated-util';
 
 // Workday's customer-experience (cxs) job feed. Tenants live on per-datacenter
@@ -76,8 +77,8 @@ function externalId(posting: Record<string, unknown>, externalPath: string): str
 /**
  * Parse a Workday cxs `/jobs` page into Jobs. The public posting URL is
  * `https://{host}/{site}{externalPath}`. Listing carries no description or
- * salary — jd_text is deferred (omitted, null in DB) like SmartRecruiters, so a
- * per-job cxs detail fetch isn't forced on large tenants.
+ * salary — jd_text is omitted (null in DB) and filled by enrich() from the
+ * per-job cxs detail, so large tenants don't pay a request per listed posting.
  */
 export function parseWorkday(
   json: unknown,
@@ -126,6 +127,43 @@ export function parseWorkday(
   return jobs;
 }
 
+// A cxs externalPath tail: `/job/<location>/<title>_<reqId>` — plain URL-path
+// segments only, never `.`/`..` or an encoded slash/dot that could climb out.
+const EXTERNAL_PATH_RX = /^\/job(?:\/[A-Za-z0-9._~()!,'*+=:@%-]+)+$/;
+
+/**
+ * Recover the externalPath from a stored job's URL (`https://{host}/{site}{externalPath}`),
+ * or null when the URL isn't on the expected host/site or the path is unsafe.
+ * The path originated in the listing payload, so it is treated as untrusted.
+ */
+export function workdayExternalPath(jobUrl: string, host: string, site: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(jobUrl);
+  } catch {
+    return null;
+  }
+  const prefix = `/${site}`;
+  if (u.protocol !== 'https:' || u.hostname !== host || !u.pathname.startsWith(`${prefix}/job/`)) return null;
+  const path = u.pathname.slice(prefix.length);
+  if (!EXTERNAL_PATH_RX.test(path)) return null;
+  // Escapes that could climb out or change meaning once decoded: `.` `/` `\`, `?` `#`,
+  // a double-encoding `%25`, NUL and the rest of the control range.
+  if (path.split('/').some(seg => seg === '.' || seg === '..') || /%(?:[01][0-9a-f]|7f|2[35ef]|3f|5c)/i.test(path)) {
+    return null;
+  }
+  return path;
+}
+
+/** Description from a cxs `/job/...` detail payload (`jobPostingInfo.jobDescription`
+ *  HTML). The remaining fields (startDate is a hire date, not a posting date)
+ *  don't map cleanly, so only jd_text is returned. Null when the body is empty. */
+export function parseWorkdayDetail(json: unknown): Partial<Job> | null {
+  const info = (json as { jobPostingInfo?: Record<string, unknown> } | null)?.jobPostingInfo;
+  const jd = htmlToText(typeof info?.['jobDescription'] === 'string' ? info['jobDescription'] : '');
+  return jd ? { jd_text: jd } : null;
+}
+
 export class WorkdayAdapter implements SourceAdapter {
   type = 'workday' as const;
 
@@ -154,6 +192,7 @@ export class WorkdayAdapter implements SourceAdapter {
         method: 'POST',
         body: { appliedFacets: {}, limit: PAGE_SIZE, offset, searchText: '' },
         retries: 1,
+        signal: ctx.abortSignal,
       })) as { total?: number; jobPostings?: unknown[] };
 
       if (page === 0 && typeof json.total === 'number') reportedTotal = json.total;
@@ -168,5 +207,25 @@ export class WorkdayAdapter implements SourceAdapter {
     }
 
     ctx.emitProgress(`${cfg.display_name}: ${total} jobs`, total);
+  }
+
+  /** Fetches the JD for one job the runner kept past L1. A bad config, unsafe
+   *  path or fetch failure is recoverable here (the job stays without a JD). */
+  async enrich(job: Job, ctx: SourceContext): Promise<Partial<Job> | null> {
+    const cfg = ctx.config as unknown as WorkdayConfig;
+    try {
+      assertValidSlug(cfg.identifier, 'Workday tenant slug');
+      const site = assertSafeSite(cfg.site ?? '');
+      const host = resolveWorkdayHost(cfg);
+      const path = workdayExternalPath(job.url, host, site);
+      if (!path) return null;
+      const url = `https://${host}/wday/cxs/${cfg.identifier}/${site}${path}`;
+      return parseWorkdayDetail(
+        await fetchJson(url, { allowedHosts: [host], headers: REQUEST_HEADERS, retries: 1 }),
+      );
+    } catch (err) {
+      ctx.emitProgress(`Workday: JD enrich failed for ${job.external_id ?? job.url} (${err instanceof Error ? err.message : String(err)})`);
+      return null;
+    }
   }
 }

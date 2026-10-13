@@ -125,6 +125,16 @@ describe('batchVerdictPrompt', () => {
     expect(prompt).toContain('cap score at 0.6');
     expect(prompt).toContain('ANNUAL USD amount');
   });
+
+  test('rubric covers the intent fields without adding verdict output fields', () => {
+    const prompt = batchVerdictPrompt('c', [job(1)]);
+    expect(prompt).toContain('criteria.skills.must');
+    expect(prompt).toContain('criteria.industries');
+    expect(prompt).toContain('criteria.visa_sponsorship_required');
+    expect(prompt).toContain('criteria.employment_types');
+    expect(prompt).toContain('or a must-have skill, cap score at 0.6');
+    expect(prompt).toContain('"reasons":["1-3 short reasons"]}]}');
+  });
 });
 
 describe('BatchVerdictShape', () => {

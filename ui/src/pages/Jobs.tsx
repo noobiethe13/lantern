@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ExternalLink, Search, MapPin, Globe, X, Banknote, GaugeCircle, SlidersHorizontal, Check,
-  ChevronUp, ChevronDown, ShieldAlert, Sparkles, Layers,
+  ChevronUp, ChevronDown, ShieldAlert, Sparkles, Layers, EyeOff,
 } from 'lucide-react';
 import { api, formatMoney, type Job, type JobStatus, type Legitimacy, type SimilarJob, type Run } from '@/lib/api';
 import { Textarea, Spinner, Button, useToast } from '@/components/ui';
@@ -79,6 +79,16 @@ const SOURCE_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'linkedin', label: 'LinkedIn' },
   { value: 'google_jobs', label: 'Google Jobs' },
   { value: 'jobicy', label: 'Jobicy' },
+  { value: 'themuse', label: 'The Muse' },
+  { value: 'smartrecruiters_search', label: 'SmartRecruiters (search)' },
+  { value: 'workingnomads', label: 'Working Nomads' },
+  { value: 'weworkremotely', label: 'We Work Remotely' },
+  { value: 'remotive', label: 'Remotive' },
+  { value: 'jobtech', label: 'JobTech (Sweden)' },
+  { value: 'hn_hiring', label: 'HN Who is hiring' },
+  { value: 'breezy', label: 'Breezy HR' },
+  { value: 'rippling', label: 'Rippling' },
+  { value: 'teamtailor', label: 'Teamtailor' },
 ];
 
 // Understated underline search — the masthead's quiet right-hand affordance.
@@ -254,6 +264,9 @@ function RefineControl({
 // Statuses the user has actively assigned — these earn a labeled pill in the list.
 const TRIAGED_STATUSES: JobStatus[] = ['shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'];
 
+// A taste delta this large (of the +/-0.1 cap) is worth a quiet hint on the row.
+const PREF_HINT_MIN = 0.06;
+
 function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolean; index: number; onSelect: () => void }) {
   // Age reflects when the job was POSTED when the source gave a date (more useful
   // than when Lantern happened to scan it); fall back to first_seen (scan time)
@@ -265,6 +278,10 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
     ? `Posted ${new Date(job.posted_at).toLocaleDateString()}`
     : `First seen ${new Date(job.first_seen).toLocaleDateString()} (no posted date)`;
   const v = job.l2_verdict;
+  // A dismissed job stays in place (KI-006: hiding is a label, not removal) but its
+  // content recedes. Applied to the cells, not the row: the entrance animation's
+  // fill-mode would override a row-level opacity.
+  const dim = job.status === 'hidden' ? 0.5 : undefined;
 
   return (
     <div
@@ -287,13 +304,13 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
     >
       {/* Fit numeral — the ranking spine. Heat ramp: weak scores cool to ash,
           strong fits glow gold with a halo (visual energy ∝ relevance). */}
-      <div style={{ alignSelf: 'center' }}>
+      <div style={{ alignSelf: 'center', opacity: dim }}>
         {v
           ? <span className="tnum" style={{ fontFamily: 'var(--font-mono)', fontSize: '19px', fontWeight: 600, color: scoreColor(v.score), letterSpacing: '-0.02em', lineHeight: 1, textShadow: v.score >= 0.7 ? '0 0 14px color-mix(in oklch, var(--score-hot) 55%, transparent)' : undefined }}>{Math.round(v.score * 100)}</span>
           : <span style={{ fontSize: '12px', color: 'var(--text-faint)' }}>{job.l1_pass === 1 ? 'L1' : '—'}</span>}
       </div>
 
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, opacity: dim }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <span style={{ fontSize: '14.5px', fontWeight: 560, color: 'var(--text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {job.title}
@@ -314,6 +331,10 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
         <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.company}
           {job.source_name && <span style={{ color: 'var(--text-faint)' }}> · {job.source_name}</span>}
+          {job.l1_rescued === 1 && <span title="Title didn't match the search, but the description reads like it" style={{ color: 'var(--text-faint)' }}> · semantic match</span>}
+          {job.status === 'new' && (job.pref_adjust ?? 0) >= PREF_HINT_MIN && (
+            <span title="Ranked a little higher because it reads like jobs you've shortlisted" style={{ color: 'var(--text-faint)' }}> · like your shortlist</span>
+          )}
           {!!job.duplicate_count && (
             <span
               title={`${job.duplicate_count} near-duplicate repost${job.duplicate_count > 1 ? 's' : ''} folded in`}
@@ -327,7 +348,7 @@ function JobRow({ job, selected, index, onSelect }: { job: Job; selected: boolea
 
       {/* Default values render near-silent so non-defaults pop by contrast:
           Remote (the norm) is faint, a real city is the signal. */}
-      <div className="col-location" style={{ alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 6, fontSize: '12.5px', color: 'var(--text-muted)', minWidth: 0 }}>
+      <div className="col-location" style={{ alignSelf: 'center', display: 'flex', alignItems: 'center', gap: 6, fontSize: '12.5px', color: 'var(--text-muted)', minWidth: 0, opacity: dim }}>
         {job.remote === 1
           ? <><Globe size={12} style={{ flexShrink: 0, color: 'var(--text-faint)', opacity: 0.7 }} /><span style={{ color: 'var(--text-faint)' }}>Remote</span></>
           : job.location
@@ -375,8 +396,9 @@ function MetaCell({ icon, label, value }: { icon: React.ReactNode; label: string
 
 const NOTES_MAX_LEN = 4000;
 
-function DetailPanel({ job, onClose, onStatusChange, onNotesSaved, onPrev, onNext }: {
-  job: Job; onClose: () => void; onStatusChange: (s: JobStatus) => void;
+function DetailPanel({ job, onClose, onStatusChange, onDismiss, restoreTo, onNotesSaved, onPrev, onNext }: {
+  job: Job; onClose: () => void; onStatusChange: (s: JobStatus) => void; onDismiss: () => void;
+  restoreTo: JobStatus;
   onNotesSaved: (id: number, notes: string) => void;
   onPrev?: () => void; onNext?: () => void;
 }) {
@@ -473,7 +495,16 @@ function DetailPanel({ job, onClose, onStatusChange, onNotesSaved, onPrev, onNex
     { icon: job.remote === 1 ? <Globe size={12} /> : <MapPin size={12} />, label: 'Location', value: locationValue },
   ];
   if (salaryValue != null) {
-    cells.push({ icon: <Banknote size={12} />, label: 'Salary', value: <span className="tnum">{salaryValue}</span> });
+    const fromText = hasNativeSalary && job.salary_source === 'jd';
+    cells.push({
+      icon: <Banknote size={12} />,
+      label: 'Salary',
+      value: (
+        <span className="tnum" title={fromText ? 'Read from the job description, not stated by the board' : undefined}>
+          {fromText ? '≈ ' : null}{salaryValue}
+        </span>
+      ),
+    });
   }
   if (v?.seniority) {
     cells.push({ icon: <GaugeCircle size={12} />, label: 'Seniority', value: <span style={{ textTransform: 'capitalize' }}>{v.seniority}</span> });
@@ -521,6 +552,7 @@ function DetailPanel({ job, onClose, onStatusChange, onNotesSaved, onPrev, onNex
           <div style={{ fontSize: '13.5px', color: 'var(--text-muted)', marginTop: 5 }}>
             <span style={{ fontWeight: 500, color: 'var(--text)' }}>{job.company}</span>
             {job.source_name && <span style={{ color: 'var(--text-faint)' }}> · {job.source_name}</span>}
+            {job.l1_rescued === 1 && <span title="Title didn't match the search, but the description reads like it" style={{ color: 'var(--text-faint)' }}> · semantic match</span>}
           </div>
         </div>
 
@@ -532,6 +564,27 @@ function DetailPanel({ job, onClose, onStatusChange, onNotesSaved, onPrev, onNex
 
         <div style={{ position: 'relative', zIndex: 1, marginTop: 16, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <StatusPill status={job.status as JobStatus} interactive onChange={onStatusChange} />
+          {/* One-click "not for me": the signal lantern learns taste from (it nudges
+              ranking only). Undoes itself when the job is already dismissed. */}
+          <button
+            type="button"
+            className="dismiss-btn"
+            onClick={() => (job.status === 'hidden' ? onStatusChange(restoreTo) : onDismiss())}
+            title={job.status === 'hidden'
+              ? `Put this job back as ${restoreTo}`
+              : job.applied_at != null
+              ? 'Hide this job (you applied to it, so it still counts toward what you like) (x)'
+              : 'Hide this job and rank similar ones lower (x)'}
+          >
+            <EyeOff size={13} />
+            {job.status === 'hidden' ? 'Restore' : 'Not interested'}
+          </button>
+          <style>{`
+            .dismiss-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; background: none;
+              border: 1px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer;
+              font-family: var(--font-ui); font-size: 12.5px; color: var(--text-muted); transition: color 140ms ease, border-color 140ms ease; }
+            .dismiss-btn:hover { color: var(--text); border-color: var(--border); }
+          `}</style>
           {(job.legitimacy === 'caution' || job.legitimacy === 'suspicious') && (
             <span style={{ fontSize: '11.5px', fontWeight: 500, color: legitimacyColor(job.legitimacy), display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 'var(--radius-full)', background: `color-mix(in oklch, ${legitimacyColor(job.legitimacy)} 14%, transparent)` }}>
               <ShieldAlert size={11} /> {job.legitimacy === 'suspicious' ? 'Possible ghost listing' : 'Staleness signals'}
@@ -771,6 +824,8 @@ export default function Jobs() {
   // Latest run, while it's still scoring (finished_at null) — drives the
   // "scoring in progress" hint and the poll that refreshes the list on completion.
   const [scanningRun, setScanningRun] = useState<Run | null>(null);
+  // Survivors of the latest finished run that L2 has not graded yet (grading limit).
+  const [ungraded, setUngraded] = useState(0);
 
   const status = params.get('status') ?? '';
   const l1 = params.get('l1') === '1';
@@ -850,6 +905,7 @@ export default function Jobs() {
           if (!live) return;
           if (latest.finished_at != null) {
             setScanningRun(null);
+            setUngraded(latest.l2_pending ?? 0);
             load();
           } else {
             setScanningRun(latest);
@@ -870,6 +926,7 @@ export default function Jobs() {
         pollRun(latest.id);
       } else {
         setScanningRun(null);
+        setUngraded(latest?.l2_pending ?? 0);
       }
     }).catch(() => {});
 
@@ -879,6 +936,17 @@ export default function Jobs() {
   const handleStatusChange = async (job: Job, newStatus: JobStatus) => {
     setJobs(prev => prev.map(j => j.id === job.id ? { ...j, status: newStatus } : j));
     await api.jobs.setStatus(job.id, newStatus).catch(() => load());
+  };
+
+  // Dismiss, then step to the next row so a run of "no"s is a run of clicks.
+  // Status each job had before it was dismissed this session, so Restore can undo
+  // exactly. After a reload it is unknown and Restore falls back to 'new'.
+  const prevStatus = useRef(new Map<number, JobStatus>());
+  const handleDismiss = (job: Job) => {
+    const idx = jobs.findIndex(j => j.id === job.id);
+    if (job.status !== 'hidden') prevStatus.current.set(job.id, job.status);
+    handleStatusChange(job, 'hidden');
+    if (idx >= 0 && idx < jobs.length - 1) setSelectedId(jobs[idx + 1].id);
   };
 
   const handleNotesSaved = useCallback((id: number, notes: string) => {
@@ -891,6 +959,8 @@ export default function Jobs() {
   // read live state via refs to avoid re-attaching the listener on every move.
   const jobsRef = useRef(jobs); jobsRef.current = jobs;
   const selRef = useRef(selectedId); selRef.current = selectedId;
+  const dismissRef = useRef<(id: number) => void>(() => {});
+  dismissRef.current = id => { const j = jobsRef.current.find(x => x.id === id); if (j && j.status !== 'hidden') handleDismiss(j); };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // A popover (StatusPill dropdown, Refine) already handled this Escape and
@@ -910,6 +980,7 @@ export default function Jobs() {
       const list = jobsRef.current;
       if (list.length === 0) return;
       const cur = selRef.current;
+      if (e.key === 'x') { if (cur) dismissRef.current(cur); return; }
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         const idx = cur ? list.findIndex(j => j.id === cur) : -1;
@@ -960,6 +1031,7 @@ export default function Jobs() {
               <span className="tnum" style={{ color: 'var(--text)' }}>{total.toLocaleString()}</span> {total === 1 ? 'role' : 'roles'}
               <span style={{ color: 'var(--text-faint)' }}> · ranked by fit</span>
               {scanningRun && <span style={{ color: 'var(--accent-text)' }}> · scoring in progress</span>}
+              {!scanningRun && ungraded > 0 && <span style={{ color: 'var(--text-faint)' }} title="Search the same query again to grade the next batch"> · <span className="tnum">{ungraded.toLocaleString()}</span> more not yet graded</span>}
               {total > PAGE_LIMIT && <span style={{ color: 'var(--text-faint)' }}> · showing top {PAGE_LIMIT}</span>}
             </p>
           )}
@@ -1037,6 +1109,8 @@ export default function Jobs() {
             job={selected}
             onClose={() => setSelectedId(null)}
             onStatusChange={s => handleStatusChange(selected, s)}
+            onDismiss={() => handleDismiss(selected)}
+            restoreTo={prevStatus.current.get(selected.id) ?? 'new'}
             onNotesSaved={handleNotesSaved}
             onPrev={idx > 0 ? () => setSelectedId(jobs[idx - 1].id) : undefined}
             onNext={idx >= 0 && idx < jobs.length - 1 ? () => setSelectedId(jobs[idx + 1].id) : undefined}

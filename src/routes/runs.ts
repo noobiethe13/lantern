@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import yaml from 'js-yaml';
 import { db } from '../db/client';
 import { bus, type ScanEvent } from '../runner/progress';
-import { runFull, createRun, tryAcquireScanLock, releaseScanLock, type RunSetup } from '../runner/scan';
+import { runFull, createRun, tryAcquireScanLock, releaseScanLock, countUngraded, type RunSetup } from '../runner/scan';
 import { llm } from '../llm';
 import { NLFilterShape } from '../llm/schemas';
 import { nlFilterPrompt } from '../llm/prompts';
@@ -21,6 +21,13 @@ function clampLimit(raw: string | undefined, def = 20, min = 1, max = 100): numb
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
+// Survivors a finished run left ungraded (the per-search L2 cap, or a failed
+// batch). Zero while the run is still scoring, since "pending" is then just
+// "not done yet".
+function pendingFor(run: Record<string, unknown>): number {
+  return run['finished_at'] == null ? 0 : countUngraded(run['id'] as number);
+}
+
 runs.get('/', c => {
   const limit = clampLimit(c.req.query('limit'));
   const rows = db.query<Record<string, unknown>, [number]>(
@@ -28,6 +35,7 @@ runs.get('/', c => {
   ).all(limit);
   return c.json({ runs: rows.map(r => ({
     ...r,
+    l2_pending: pendingFor(r),
     errors: r.errors_json ? JSON.parse(r.errors_json as string) : [],
     errors_json: undefined,
   })) });
@@ -53,6 +61,7 @@ runs.get('/:id', c => {
   if (!row) return c.json({ error: 'not found' }, 404);
   return c.json({
     ...row,
+    l2_pending: pendingFor(row),
     errors: row.errors_json ? JSON.parse(row.errors_json as string) : [],
     errors_json: undefined,
   });
@@ -131,7 +140,8 @@ runs.post('/scan', async c => {
   // criteria, not after — otherwise two overlapping searches can both pass the
   // 409 check, and the loser overwrites criteria / wipes verdicts out from under
   // the run that's actually executing (L3 in review notes).
-  if (!tryAcquireScanLock()) {
+  const lockToken = tryAcquireScanLock();
+  if (!lockToken) {
     return c.json({ error: 'A scan is already running' }, 409);
   }
 
@@ -142,13 +152,13 @@ runs.post('/scan', async c => {
     const text = await c.req.text();
     body = text.trim() ? JSON.parse(text) : {};
   } catch {
-    releaseScanLock();
+    releaseScanLock(lockToken);
     return c.json({ error: 'Malformed JSON body' }, 400);
   }
   const rawQuery = (body as { query?: unknown } | null)?.query;
   const query = typeof rawQuery === 'string' ? rawQuery.trim() : '';
   if (query.length > 500) {
-    releaseScanLock();
+    releaseScanLock(lockToken);
     return c.json({ error: 'Query is too long (max 500 characters)' }, 400);
   }
 
@@ -206,7 +216,7 @@ runs.post('/scan', async c => {
           // invalidate unconditionally rather than gating on a YAML diff.
           db.run('UPDATE jobs SET l2_verdict_json = NULL, l2_score = NULL, l2_fit = NULL WHERE l2_verdict_json IS NOT NULL');
         } catch (err) {
-          releaseScanLock();
+          releaseScanLock(lockToken);
           const msg = err instanceof Error ? err.message : String(err);
           return c.json({ error: `Could not interpret your search: ${msg}` }, 502);
         }
@@ -215,14 +225,14 @@ runs.post('/scan', async c => {
 
     setup = createRun(query || undefined);
   } catch (err) {
-    releaseScanLock();
+    releaseScanLock(lockToken);
     throw err;
   }
 
   // Start the scan in the background (don't await) — runFull owns the
   // already-acquired lock from here and releases it in its own finally,
   // however the scan ends. Progress goes through the bus directly.
-  runFull(setup).catch(err => {
+  runFull(setup, lockToken).catch(err => {
     console.error('[scan] unhandled error:', err);
   });
 

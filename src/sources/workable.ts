@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
-import { assertValidSlug, fetchText } from '../core/fetch';
+import { assertValidSlug, fetchJson, fetchText } from '../core/fetch';
+import { htmlToText } from './aggregator-util';
 
 const WORKABLE_HOST = 'apply.workable.com';
 // Large accounts get an "instructions" page back instead of a table (e.g.
@@ -69,8 +70,8 @@ export function parseWorkableMarkdown(text: string, company: string): Job[] {
 
     const posted = cols[6] ? Date.parse(cols[6]) : NaN;
 
-    // TODO(jd_text deferred): the public markdown feed carries no description
-    // body, only the row fields — so Workable jobs reach L2 without jd_text.
+    // jd_text is omitted: the markdown feed has only the row fields, enrich()
+    // fetches the description.
     jobs.push({
       external_id: code,
       title,
@@ -82,6 +83,24 @@ export function parseWorkableMarkdown(text: string, company: string): Job[] {
     });
   }
   return jobs;
+}
+
+const SHORTCODE_RX = /^[A-Za-z0-9]{1,32}$/;
+
+/**
+ * Description from a `/api/v2/accounts/{slug}/jobs/{shortcode}` payload. The
+ * list feed is markdown, but this per-job JSON endpoint is keyless and carries
+ * the HTML body as three fields. Requirements come before benefits so the text
+ * cap trims perks, not the role. Returns null when all three are empty.
+ */
+export function parseWorkableDetail(json: unknown): Partial<Job> | null {
+  const d = json as Record<string, unknown> | null;
+  const html = ['description', 'requirements', 'benefits']
+    .map(k => d?.[k])
+    .filter((t): t is string => typeof t === 'string' && t.trim() !== '')
+    .join('\n\n');
+  const jd = htmlToText(html);
+  return jd ? { jd_text: jd } : null;
 }
 
 export class WorkableAdapter implements SourceAdapter {
@@ -96,10 +115,13 @@ export class WorkableAdapter implements SourceAdapter {
     const feedUrl = `https://${WORKABLE_HOST}/${identifier}/jobs.md`;
     ctx.emitProgress(`Fetching ${display_name} (Workable)…`);
 
-    const text = await fetchText(feedUrl, { allowedHosts: [WORKABLE_HOST], retries: 2 });
+    const text = await fetchText(feedUrl, { allowedHosts: [WORKABLE_HOST], retries: 2, signal: ctx.abortSignal });
     let jobs = parseWorkableMarkdown(text, display_name);
 
     if (jobs.length === 0 && isWorkableSearchInstructionsPage(text)) {
+      // What the keyword searches return is not the whole board, so a later search with
+      // other keywords must not be answered from these stored jobs.
+      ctx.markQueryDependent?.();
       const keywords = (ctx.keywords ?? []).filter(k => k.trim()).slice(0, MAX_SEARCH_KEYWORDS);
       if (keywords.length === 0) {
         throw new Error(
@@ -117,7 +139,7 @@ export class WorkableAdapter implements SourceAdapter {
         const kwUrl = `${feedUrl}?query=${encodeURIComponent(kw)}`;
         let kwText: string;
         try {
-          kwText = await fetchText(kwUrl, { allowedHosts: [WORKABLE_HOST], retries: 2 });
+          kwText = await fetchText(kwUrl, { allowedHosts: [WORKABLE_HOST], retries: 2, signal: ctx.abortSignal });
         } catch {
           failures++;
           ctx.emitProgress(`${display_name}: search for "${kw}" failed`);
@@ -138,6 +160,22 @@ export class WorkableAdapter implements SourceAdapter {
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
     for (const job of jobs) {
       yield job;
+    }
+  }
+
+  /** Fetches the JD for one job the runner kept past L1. A fetch failure is
+   *  recoverable here (the job simply stays without a JD). */
+  async enrich(job: Job, ctx: SourceContext): Promise<Partial<Job> | null> {
+    const { identifier } = ctx.config as { identifier: string };
+    const code = job.external_id;
+    if (!code || !SHORTCODE_RX.test(code)) return null;
+    try {
+      assertValidSlug(identifier, 'Workable account slug');
+      const url = `https://${WORKABLE_HOST}/api/v2/accounts/${identifier}/jobs/${code}`;
+      return parseWorkableDetail(await fetchJson(url, { allowedHosts: [WORKABLE_HOST], retries: 1 }));
+    } catch (err) {
+      ctx.emitProgress(`Workable: JD enrich failed for ${code} (${err instanceof Error ? err.message : String(err)})`);
+      return null;
     }
   }
 }

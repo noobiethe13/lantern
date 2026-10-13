@@ -1,4 +1,7 @@
 import type { Job } from './job';
+import { employmentTypesInTitle, type EmploymentType } from './employment-type';
+import { explicitNoSponsorship } from './visa-sponsorship';
+import type { CompanyStage } from '../llm/schemas';
 import {
   countryLevel,
   hasWorldwideMarker,
@@ -31,12 +34,27 @@ export interface Criteria {
   salary_min_usd?: number | null;
   salary_currency?: string;
   exclude_companies?: string[];
+  /** Empty/absent = any. L1 drops only on an explicit contrary signal (see l1Filter). */
+  employment_types?: EmploymentType[];
+  /** L1 drops only a JD that explicitly refuses sponsorship. */
+  visa_sponsorship_required?: boolean;
+  /** Consumed by the L2 prompt, not L1. */
+  skills?: { must: string[]; nice: string[] };
+  /** exclude is also matched against title/company by L1, the rest is L2's. */
+  industries?: { include: string[]; exclude: string[] };
+  /** Consumed by the L2 prompt, not L1. */
+  company_stage?: CompanyStage[];
 }
 
 export interface L1Result {
   pass: boolean;
   reasons: string[];
 }
+
+/** The reason l1Filter emits when the title has no positive keyword. A job whose
+ *  ONLY reason is this one is a semantic-rescue candidate (runner/semantic-rescue.ts)
+ *  — rescue finds them by this exact reason, so keep the string stable. */
+export const TITLE_MISSING_REASON = 'title missing positive keyword';
 
 export interface L1Options {
   /** Reference time for the freshness gate (defaults to Date.now()). */
@@ -74,6 +92,19 @@ const SENIOR_TITLE_RE = new RegExp(
 // Criteria levels that count as "senior and up". If the allowed set names none of
 // these, the user asked for junior/mid only and the seniority gate engages.
 const SENIOR_LEVELS = new Set(['senior', 'staff', 'principal']);
+
+// Industry words that are also job functions: an "Insurance Data Engineer" or a
+// "Finance Platform Engineer" works in finance without the employer being excluded
+// for it, and "Security Engineer" says nothing about the industry at all. Such an
+// exclude term is matched against the company name only, never the title. Anything
+// industry-specific ("crypto", "casino", "tobacco") still matches titles.
+const FUNCTION_WORDS = new Set([
+  'finance', 'financial', 'banking', 'bank', 'insurance', 'security', 'health', 'healthcare',
+  'medical', 'payments', 'payment', 'ads', 'advertising', 'marketing', 'sales', 'data', 'legal',
+  'gaming', 'game', 'games', 'media', 'energy', 'education', 'retail', 'consulting', 'cloud',
+  'software', 'tech', 'technology', 'ai',
+]);
+const isFunctionWord = (t: Term) => FUNCTION_WORDS.has(normalizeForMatch(t.term).trim());
 
 /** Lowercase, strip diacritics, and treat -, _, / and dashes as spaces so
  *  "Full-Stack" / "CI/CD" read like "full stack" / "ci cd". */
@@ -119,6 +150,10 @@ interface Compiled {
   block: Term[];
   alwaysAllow: Term[];
   excludes: Term[];
+  industryExcludes: Term[];
+  /** Function-ambiguous industry words, matched against the company name only. */
+  industryExcludesCompanyOnly: Term[];
+  wantedTypes: Set<EmploymentType>;
   /** Places of allowed ∪ always_allow: where the user can work. */
   home: Set<PlaceKey>;
   floorCurrency: string;
@@ -147,6 +182,7 @@ function compile(c: Criteria): Compiled {
   const alwaysAllow = compileTerms(c.location?.always_allow, true);
   const home = new Set<PlaceKey>();
   for (const t of [...allowed, ...alwaysAllow]) for (const p of t.places) home.add(p);
+  const industryTerms = compileTerms(c.industries?.exclude, false);
   const k: Compiled = {
     titlePos: compileTerms(c.title?.positive, false),
     titleNeg: compileTerms(c.title?.negative, false),
@@ -154,6 +190,9 @@ function compile(c: Criteria): Compiled {
     block: compileTerms(c.location?.block, true),
     alwaysAllow,
     excludes: compileTerms(c.exclude_companies, false),
+    industryExcludes: industryTerms.filter((t) => !isFunctionWord(t)),
+    industryExcludesCompanyOnly: industryTerms.filter(isFunctionWord),
+    wantedTypes: new Set(c.employment_types ?? []),
     home,
     floorCurrency: (c.salary_currency?.trim() || 'USD').toUpperCase(),
   };
@@ -168,7 +207,7 @@ export function l1Filter(job: Job, c: Criteria, opts: L1Options = {}): L1Result 
   if (c.title) {
     const t = normalizeForMatch(job.title ?? '');
     if (k.titlePos.length > 0 && !k.titlePos.some((x) => x.re.test(t))) {
-      reasons.push(`title missing positive keyword`);
+      reasons.push(TITLE_MISSING_REASON);
     }
     const negHit = k.titleNeg.find((x) => x.re.test(t));
     if (negHit) reasons.push(`title has negative keyword "${negHit.term}"`);
@@ -247,6 +286,35 @@ export function l1Filter(job: Job, c: Criteria, opts: L1Options = {}): L1Result 
   if (k.excludes.length > 0) {
     const company = normalizeForMatch(job.company ?? '');
     if (k.excludes.some((x) => x.re.test(company))) reasons.push(`company excluded`);
+  }
+
+  // Industry excludes look at company and title only (function-ambiguous words at
+  // company only, see FUNCTION_WORDS). A JD mentioning "crypto" or
+  // "defense" in passing says nothing about the employer's industry, so the rest of
+  // the exclusion is L2's call.
+  if (k.industryExcludes.length > 0 || k.industryExcludesCompanyOnly.length > 0) {
+    const company = normalizeForMatch(job.company ?? '');
+    const title = normalizeForMatch(job.title ?? '');
+    const hit =
+      k.industryExcludes.find((x) => x.re.test(company) || x.re.test(title)) ??
+      k.industryExcludesCompanyOnly.find((x) => x.re.test(company));
+    if (hit) reasons.push(`industry excluded: "${hit.term}"`);
+  }
+
+  // Employment type: drop only when the title or the ATS's structured field states a
+  // type and none of the stated types is wanted. "Engineer (Contract) - Full time"
+  // states both, so a wanted one saves it. No stated type passes.
+  if (k.wantedTypes.size > 0) {
+    const stated = employmentTypesInTitle(normalizeForMatch(job.title ?? ''));
+    if (job.employment_type) stated.add(job.employment_type);
+    if (stated.size > 0 && ![...stated].some((t) => k.wantedTypes.has(t))) {
+      reasons.push(`employment type ${[...stated].join('/')} not wanted (${[...k.wantedTypes].join('/')})`);
+    }
+  }
+
+  if (c.visa_sponsorship_required) {
+    const refusal = explicitNoSponsorship(job.jd_text);
+    if (refusal) reasons.push(`no visa sponsorship ("${refusal}")`);
   }
 
   // Salary floor compares amounts only when both currencies are known and equal.

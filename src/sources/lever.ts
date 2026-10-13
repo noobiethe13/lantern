@@ -1,6 +1,8 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
 import { htmlToText } from './aggregator-util';
+import { normalizeEmploymentLabel } from '../core/employment-type';
+import { annualizePay } from '../core/salary';
 
 const LEVER_ALLOWED_HOSTS = ['api.lever.co'];
 
@@ -81,25 +83,26 @@ interface LeverSalary {
 
 /**
  * Map a Lever `salaryRange` (`{min, max, currency, interval}`) to native-
- * currency amounts. Only annual intervals are mapped — an hourly or monthly
- * figure must never be compared against L1's annual salary floor. Lever
- * intervals are strings like `per-year-salary`; absent interval is treated as
- * annual (the common case for posted ranges).
+ * currency ANNUAL amounts: an hourly or monthly interval is annualised
+ * (core/salary.ts) so it can meet L1's annual floor, and an unrecognised one is
+ * dropped. Lever intervals are strings like `per-year-salary`; absent interval is
+ * treated as annual (the common case for posted ranges).
  */
 function extractLeverSalary(salaryRange: unknown): LeverSalary {
   const none: LeverSalary = { min: null, max: null, currency: null };
   if (!salaryRange || typeof salaryRange !== 'object') return none;
   const sr = salaryRange as Record<string, unknown>;
-  const interval = sr['interval'];
-  if (typeof interval === 'string' && !/year|annual/i.test(interval)) return none;
   const minV = sr['min'];
   const maxV = sr['max'];
   if (typeof minV !== 'number' && typeof maxV !== 'number') return none;
-  return {
-    min: typeof minV === 'number' ? Math.round(minV) : null,
-    max: typeof maxV === 'number' ? Math.round(maxV) : null,
-    currency: typeof sr['currency'] === 'string' ? (sr['currency'] as string).toUpperCase() : null,
-  };
+  const currency = typeof sr['currency'] === 'string' ? (sr['currency'] as string).toUpperCase() : null;
+  const annual = annualizePay(
+    typeof minV === 'number' ? minV : null,
+    typeof maxV === 'number' ? maxV : null,
+    typeof sr['interval'] === 'string' ? sr['interval'] : 'per-year-salary',
+    currency,
+  );
+  return annual ? { ...annual, currency } : none;
 }
 
 export function parseLever(json: unknown, company: string): Job[] {
@@ -115,6 +118,9 @@ export function parseLever(json: unknown, company: string): Job[] {
 
     const { location, remote } = buildLeverLocation(job);
     const salary = extractLeverSalary(job['salaryRange']);
+    const employmentType = normalizeEmploymentLabel(
+      (job['categories'] as Record<string, unknown> | undefined)?.['commitment'],
+    );
     jobs.push({
       external_id: String(job['id'] ?? ''),
       title,
@@ -127,6 +133,7 @@ export function parseLever(json: unknown, company: string): Job[] {
       salary_currency: salary.currency,
       jd_text: buildLeverJdText(job),
       posted_at: (job['createdAt'] as number) ?? null,
+      ...(employmentType && { employment_type: employmentType }),
     });
   }
   return jobs;
@@ -144,7 +151,7 @@ export class LeverAdapter implements SourceAdapter {
     const apiUrl = `https://api.lever.co/v0/postings/${identifier}`;
     ctx.emitProgress(`Fetching ${display_name} (Lever)…`);
 
-    const json = await fetchJson(apiUrl, { allowedHosts: LEVER_ALLOWED_HOSTS, retries: 2 });
+    const json = await fetchJson(apiUrl, { allowedHosts: LEVER_ALLOWED_HOSTS, retries: 2, signal: ctx.abortSignal });
     const jobs = parseLever(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

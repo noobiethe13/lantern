@@ -27,8 +27,8 @@ function insertLock(pid: number | null, acquiredAt: number): void {
   memDb.run('INSERT INTO scan_locks (key, acquired_at, pid) VALUES (?, ?, ?)', ['scan', acquiredAt, pid]);
 }
 
-function lockRow(): { acquired_at: number; pid: number | null } | null {
-  return memDb.query('SELECT acquired_at, pid FROM scan_locks WHERE key = ?').get('scan') as never;
+function lockRow(): { acquired_at: number; pid: number | null; token: string | null } | null {
+  return memDb.query('SELECT acquired_at, pid, token FROM scan_locks WHERE key = ?').get('scan') as never;
 }
 
 /** Spawns a real child process and waits for it to exit, returning its now-dead pid. */
@@ -45,14 +45,14 @@ test('tryAcquireScanLock steals a lock held by a dead pid (real child process)',
   const pid = await deadPid();
   insertLock(pid, Date.now()); // fresh timestamp — staleness must come from the dead pid, not age
   expect(scan.getScanningState()).toBe(false);
-  expect(scan.tryAcquireScanLock()).toBe(true);
+  expect(scan.tryAcquireScanLock()).not.toBeNull();
   expect(lockRow()!.pid).toBe(process.pid);
 });
 
 test('tryAcquireScanLock refuses a lock held by a live pid regardless of age', () => {
   insertLock(process.pid, Date.now() - 5 * 3600_000); // 5h old, but the "holder" is alive (us)
   expect(scan.getScanningState()).toBe(true);
-  expect(scan.tryAcquireScanLock()).toBe(false);
+  expect(scan.tryAcquireScanLock()).toBeNull();
 });
 
 test('getScanningState reflects staleness the same way tryAcquireScanLock does (no separate check)', async () => {
@@ -131,7 +131,7 @@ test('recoverInterruptedScans leaves a genuinely live foreign-pid lock and its r
 test('a lock older than the 12h age ceiling is stale regardless of pid liveness', () => {
   insertLock(process.pid, Date.now() - 13 * 3600_000);
   expect(scan.getScanningState()).toBe(false);
-  expect(scan.tryAcquireScanLock()).toBe(true);
+  expect(scan.tryAcquireScanLock()).not.toBeNull();
 });
 
 test('tryAcquireScanLock clearing a stale lock also finishes the orphaned run it left behind', async () => {
@@ -141,7 +141,7 @@ test('tryAcquireScanLock clearing a stale lock also finishes the orphaned run it
     .query<{ id: number }, []>('INSERT INTO runs (started_at, sources_total) VALUES (0, 0) RETURNING id')
     .get()!.id;
 
-  expect(scan.tryAcquireScanLock()).toBe(true);
+  expect(scan.tryAcquireScanLock()).not.toBeNull();
 
   const run = memDb.query('SELECT finished_at, errors_json FROM runs WHERE id = ?').get(runId) as {
     finished_at: number | null;
@@ -247,4 +247,186 @@ test('createRun creates the run row synchronously and snapshots criteria once', 
   expect(setup.criteria).toBeTruthy();
   const run = memDb.query('SELECT query FROM runs WHERE id = ?').get(setup.runId) as { query: string };
   expect(run.query).toBe('my query');
+});
+
+test('releaseScanLock only deletes a lock the caller owns (a stale run cannot free a newer scan)', () => {
+  const stale = scan.tryAcquireScanLock()!;
+  // The stale run's lock is reclaimed and a newer scan takes over.
+  memDb.run("DELETE FROM scan_locks WHERE key = 'scan'");
+  const fresh = scan.tryAcquireScanLock()!;
+  expect(fresh).not.toBe(stale);
+
+  scan.releaseScanLock(stale);
+  expect(lockRow()).not.toBeNull();
+  expect(scan.getScanningState()).toBe(true);
+
+  scan.releaseScanLock(fresh);
+  expect(lockRow()).toBeNull();
+});
+
+test('startScanLockHeartbeat refreshes acquired_at for its own lock only, and stops cleanly', async () => {
+  const token = scan.tryAcquireScanLock()!;
+  memDb.run("UPDATE scan_locks SET acquired_at = 1 WHERE key = 'scan'");
+  const stop = scan.startScanLockHeartbeat(token, 10);
+  await new Promise(r => setTimeout(r, 60));
+  expect(lockRow()!.acquired_at).toBeGreaterThan(1);
+  stop();
+
+  memDb.run("UPDATE scan_locks SET acquired_at = 1 WHERE key = 'scan'");
+  await new Promise(r => setTimeout(r, 40));
+  expect(lockRow()!.acquired_at).toBe(1); // stopped
+
+  const stopOther = scan.startScanLockHeartbeat('someone-elses-token', 10);
+  await new Promise(r => setTimeout(r, 40));
+  expect(lockRow()!.acquired_at).toBe(1); // wrong token never touches the row
+  stopOther();
+});
+
+test('runFull releases only its own lock token', async () => {
+  const setup = scan.createRun('backend engineer');
+  const mine = scan.tryAcquireScanLock()!;
+  // Simulate a reclaim: another scan now holds the lock.
+  memDb.run("DELETE FROM scan_locks WHERE key = 'scan'");
+  const newer = scan.tryAcquireScanLock()!;
+  seedEmbeddingsOff();
+  setLlm(async () => ({ verdicts: [] }));
+  await scan.runFull(setup, mine);
+  expect(scan.getScanningState()).toBe(true);
+  scan.releaseScanLock(newer);
+});
+
+test('runL2Pass grades at most the configured cap, leaves the rest ungraded, and a repeat continues', async () => {
+  const sourceId = insertSource({ type: 'lever', enabled: 0 });
+  const runId = memDb
+    .query<{ id: number }, []>('INSERT INTO runs (started_at, sources_total) VALUES (0, 0) RETURNING id')
+    .get()!.id;
+  for (let i = 0; i < 50; i++) insertJob(sourceId, { last_run_id: runId, l1_pass: 1 });
+  memDb.run(`INSERT OR REPLACE INTO settings (key, value_json, updated_at) VALUES ('l2_cap', '{"maxJobs":20}', 0)`);
+
+  let calls = 0;
+  setLlm(async () => {
+    calls++;
+    // The next 20 still-ungraded jobs are exactly the batch being asked about.
+    const jobs = memDb.query('SELECT id FROM jobs WHERE l2_verdict_json IS NULL AND last_run_id = ? LIMIT 20').all(runId) as { id: number }[];
+    return {
+      verdicts: jobs.map(j => ({
+        job_id: j.id, fit: true, score: 0.8, seniority: 'unknown', stack_match: [],
+        remote_confirmed: false, salary_min_usd: null, reasons: ['ok'],
+      })),
+    };
+  });
+
+  const events: { type: string; msg: string; data?: Record<string, unknown> }[] = [];
+  bus.subscribe(runId, (e: ScanEvent) => events.push(e as never));
+  await scan.runL2Pass(runId, yaml.dump(NL_OK));
+
+  expect(calls).toBe(1);
+  expect(scan.countUngraded(runId)).toBe(30);
+  const done = events.find(e => e.type === 'l2_done')!;
+  expect(done.msg).toContain('30 more not yet graded');
+  expect(done.msg).toContain('limit 20');
+  expect(done.data?.ungraded).toBe(30);
+
+  await scan.runL2Pass(runId, yaml.dump(NL_OK));
+  expect(scan.countUngraded(runId)).toBe(10);
+  await scan.runL2Pass(runId, yaml.dump(NL_OK));
+  expect(scan.countUngraded(runId)).toBe(0);
+});
+
+test('a lock past the 24h absolute ceiling is reclaimed even with a fresh heartbeat and a live pid', () => {
+  memDb.run(
+    "INSERT INTO scan_locks (key, acquired_at, pid, token, started_at) VALUES ('scan', ?, ?, 'hung', ?)",
+    [Date.now(), process.pid, Date.now() - 25 * 3600_000],
+  );
+  expect(scan.getScanningState()).toBe(false);
+  const fresh = scan.tryAcquireScanLock();
+  expect(fresh).not.toBeNull();
+  scan.releaseScanLock('hung'); // the hung run's release cannot free the replacement
+  expect(lockRow()).not.toBeNull();
+  expect(lockRow()!.token).toBe(fresh);
+});
+
+test('a lock under 24h old with a live heartbeat is never reclaimed', () => {
+  memDb.run(
+    "INSERT INTO scan_locks (key, acquired_at, pid, token, started_at) VALUES ('scan', ?, ?, 'busy', ?)",
+    [Date.now(), process.pid, Date.now() - 20 * 3600_000],
+  );
+  expect(scan.tryAcquireScanLock()).toBeNull();
+});
+
+function seedRunWithJobs(count: number, extra: Record<string, unknown> = {}): { runId: number; ids: number[] } {
+  const sourceId = insertSource({ type: 'lever', enabled: 0 });
+  const runId = memDb
+    .query<{ id: number }, []>('INSERT INTO runs (started_at, sources_total) VALUES (0, 0) RETURNING id')
+    .get()!.id;
+  const ids = Array.from({ length: count }, () => insertJob(sourceId, { last_run_id: runId, l1_pass: 1, ...extra }));
+  return { runId, ids };
+}
+
+test('the cap keeps the top of the pre-ranked order, not insertion order', async () => {
+  const { runId, ids } = seedRunWithJobs(30);
+  memDb.run(`INSERT OR REPLACE INTO settings (key, value_json, updated_at) VALUES ('l2_cap', '{"maxJobs":20}', 0)`);
+  const graded: number[] = [];
+  setLlm(async () => {
+    const jobs = memDb.query('SELECT id FROM jobs WHERE id IN (' + ids.slice(-20).join(',') + ') AND l2_verdict_json IS NULL').all() as { id: number }[];
+    graded.push(...jobs.map(j => j.id));
+    return {
+      verdicts: jobs.map(j => ({
+        job_id: j.id, fit: true, score: 0.8, seniority: 'unknown', stack_match: [],
+        remote_confirmed: false, salary_min_usd: null, reasons: ['ok'],
+      })),
+    };
+  });
+  // A ranker that puts the newest jobs first.
+  await scan.runL2Pass(runId, yaml.dump(NL_OK), undefined, async (jobs: unknown[]) => [...jobs].reverse() as never);
+
+  const done = memDb.query('SELECT id FROM jobs WHERE l2_verdict_json IS NOT NULL').all() as { id: number }[];
+  expect(done.map(j => j.id).sort((a, b) => a - b)).toEqual(ids.slice(-20));
+  expect(scan.countUngraded(runId)).toBe(10);
+});
+
+test('hidden jobs are neither graded nor counted as ungraded', async () => {
+  const { runId, ids } = seedRunWithJobs(5);
+  memDb.run("UPDATE jobs SET status = 'hidden' WHERE id IN (?, ?)", [ids[0], ids[1]]);
+  expect(scan.countUngraded(runId)).toBe(3);
+  setLlm(async () => {
+    const jobs = memDb.query('SELECT id FROM jobs WHERE l2_verdict_json IS NULL AND status != \'hidden\' AND last_run_id = ?').all(runId) as { id: number }[];
+    return {
+      verdicts: jobs.map(j => ({
+        job_id: j.id, fit: true, score: 0.8, seniority: 'unknown', stack_match: [],
+        remote_confirmed: false, salary_min_usd: null, reasons: ['ok'],
+      })),
+    };
+  });
+  await scan.runL2Pass(runId, yaml.dump(NL_OK));
+  expect(memDb.query('SELECT COUNT(*) AS n FROM jobs WHERE l2_verdict_json IS NOT NULL').get()).toEqual({ n: 3 });
+});
+
+test('runFull clears its lock heartbeat timer when the run errors', async () => {
+  const sourceId = insertSource({ type: 'lever', enabled: 0 });
+  const setup = scan.createRun('backend engineer');
+  insertJob(sourceId, { last_run_id: setup.runId, l1_pass: 1, duplicate_urls: 'not-json' }); // makes the legitimacy pass throw
+  const token = scan.tryAcquireScanLock()!;
+
+  const realSet = globalThis.setInterval;
+  const realClear = globalThis.clearInterval;
+  const live = new Set<unknown>();
+  globalThis.setInterval = ((fn: () => void, ms?: number) => {
+    const h = realSet(fn, ms);
+    live.add(h);
+    return h;
+  }) as typeof setInterval;
+  globalThis.clearInterval = ((h: never) => {
+    live.delete(h);
+    realClear(h);
+  }) as typeof clearInterval;
+  try {
+    await expect(scan.runFull(setup, token)).rejects.toThrow();
+    expect(live.size).toBe(0);
+  } finally {
+    globalThis.setInterval = realSet;
+    globalThis.clearInterval = realClear;
+    for (const h of live) realClear(h as never);
+  }
+  expect(lockRow()).toBeNull();
 });

@@ -16,6 +16,9 @@ data/
 # Downloaded embedding-model weights (all-MiniLM-L6-v2) — fetched on first use
 models/
 
+# Resumable checkpoints written by scripts/discover-boards.ts
+.discovery-cache/
+
 # Bootstrap / per-session scratch
 .claude/session/
 

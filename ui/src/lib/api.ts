@@ -80,6 +80,9 @@ export interface Job {
   salary_min_usd: number | null;
   salary_max_usd: number | null;
   salary_currency: string | null;
+  // 'jd' when the figure was read from the description text rather than stated by
+  // the source. null/'ats' = the source's own field.
+  salary_source: 'ats' | 'jd' | null;
   posted_at: number | null;
   jd_text: string | null;
   content_hash: string;
@@ -89,6 +92,9 @@ export interface Job {
   liveness_checked_at: number | null;
   l1_pass: number;
   l1_reasons: string[] | null;
+  // 1 when semantic rescue promoted this job past the title rule (title had no
+  // search keyword but the description reads like the query).
+  l1_rescued: number;
   l2_verdict: Verdict | null;
   legitimacy: Legitimacy | null;
   legitimacy_reasons: LegitimacyReason[] | null;
@@ -102,6 +108,25 @@ export interface Job {
   status: JobStatus;
   applied_at: number | null;
   notes: string | null;
+  // Score delta (bounded, +/-0.1) the learned taste applied to this job's rank.
+  // null/absent when personalization is inactive or the job has no vector.
+  pref_adjust?: number | null;
+}
+
+export interface TasteStats {
+  triaged: number;
+  scored: number;
+  mean_score: number | null;
+  fit: number;
+  not_fit: number;
+}
+
+// How L2's grades line up with the user's triage. `liked` = shortlisted/applied,
+// `disliked` = dismissed. preference.active = a taste model is reordering results.
+export interface Calibration {
+  preference: { active: boolean; liked: number; disliked: number };
+  liked: TasteStats;
+  disliked: TasteStats;
 }
 
 // A job returned by the nearest-neighbour endpoint, with its cosine similarity
@@ -123,7 +148,17 @@ export type SourceType =
   | 'himalayas'
   | 'linkedin'
   | 'google_jobs'
-  | 'jobicy';
+  | 'jobicy'
+  | 'themuse'
+  | 'smartrecruiters_search'
+  | 'workingnomads'
+  | 'weworkremotely'
+  | 'remotive'
+  | 'jobtech'
+  | 'hn_hiring'
+  | 'breezy'
+  | 'rippling'
+  | 'teamtailor';
 
 export interface Source {
   id: number;
@@ -135,7 +170,10 @@ export interface Source {
   last_scan_at: number | null;
   last_status: string | null;
   last_error: string | null;
+  /** Start of the last complete successful fetch. last_scan_at is the last attempt. */
+  last_ok_fetch_at: number | null;
   created_at: number;
+  origin: string | null;
 }
 
 export interface Run {
@@ -150,6 +188,8 @@ export interface Run {
   errors: { source: string; error: string }[];
   trigger: string;
   query: string | null;
+  /** Survivors left ungraded when the run finished (cap or failed batches). */
+  l2_pending?: number;
 }
 
 // What Claude parsed the natural-language search into — surfaced as the
@@ -162,6 +202,12 @@ export interface InterpretedCriteria {
   salary_currency?: string;
   exclude_companies: string[];
   experience_years: { min: number | null; max: number | null } | null;
+  // Optional because a re-scan without a query echoes a stored row that may predate them.
+  employment_types?: string[];
+  visa_sponsorship_required?: boolean;
+  skills?: { must: string[]; nice: string[] };
+  industries?: { include: string[]; exclude: string[] };
+  company_stage?: string[];
 }
 
 // Format a salary amount in its native currency. Falls back to a "CODE amount"
@@ -219,6 +265,32 @@ export interface FreshnessSettings {
   maxAgeDays: number;
 }
 
+// Per-search cap on how many survivors L2 grades; the rest wait for a repeat search.
+export interface L2CapSettings {
+  maxJobs: number;
+}
+
+// How long a company board's last good fetch is reused. Within it a scan re-checks
+// the stored jobs against the new search instead of fetching the board. 0 = always fetch.
+export interface BoardCacheSettings {
+  ttlHours: number;
+}
+
+// Background refresher that keeps enabled company boards fresh so searches are served
+// from the board cache. `status` is read-only and live.
+export interface BoardRefreshStatus {
+  enabled: boolean;
+  running: boolean;
+  idleReason: 'off' | 'cache-off' | 'scan-running' | 'nothing-stale' | 'busy' | null;
+  boards: { total: number; fresh: number; stale: number; backedOff: number };
+  refreshing: string[];
+  restingHosts: string[];
+  lastTickAt: number | null;
+  lastTick: { attempted: number; ok: number; failed: number; aborted: number } | null;
+  nextTickAt: number | null;
+  lastError: { board: string; error: string; at: number } | null;
+}
+
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -251,6 +323,7 @@ export const api = {
       );
     },
     get: (id: number) => request<Job>(`/jobs/${id}`),
+    calibration: () => request<Calibration>('/jobs/calibration'),
     similar: (id: number, limit = 6) =>
       request<{ jobs: SimilarJob[] }>(`/jobs/${id}/similar?limit=${limit}`),
     duplicates: (id: number) =>
@@ -269,6 +342,14 @@ export const api = {
 
   sources: {
     list: () => request<{ sources: Source[] }>('/sources'),
+    // Discovered boards are thousands of rows, so they are counted and toggled in bulk
+    // instead of listed.
+    discovered: () => request<{ total: number; enabled: number }>('/sources/discovered'),
+    setDiscovered: (enabled: boolean) =>
+      request<{ ok: boolean; total: number; enabled: number }>('/sources/discovered', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      }),
     create: (body: {
       type: SourceType;
       identifier: string;
@@ -360,6 +441,33 @@ export const api = {
       request<{ ok: boolean; settings: FreshnessSettings }>('/settings/freshness', {
         method: 'PUT',
         body: JSON.stringify(settings),
+      }),
+  },
+
+  l2Cap: {
+    get: () => request<{ settings: L2CapSettings }>('/settings/l2-cap'),
+    save: (settings: L2CapSettings) =>
+      request<{ ok: boolean; settings: L2CapSettings }>('/settings/l2-cap', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
+  },
+
+  boardCache: {
+    get: () => request<{ settings: BoardCacheSettings }>('/settings/board-cache'),
+    save: (settings: BoardCacheSettings) =>
+      request<{ ok: boolean; settings: BoardCacheSettings }>('/settings/board-cache', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }),
+  },
+
+  boardRefresh: {
+    get: () => request<{ settings: { enabled: boolean }; status: BoardRefreshStatus }>('/settings/board-refresh'),
+    save: (enabled: boolean) =>
+      request<{ ok: boolean; settings: { enabled: boolean }; status: BoardRefreshStatus }>('/settings/board-refresh', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
       }),
   },
 

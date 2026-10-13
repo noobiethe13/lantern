@@ -11,7 +11,13 @@ const SOURCE_TYPE_CHECK = [
   'greenhouse', 'ashby', 'lever',
   'recruitee', 'smartrecruiters', 'workable', 'personio', 'bamboohr', 'workday',
   'remoteok', 'arbeitnow', 'himalayas', 'linkedin', 'google_jobs', 'jobicy',
+  'themuse', 'smartrecruiters_search', 'workingnomads', 'weworkremotely', 'remotive',
+  'jobtech', 'hn_hiring',
+  'breezy', 'rippling', 'teamtailor',
 ];
+
+const SOURCE_COLUMNS =
+  'id, type, identifier, display_name, enabled, config_json, last_scan_at, last_status, last_error, last_ok_fetch_at, refresh_failures, refresh_retry_at, created_at, origin';
 
 /**
  * Bring an existing DB's sources.type CHECK up to date. CREATE TABLE IF NOT
@@ -45,11 +51,17 @@ function migrateSourceTypeCheck(db: Database): void {
           last_scan_at    INTEGER,
           last_status     TEXT,
           last_error      TEXT,
+          last_ok_fetch_at INTEGER,
+          refresh_failures INTEGER NOT NULL DEFAULT 0,
+          refresh_retry_at INTEGER,
           created_at      INTEGER NOT NULL,
+          origin          TEXT,
           UNIQUE (type, identifier)
         )
       `);
-      db.run('INSERT INTO sources_new SELECT * FROM sources');
+      // Explicit columns: the origin column is appended by ALTER on old DBs, so
+      // a positional SELECT * would depend on that column order.
+      db.run(`INSERT INTO sources_new (${SOURCE_COLUMNS}) SELECT ${SOURCE_COLUMNS} FROM sources`);
       db.run('DROP TABLE sources');
       db.run('ALTER TABLE sources_new RENAME TO sources');
     });
@@ -84,7 +96,47 @@ export function runMigrations(db: Database): void {
   // the CHECK constraint would fail to re-insert. Extend this list if a type is retired.
   db.run("DELETE FROM sources WHERE type = 'indeed'");
 
+  // origin: NULL for seeded and user-added rows, 'discovered' for boards seeded
+  // from discovered-sources.json (bulk-toggled in Settings, hidden from the roster).
+  // Added before the CHECK rebuild so the rebuilt table and its copy include it.
+  const sourcesCols = db
+    .query<{ name: string }, []>("PRAGMA table_info(sources)")
+    .all()
+    .map(r => r.name);
+  if (!sourcesCols.includes('origin')) {
+    db.run('ALTER TABLE sources ADD COLUMN origin TEXT');
+  }
+  // last_ok_fetch_at: start of the last complete successful fetch, read by the board
+  // cache. NULL on existing rows, so every board is fetched live once before it can be
+  // served from cache. Added before the CHECK rebuild for the same reason as origin.
+  if (!sourcesCols.includes('last_ok_fetch_at')) {
+    db.run('ALTER TABLE sources ADD COLUMN last_ok_fetch_at INTEGER');
+  }
+  // refresh_failures / refresh_retry_at: the background refresher's per-board backoff
+  // (runner/board-refresher.ts). Existing rows start with no failures and no delay.
+  if (!sourcesCols.includes('refresh_failures')) {
+    db.run('ALTER TABLE sources ADD COLUMN refresh_failures INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!sourcesCols.includes('refresh_retry_at')) {
+    db.run('ALTER TABLE sources ADD COLUMN refresh_retry_at INTEGER');
+  }
+
   migrateSourceTypeCheck(db);
+
+  // token: per-acquisition owner id for scan_locks (see tryAcquireScanLock). A
+  // lock row left by an older build has NULL, which no live run owns.
+  const lockCols = db
+    .query<{ name: string }, []>("PRAGMA table_info(scan_locks)")
+    .all()
+    .map(r => r.name);
+  if (!lockCols.includes('token')) {
+    db.run('ALTER TABLE scan_locks ADD COLUMN token TEXT');
+  }
+  // started_at: when the lock was first taken (acquired_at is the heartbeat). NULL on a
+  // row from an older build, which then simply has no absolute ceiling.
+  if (!lockCols.includes('started_at')) {
+    db.run('ALTER TABLE scan_locks ADD COLUMN started_at INTEGER');
+  }
 
   // Idempotent ADD COLUMN — schema.sql only fires for fresh DBs since
   // CREATE TABLE IF NOT EXISTS skips column changes on existing tables.
@@ -100,6 +152,12 @@ export function runMigrations(db: Database): void {
   // Pre-existing rows get NULL, so they are not amount-filtered until re-scanned.
   if (!jobsCols.includes('salary_currency')) {
     db.run('ALTER TABLE jobs ADD COLUMN salary_currency TEXT');
+  }
+
+  // salary_source: 'ats' or 'jd' provenance of the salary. Pre-existing rows stay
+  // NULL, which reads as ats (text extraction did not exist before this column).
+  if (!jobsCols.includes('salary_source')) {
+    db.run('ALTER TABLE jobs ADD COLUMN salary_source TEXT');
   }
 
   // company_norm: indexed prefilter for the fuzzy-dedup candidate lookup in
@@ -134,6 +192,16 @@ export function runMigrations(db: Database): void {
   // duplicates endpoint queries `duplicate_of = ?`.
   if (!jobsCols.includes('duplicate_of')) {
     db.run('ALTER TABLE jobs ADD COLUMN duplicate_of INTEGER');
+  }
+  // l1_rescued: set by semantic rescue (runner/semantic-rescue.ts) on a job it
+  // promoted past the title rule. Existing rows default to 0 (not rescued).
+  if (!jobsCols.includes('l1_rescued')) {
+    db.run('ALTER TABLE jobs ADD COLUMN l1_rescued INTEGER NOT NULL DEFAULT 0');
+  }
+  // employment_type: the ATS's structured commitment field, an L1 input the board cache
+  // re-evaluates from stored rows. Existing rows stay NULL (unknown) until re-fetched.
+  if (!jobsCols.includes('employment_type')) {
+    db.run('ALTER TABLE jobs ADD COLUMN employment_type TEXT');
   }
   const stale = db
     .query<{ id: number; company: string }, []>(

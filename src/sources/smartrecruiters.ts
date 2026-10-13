@@ -1,5 +1,6 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
+import { enrichSmartRecruiters } from './smartrecruiters-detail';
 
 const SR_ALLOWED_HOSTS = ['api.smartrecruiters.com'];
 const SR_PAGE_SIZE = 100;
@@ -55,10 +56,7 @@ export function parseSmartRecruiters(json: unknown, company: string, identifier:
     const remote = loc['remote'] ? 'Remote' : '';
     const location = [fullLocation, remote].filter(Boolean).join(', ');
 
-    // TODO(jd_text deferred): the postings list endpoint has no description; the
-    // full jobAd needs a per-posting fetch (`/postings/{id}`). Deferred to avoid
-    // N extra requests per company — so SmartRecruiters jobs reach L2 without a
-    // description. Revisit if SR boards become a meaningful share of results.
+    // jd_text is omitted: the list endpoint has no description, enrich() fetches it.
     jobs.push({
       external_id: String(postingId ?? ''),
       title,
@@ -75,6 +73,7 @@ export function parseSmartRecruiters(json: unknown, company: string, identifier:
 
 export class SmartRecruitersAdapter implements SourceAdapter {
   type = 'smartrecruiters' as const;
+  salaryFromEnrich = true;
 
   async *fetch(ctx: SourceContext): AsyncIterable<Job> {
     const { identifier, display_name } = ctx.config as {
@@ -88,7 +87,7 @@ export class SmartRecruitersAdapter implements SourceAdapter {
     for (let page = 0; page < SR_MAX_PAGES; page++) {
       if (ctx.abortSignal.aborted) break;
       const apiUrl = buildPostingsUrl(identifier, page * SR_PAGE_SIZE);
-      const json = await fetchJson(apiUrl, { allowedHosts: SR_ALLOWED_HOSTS, retries: 2 });
+      const json = await fetchJson(apiUrl, { allowedHosts: SR_ALLOWED_HOSTS, retries: 2, signal: ctx.abortSignal });
       const pageItems = (json as { content?: unknown[] })?.content;
       const jobs = parseSmartRecruiters(json, display_name, identifier);
       for (const job of jobs) {
@@ -99,5 +98,9 @@ export class SmartRecruitersAdapter implements SourceAdapter {
       if (!Array.isArray(pageItems) || pageItems.length < SR_PAGE_SIZE) break;
     }
     ctx.emitProgress(`${display_name}: ${total} jobs`, total);
+  }
+
+  enrich(job: Job, ctx: SourceContext): Promise<Partial<Job> | null> {
+    return enrichSmartRecruiters(job, ctx);
   }
 }

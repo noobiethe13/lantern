@@ -2,6 +2,8 @@
 // arbeitnow, himalayas). These sources take the role/keyword from
 // `SourceContext.keywords` instead of a per-company slug.
 
+import { termMatches } from '../core/filter';
+
 const JD_MAX_CHARS = 8_000;
 
 // Named entities aggregator feeds actually use, beyond the basic five. Keyed by
@@ -119,4 +121,26 @@ export function matchesAny(keywords: string[], ...parts: (string | string[] | un
     .join(' ')
     .toLowerCase();
   return keywords.some(k => hay.includes(k.toLowerCase()));
+}
+
+/**
+ * Whole-word title prefilter for aggregators with no server-side search
+ * (workingnomads, weworkremotely, themuse). Uses the same matcher as L1's title
+ * rule, so it only drops postings L1 would drop anyway — and unlike
+ * {@link matchesAny}'s substring test, "java" does not match "JavaScript".
+ * Empty `keywords` matches nothing.
+ */
+export function titleMatchesKeywords(keywords: string[], title: string): boolean {
+  return keywords.some(k => termMatches(title, k));
+}
+
+/**
+ * Admission test for the full-feed aggregators: a posting is kept when a keyword
+ * is a whole word in its title OR in its description. A title-only match would
+ * drop "Software Engineer II" on a backend search before L1 (and semantic rescue,
+ * runner/semantic-rescue.ts) ever saw it. L1 still applies the title rule, so this
+ * widens what is stored, not what passes. Empty `keywords` matches nothing.
+ */
+export function postingMatchesKeywords(keywords: string[], title: string, body: string | undefined): boolean {
+  return titleMatchesKeywords(keywords, title) || (!!body && keywords.some(k => termMatches(body, k)));
 }

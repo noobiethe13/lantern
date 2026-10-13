@@ -123,6 +123,22 @@ describe('WorkableAdapter — large-account search fallback', () => {
     ]);
   });
 
+  test('flags the fetch as query-dependent only when it falls back to ?query= searches', async () => {
+    let flagged = 0;
+    const ctx = { ...makeCtx(['flutter']), markQueryDependent: () => { flagged++; } };
+    globalThis.fetch = (async (url: string) => {
+      if (url.includes('?query=')) return new Response(SEARCH_RESULT, { status: 200 });
+      return new Response(INSTRUCTIONS_PAGE, { status: 200 });
+    }) as unknown as typeof fetch;
+    for await (const _ of new WorkableAdapter().fetch(ctx)) void _;
+    expect(flagged).toBe(1);
+
+    flagged = 0;
+    globalThis.fetch = (async () => new Response(FEED, { status: 200 })) as unknown as typeof fetch;
+    for await (const _ of new WorkableAdapter().fetch({ ...ctx, config: { identifier: 'acme', display_name: 'Acme' } })) void _;
+    expect(flagged).toBe(0); // the whole default feed is query-independent
+  });
+
   test('throws a clear error when the instructions page is hit with no criteria keywords', async () => {
     globalThis.fetch = (async () => new Response(INSTRUCTIONS_PAGE, { status: 200 })) as unknown as typeof fetch;
 

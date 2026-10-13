@@ -218,6 +218,27 @@ test('a stored criteria row that no longer matches NLFilterShape regenerates via
   await waitUntilIdle();
 }, 10000);
 
+test('a stored row from before the intent fields (employment/visa/skills/...) regenerates for the same query', async () => {
+  const { employment_types: _a, visa_sponsorship_required: _b, skills: _c, industries: _d, company_stage: _e, ...preIntent } = NL_OK;
+  memDb.run(
+    `INSERT INTO criteria (id, yaml, source_text, updated_at) VALUES (1, ?, 'same query', 0)`,
+    [yaml.dump(preIntent)]
+  );
+  setLlm(async req => (req.task === 'nl-filter' ? NL_OK : { verdicts: [] }));
+
+  const res = await runs.request('/scan', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: J({ query: 'same query' }),
+  });
+  expect(res.status).toBe(202);
+  expect(llmCalls.filter(c => c.task === 'nl-filter').length).toBe(1);
+  const stored = memDb.query<{ yaml: string }, []>('SELECT yaml FROM criteria WHERE id = 1').get()!;
+  expect(yaml.load(stored.yaml)).toMatchObject({ employment_types: [], skills: { must: [], nice: [] } });
+
+  await waitUntilIdle();
+}, 10000);
+
 test('GET /:id/stream for an unknown run id returns 404 JSON without opening a stream', async () => {
   const res = await runs.request('/999999/stream');
   expect(res.status).toBe(404);

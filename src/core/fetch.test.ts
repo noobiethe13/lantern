@@ -403,3 +403,61 @@ describe('fetchJson / fetchText — body timeout, retry, and size cap', () => {
     expect(calls).toBe(1); // a huge body is deterministic, not transient — not worth retrying
   });
 });
+
+describe('fetchJson / fetchText — caller abort signal', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+  const URL_ = 'https://api.example.com/jobs';
+
+  test('passes the signal to fetch, so aborting cancels the in-flight request', async () => {
+    globalThis.fetch = ((_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal!.addEventListener('abort', () => reject(new Error('socket aborted')));
+      })) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    const pending = fetchJson(URL_, { signal: ctrl.signal, retries: 2, retryBaseDelayMs: 0 });
+    ctrl.abort();
+    await expect(pending).rejects.toThrow();
+  });
+
+  test('an already-aborted signal never reaches the network', async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response('{}');
+    }) as unknown as typeof fetch;
+    const ctrl = new AbortController();
+    ctrl.abort();
+    await expect(fetchText(URL_, { signal: ctrl.signal })).rejects.toThrow(/aborted/);
+    expect(calls).toBe(0);
+  });
+
+  test('an abort during the retry sleep stops the retries', async () => {
+    let calls = 0;
+    const ctrl = new AbortController();
+    globalThis.fetch = (async () => {
+      calls++;
+      return new Response('busy', { status: 503, headers: { 'retry-after': '20' } });
+    }) as unknown as typeof fetch;
+    const started = Date.now();
+    const pending = fetchJson(URL_, { signal: ctrl.signal, retries: 3 });
+    setTimeout(() => ctrl.abort(), 30);
+    await expect(pending).rejects.toThrow(/aborted/);
+    expect(calls).toBe(1);
+    expect(Date.now() - started).toBeLessThan(2_000); // not the 20s Retry-After
+  });
+
+  test('a failure after the abort is not retried', async () => {
+    let calls = 0;
+    const ctrl = new AbortController();
+    globalThis.fetch = (async () => {
+      calls++;
+      ctrl.abort();
+      throw new Error('network down');
+    }) as unknown as typeof fetch;
+    await expect(fetchJson(URL_, { signal: ctrl.signal, retries: 3, retryBaseDelayMs: 0 })).rejects.toThrow('network down');
+    expect(calls).toBe(1);
+  });
+});

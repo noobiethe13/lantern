@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 
 describe('applyLegitimacyPass', () => {
-  test('scores every surfaced row in exactly one db.transaction (not one autocommit per row)', () => {
+  test('scores every surfaced row in exactly one db.transaction (not one autocommit per row)', async () => {
     const sourceId = memDb
       .query<{ id: number }, []>(
         "INSERT INTO sources (type, identifier, display_name, enabled, created_at) VALUES ('greenhouse','acme','Acme',1,0) RETURNING id"
@@ -36,7 +36,7 @@ describe('applyLegitimacyPass', () => {
       return realTransaction(fn);
     };
 
-    const scored = applyLegitimacyPass(runId);
+    const scored = await applyLegitimacyPass(runId);
     memDb.transaction = realTransaction; // restore for later tests in this file
 
     expect(scored).toBe(5);
@@ -51,7 +51,7 @@ describe('applyLegitimacyPass', () => {
     }
   });
 
-  test('only scores rows scoped to the given run', () => {
+  test('only scores rows scoped to the given run', async () => {
     const sourceId = memDb
       .query<{ id: number }, []>(
         "INSERT INTO sources (type, identifier, display_name, enabled, created_at) VALUES ('lever','globex','Globex',1,0) RETURNING id"
@@ -71,7 +71,43 @@ describe('applyLegitimacyPass', () => {
       [sourceId, runIdB],
     );
 
-    const scored = applyLegitimacyPass(runIdB);
+    const scored = await applyLegitimacyPass(runIdB);
     expect(scored).toBe(1);
+  });
+});
+
+describe('applyLegitimacyPass slicing', () => {
+  test('commits in slices, scores every row once, and skips unchanged scores', async () => {
+    const sourceId = memDb
+      .query<{ id: number }, []>(
+        "INSERT INTO sources (type, identifier, display_name, enabled, created_at) VALUES ('lever','slices','Slices',1,0) RETURNING id"
+      )
+      .get()!.id;
+    const runId = memDb.query<{ id: number }, []>('INSERT INTO runs (started_at) VALUES (1) RETURNING id').get()!.id;
+    memDb.transaction(() => {
+      for (let i = 0; i < 1100; i++) {
+        memDb.run(
+          `INSERT INTO jobs (source_id, url, title, company, content_hash, first_seen, last_seen, last_run_id)
+           VALUES (?, ?, 'T', 'Slices', 'h', 0, 0, ?)`,
+          [sourceId, `https://jobs.lever.co/slices/${i}`, runId],
+        );
+      }
+    })();
+
+    let writes = 0;
+    const realRun = memDb.run.bind(memDb);
+    memDb.run = (sql: string, params?: unknown[]) => {
+      if (String(sql).startsWith('UPDATE jobs SET legitimacy')) writes++;
+      return realRun(sql, params as never);
+    };
+    try {
+      expect(await applyLegitimacyPass(runId)).toBe(1100);
+      expect(writes).toBe(1100);
+      expect(await applyLegitimacyPass(runId)).toBe(1100);
+      expect(writes).toBe(1100); // nothing changed, nothing rewritten
+    } finally {
+      memDb.run = realRun;
+    }
+    expect(memDb.query('SELECT COUNT(*) AS n FROM jobs WHERE legitimacy IS NULL').get()).toEqual({ n: 0 });
   });
 });

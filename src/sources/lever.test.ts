@@ -51,14 +51,24 @@ describe('parseLever', () => {
     });
   });
 
-  test('skips non-annual intervals (never compare hourly to an annual floor)', () => {
+  test('annualises hourly and monthly intervals, drops one-time and unknown ones', () => {
     const json = [{
       id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
       salaryRange: { min: 40, max: 60, currency: 'USD', interval: 'per-hour-wage' },
     }];
     expect(parseLever(json, 'Acme')[0]).toMatchObject({
-      salary_min_usd: null, salary_max_usd: null, salary_currency: null,
+      salary_min_usd: 83200, salary_max_usd: 124800, salary_currency: 'USD',
     });
+    const monthly = [{
+      id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
+      salaryRange: { min: 4000, max: 5000, currency: 'EUR', interval: 'per-month-salary' },
+    }];
+    expect(parseLever(monthly, 'Acme')[0]).toMatchObject({ salary_min_usd: 48000, salary_max_usd: 60000, salary_currency: 'EUR' });
+    const bonus = [{
+      id: '1', text: 'X', hostedUrl: 'https://jobs.lever.co/acme/1',
+      salaryRange: { min: 5000, max: 5000, currency: 'USD', interval: 'one-time-bonus' },
+    }];
+    expect(parseLever(bonus, 'Acme')[0]).toMatchObject({ salary_min_usd: null, salary_currency: null });
   });
 
   test('nulls when salaryRange absent or malformed', () => {
@@ -199,5 +209,17 @@ describe('parseLever', () => {
       const json = [{ id: '1', hostedUrl: 'https://jobs.lever.co/acme/1' }];
       expect(parseLever(json, 'Acme')).toEqual([]);
     });
+  });
+});
+
+describe('parseLever employment type', () => {
+  const base = { id: '1', text: 'Engineer', hostedUrl: 'https://jobs.lever.co/acme/1' };
+  test('maps categories.commitment', () => {
+    expect(parseLever([{ ...base, categories: { commitment: 'Part-time' } }], 'Acme')[0].employment_type).toBe('part_time');
+    expect(parseLever([{ ...base, categories: { commitment: 'Contract' } }], 'Acme')[0].employment_type).toBe('contract');
+  });
+  test('leaves it absent when missing or unrecognised', () => {
+    expect(parseLever([base], 'Acme')[0]).not.toHaveProperty('employment_type');
+    expect(parseLever([{ ...base, categories: { commitment: 'Permanent' } }], 'Acme')[0]).not.toHaveProperty('employment_type');
   });
 });

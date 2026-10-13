@@ -88,7 +88,7 @@ describe('parseJobicy', () => {
     expect(job.salary_currency).toBe('USD');
   });
 
-  test('does not map salary for a non-annual period', () => {
+  test('annualises salary for a non-annual period', () => {
     const json = {
       jobs: [
         {
@@ -98,9 +98,9 @@ describe('parseJobicy', () => {
       ],
     };
     const job = parseJobicy(json)[0];
-    expect(job.salary_min_usd).toBeNull();
-    expect(job.salary_max_usd).toBeNull();
-    expect(job.salary_currency).toBeNull();
+    expect(job.salary_min_usd).toBe(83200);
+    expect(job.salary_max_usd).toBe(124800);
+    expect(job.salary_currency).toBe('USD');
   });
 
   test('omits jd_text (undefined, not "") when description is missing', () => {

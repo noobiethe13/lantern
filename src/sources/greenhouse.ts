@@ -69,7 +69,7 @@ export class GreenhouseAdapter implements SourceAdapter {
     const apiUrl = `https://boards-api.greenhouse.io/v1/boards/${identifier}/jobs?content=true`;
     ctx.emitProgress(`Fetching ${display_name} (Greenhouse)…`);
 
-    const json = await fetchJson(apiUrl, { allowedHosts: GREENHOUSE_ALLOWED_HOSTS, retries: 2 });
+    const json = await fetchJson(apiUrl, { allowedHosts: GREENHOUSE_ALLOWED_HOSTS, retries: 2, signal: ctx.abortSignal });
     const jobs = parseGreenhouse(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

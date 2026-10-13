@@ -1,6 +1,8 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { assertValidSlug, fetchJson } from '../core/fetch';
 import { htmlToText } from './aggregator-util';
+import { normalizeEmploymentLabel } from '../core/employment-type';
+import { annualizePay, periodFromLabel } from '../core/salary';
 
 const ASHBY_ALLOWED_HOSTS = ['api.ashbyhq.com'];
 
@@ -14,25 +16,32 @@ interface AshbySalary {
  * Pull the annual base-salary range + its native currency out of an Ashby
  * `compensation` object (present with `includeCompensation=true`). Salary lives
  * in `summaryComponents[]` as `{compensationType, interval, currencyCode,
- * minValue, maxValue}`; we take the `Salary` component billed per year and
- * ignore equity/bonus/hourly so we never compare an hourly rate against an
- * annual floor. Returns nulls when no annual salary component is present.
+ * minValue, maxValue}`; we take the `Salary` component (preferring one billed per
+ * year) and ignore equity/bonus. An hourly/monthly component is annualised
+ * (core/salary.ts) so it can meet L1's annual floor. Returns nulls when there is
+ * no usable salary component.
  */
 function extractAshbySalary(compensation: unknown): AshbySalary {
   const none: AshbySalary = { min: null, max: null, currency: null };
   const comp = compensation as { summaryComponents?: unknown[] } | undefined;
   const components = Array.isArray(comp?.summaryComponents) ? comp!.summaryComponents! : [];
-  const salary = components
+  const salaries = components
     .map((c) => c as Record<string, unknown>)
-    .find((c) => c['compensationType'] === 'Salary' && c['interval'] === '1 YEAR');
+    .filter((c) => c['compensationType'] === 'Salary');
+  const salary =
+    salaries.find((c) => periodFromLabel(c['interval']) === 'year') ??
+    salaries.find((c) => periodFromLabel(c['interval']) != null);
   if (!salary) return none;
   const minV = salary['minValue'];
   const maxV = salary['maxValue'];
-  return {
-    min: typeof minV === 'number' ? Math.round(minV) : null,
-    max: typeof maxV === 'number' ? Math.round(maxV) : null,
-    currency: typeof salary['currencyCode'] === 'string' ? (salary['currencyCode'] as string) : null,
-  };
+  const currency = typeof salary['currencyCode'] === 'string' ? (salary['currencyCode'] as string) : null;
+  const annual = annualizePay(
+    typeof minV === 'number' ? minV : null,
+    typeof maxV === 'number' ? maxV : null,
+    salary['interval'],
+    currency,
+  );
+  return annual ? { ...annual, currency } : none;
 }
 
 /**
@@ -86,6 +95,7 @@ export function parseAshby(json: unknown, company: string): Job[] {
     const salary = extractAshbySalary(job['compensation']);
     const { location, remote } = buildAshbyLocation(job);
     const jd = htmlToText((job['descriptionPlain'] as string) || (job['descriptionHtml'] as string));
+    const employmentType = normalizeEmploymentLabel(job['employmentType']);
     jobs.push({
       external_id: String(job['id'] ?? ''),
       title,
@@ -100,6 +110,7 @@ export function parseAshby(json: unknown, company: string): Job[] {
       posted_at: job['publishedAt']
         ? new Date(job['publishedAt'] as string).getTime()
         : null,
+      ...(employmentType && { employment_type: employmentType }),
     });
   }
   return jobs;
@@ -123,6 +134,7 @@ export class AshbyAdapter implements SourceAdapter {
       allowedHosts: ASHBY_ALLOWED_HOSTS,
       timeoutMs: 30_000,
       retries: 2,
+      signal: ctx.abortSignal,
     });
     const jobs = parseAshby(json, display_name);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);

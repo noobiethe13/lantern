@@ -22,7 +22,7 @@ function eventColor(event: ScanEvent): string {
   switch (event.type) {
     case 'source_done': case 'l2_done': case 'done': return 'var(--success)';
     case 'source_error': case 'error': return 'var(--danger)';
-    case 'l2_progress': case 'l2_start': case 'scan_done': return 'var(--accent-text)';
+    case 'l2_progress': case 'l2_start': case 'scan_done': case 'rescue_start': case 'rescue_done': return 'var(--accent-text)';
     default: return 'var(--text-faint)';
   }
 }
@@ -34,7 +34,7 @@ function EventIcon({ event }: { event: ScanEvent }) {
     case 'source_done': return <CheckCircle2 {...p} />;
     case 'source_error': case 'error': return <XCircle {...p} />;
     case 'l2_progress': return <Sparkles {...p} />;
-    case 'l2_start': case 'l2_done': case 'scan_done': return <BarChart3 {...p} />;
+    case 'l2_start': case 'l2_done': case 'scan_done': case 'rescue_start': case 'rescue_done': return <BarChart3 {...p} />;
     case 'done': return <Flag {...p} />;
     default: return <Circle {...p} />;
   }
@@ -222,7 +222,9 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
     c.title.positive.length || c.location.remote_required || c.location.allowed.length ||
     c.location.block?.length || c.location.always_allow?.length ||
     c.salary_min_usd || c.seniority.allowed.length || c.title.negative.length ||
-    c.exclude_companies.length || expLabel;
+    c.exclude_companies.length || expLabel || c.employment_types?.length ||
+    c.visa_sponsorship_required || c.skills?.must.length || c.skills?.nice.length ||
+    c.industries?.include.length || c.industries?.exclude.length || c.company_stage?.length;
   if (!hasAny) return null;
   const positive = c.title.positive.slice(0, 4);
   const allowed = c.location.allowed.slice(0, 3);
@@ -230,6 +232,10 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
   const block = (c.location.block ?? []).slice(0, 3);
   const negative = c.title.negative.slice(0, 3);
   const excluded = c.exclude_companies.slice(0, 3);
+  const must = (c.skills?.must ?? []).slice(0, 4);
+  const nice = (c.skills?.nice ?? []).slice(0, 3);
+  const industriesIn = (c.industries?.include ?? []).slice(0, 2);
+  const industriesOut = (c.industries?.exclude ?? []).slice(0, 3);
   return (
     <div style={{ marginTop: 'var(--space-md)', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', animation: 'fadeIn 220ms ease' }}>
       <span style={{ fontSize: '12px', color: 'var(--text-faint)', marginRight: 2 }}>Understood as</span>
@@ -249,6 +255,17 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
       {overflowBadge(c.title.negative.slice(3), 'n-more')}
       {excluded.map(x => <Badge key={`x-${x}`} tone="danger">not {x}</Badge>)}
       {overflowBadge(c.exclude_companies.slice(3), 'x-more')}
+      {(c.employment_types ?? []).map(t => <Badge key={`et-${t}`} tone="blue">{t.replace('_', ' ')}</Badge>)}
+      {c.visa_sponsorship_required && <Badge tone="blue">needs visa sponsorship</Badge>}
+      {(c.company_stage ?? []).map(t => <Badge key={`cs-${t}`} tone="neutral">{t}</Badge>)}
+      {must.map(k => <Badge key={`sm-${k}`} tone="violet">must {k}</Badge>)}
+      {overflowBadge((c.skills?.must ?? []).slice(4), 'sm-more')}
+      {nice.map(k => <Badge key={`sn-${k}`} tone="dim">{k} a plus</Badge>)}
+      {overflowBadge((c.skills?.nice ?? []).slice(3), 'sn-more')}
+      {industriesIn.map(k => <Badge key={`ii-${k}`} tone="neutral">{k} only</Badge>)}
+      {overflowBadge((c.industries?.include ?? []).slice(2), 'ii-more')}
+      {industriesOut.map(k => <Badge key={`io-${k}`} tone="danger">no {k}</Badge>)}
+      {overflowBadge((c.industries?.exclude ?? []).slice(3), 'io-more')}
     </div>
   );
 }

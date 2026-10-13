@@ -73,7 +73,7 @@ export class PersonioAdapter implements SourceAdapter {
     const feedUrl = `https://${host}/xml?language=en`;
     ctx.emitProgress(`Fetching ${display_name} (Personio)…`);
 
-    const xml = await fetchText(feedUrl, { allowedHosts: [host], retries: 2 });
+    const xml = await fetchText(feedUrl, { allowedHosts: [host], retries: 2, signal: ctx.abortSignal });
     const jobs = parsePersonioXml(xml, display_name, host);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

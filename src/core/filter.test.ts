@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { l1Filter, termMatches, type Criteria } from './filter';
+import { l1Filter, termMatches, TITLE_MISSING_REASON, type Criteria } from './filter';
 import type { Job } from './job';
 
 function job(overrides: Partial<Job> = {}): Job {
@@ -30,6 +30,31 @@ describe('l1Filter — title', () => {
     const r = l1Filter(job(), c);
     expect(r.pass).toBe(false);
     expect(r.reasons.join()).toContain('negative keyword');
+  });
+});
+
+describe('l1Filter — title-only misses (semantic-rescue candidates)', () => {
+  const c: Criteria = {
+    title: { positive: ['frontend'], negative: ['intern'] },
+    location: { remote_required: false, allowed: ['uk'] },
+    salary_min_usd: 100_000,
+  };
+
+  test('a title-only failure carries exactly the stable title reason', () => {
+    expect(l1Filter(job(), c).reasons).toEqual([TITLE_MISSING_REASON]);
+  });
+
+  test('any additional failure makes the reasons list differ, so it is not a candidate', () => {
+    const other = (over: Partial<Job>) => l1Filter(job(over), c).reasons;
+    expect(other({ location: 'Berlin, Germany' })).toEqual([TITLE_MISSING_REASON, expect.stringContaining('not in allowed list')]);
+    expect(other({ title: 'Backend Intern' })).toHaveLength(2);
+    expect(other({ salary_min_usd: 50_000, salary_max_usd: 60_000, salary_currency: 'USD' })).toHaveLength(2);
+    expect(other({ posted_at: 1 })).toEqual([TITLE_MISSING_REASON]); // freshness gate is off without maxAgeDays
+    expect(l1Filter(job({ posted_at: 1 }), c, { now: 40 * 86_400_000, maxAgeDays: 7 }).reasons).toHaveLength(2);
+  });
+
+  test('a passing title yields no title reason', () => {
+    expect(l1Filter(job({ title: 'Frontend Engineer' }), c).reasons).toEqual([]);
   });
 });
 
@@ -537,6 +562,127 @@ describe('l1Filter — blank terms are ignored', () => {
   test('whitespace around terms is trimmed', () => {
     const c: Criteria = { title: { positive: ['  flutter '], negative: [] } };
     expect(l1Filter(job({ title: 'Flutter Developer' }), c).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — employment type', () => {
+  const c = (types: NonNullable<Criteria['employment_types']>): Criteria => ({ employment_types: types });
+
+  test('an unstated type passes', () => {
+    expect(l1Filter(job({ title: 'Backend Engineer' }), c(['contract'])).pass).toBe(true);
+  });
+
+  test('no employment_types means any', () => {
+    expect(l1Filter(job({ title: 'Engineering Intern' }), c([])).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Engineering Intern' }), {}).pass).toBe(true);
+  });
+
+  test('drops a title that states an unwanted type', () => {
+    const r = l1Filter(job({ title: 'Software Engineering Intern' }), c(['full_time']));
+    expect(r.pass).toBe(false);
+    expect(r.reasons[0]).toContain('employment type internship not wanted');
+  });
+
+  test('keeps a title that states a wanted type', () => {
+    expect(l1Filter(job({ title: 'Backend Engineer (Contract)' }), c(['contract'])).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Summer Internship' }), c(['internship'])).pass).toBe(true);
+  });
+
+  test('a title stating several types passes when any is wanted', () => {
+    expect(l1Filter(job({ title: 'Engineer (Contract / Full-time)' }), c(['full_time'])).pass).toBe(true);
+  });
+
+  test('whole-word: International and Internal are not interns', () => {
+    expect(l1Filter(job({ title: 'International Sales Lead' }), c(['full_time'])).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Internal Tools Engineer' }), c(['full_time'])).pass).toBe(true);
+  });
+
+  test('a contract-management title is not a contract role', () => {
+    expect(l1Filter(job({ title: 'Contract Manager' }), c(['full_time'])).pass).toBe(true);
+  });
+
+  test('uses the ATS structured field when the title is silent', () => {
+    expect(l1Filter(job({ title: 'Backend Engineer', employment_type: 'part_time' }), c(['full_time'])).pass).toBe(false);
+    expect(l1Filter(job({ title: 'Backend Engineer', employment_type: 'full_time' }), c(['full_time'])).pass).toBe(true);
+  });
+
+  test('title and structured field are unioned, so either can save the job', () => {
+    expect(l1Filter(job({ title: 'Engineer (Contract)', employment_type: 'full_time' }), c(['contract'])).pass).toBe(true);
+  });
+
+  test('the reason is distinct from the semantic-rescue reason', () => {
+    const r = l1Filter(job({ title: 'Marketing Intern' }), {
+      title: { positive: ['backend'], negative: [] },
+      employment_types: ['full_time'],
+    });
+    expect(r.reasons).toHaveLength(2);
+    expect(r.reasons[0]).toBe(TITLE_MISSING_REASON);
+    expect(r.reasons).not.toEqual([TITLE_MISSING_REASON]);
+  });
+});
+
+describe('l1Filter — visa sponsorship', () => {
+  const need: Criteria = { visa_sponsorship_required: true };
+
+  test('drops a JD that explicitly refuses sponsorship', () => {
+    const r = l1Filter(job({ jd_text: 'Great role. We are unable to sponsor visas.' }), need);
+    expect(r.pass).toBe(false);
+    expect(r.reasons[0]).toContain('no visa sponsorship');
+  });
+
+  test('passes a JD that is silent, missing, or offers sponsorship', () => {
+    expect(l1Filter(job({ jd_text: 'Build things in Go.' }), need).pass).toBe(true);
+    expect(l1Filter(job(), need).pass).toBe(true);
+    expect(l1Filter(job({ jd_text: 'We can sponsor visas.' }), need).pass).toBe(true);
+  });
+
+  test('does nothing unless the user needs sponsorship', () => {
+    const jd = 'We are unable to sponsor visas.';
+    expect(l1Filter(job({ jd_text: jd }), { visa_sponsorship_required: false }).pass).toBe(true);
+    expect(l1Filter(job({ jd_text: jd }), {}).pass).toBe(true);
+  });
+});
+
+describe('l1Filter — industries.exclude', () => {
+  const c: Criteria = { industries: { include: [], exclude: ['crypto', 'defense'] } };
+
+  test('drops on a whole-word hit in the company name', () => {
+    const r = l1Filter(job({ company: 'Crypto Labs' }), c);
+    expect(r.pass).toBe(false);
+    expect(r.reasons[0]).toBe('industry excluded: "crypto"');
+  });
+
+  test('drops on a whole-word hit in the title', () => {
+    expect(l1Filter(job({ title: 'Defense Systems Engineer' }), c).pass).toBe(false);
+  });
+
+  test('never reads the job description', () => {
+    expect(l1Filter(job({ jd_text: 'We are not a crypto company but our clients work in defense.' }), c).pass).toBe(true);
+  });
+
+  test('is whole-word, so cryptography and defensive pass', () => {
+    expect(l1Filter(job({ title: 'Cryptography Engineer' }), c).pass).toBe(true);
+    expect(l1Filter(job({ title: 'Defensive Security Analyst' }), c).pass).toBe(true);
+  });
+
+  test('function-ambiguous words match the company name only, never the title', () => {
+    const f: Criteria = { industries: { include: [], exclude: ['finance', 'security', 'health', 'insurance', 'crypto'] } };
+    for (const title of ['Finance Platform Engineer', 'Security Engineer', 'Health Data Scientist', 'Insurance Data Engineer']) {
+      expect(l1Filter(job({ title }), f).pass).toBe(true);
+    }
+    expect(l1Filter(job({ company: 'Acme Insurance Group' }), f).pass).toBe(false);
+    expect(l1Filter(job({ company: 'Health Catalyst' }), f).pass).toBe(false);
+    // Industry-specific words still match titles.
+    expect(l1Filter(job({ title: 'Crypto Exchange Engineer' }), f).pass).toBe(false);
+  });
+
+  test('industries.include, skills and company_stage never gate L1', () => {
+    const only: Criteria = {
+      industries: { include: ['climate'], exclude: [] },
+      skills: { must: ['rust'], nice: ['go'] },
+      company_stage: ['startup'],
+    };
+    expect(l1Filter(job(), only).pass).toBe(true);
   });
 });
 

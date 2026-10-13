@@ -14,13 +14,19 @@ import { BatchVerdictShape, BatchVerdictWithResumeShape } from '../llm/schemas';
 import { batchVerdictPrompt } from '../llm/prompts';
 import { activeResumeText } from '../routes/resume';
 import { applyLegitimacyPass } from './legitimacy';
+import { fillSalaryFromJd, hasSalary, type SalarySource } from './jd-salary';
 import { applySemanticDedupPass } from './semantic-dedup';
+import { applySemanticRescue } from './semantic-rescue';
 import { prerankSurvivors } from './preranker';
 import { criteriaToQueryText } from '../core/embed';
 import { runPool } from '../core/pool';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 import { AGGREGATOR_TYPES } from '../routes/sources';
+import { seedDiscoveredSources } from './discovered-seed';
+import { l2MaxJobs } from '../routes/l2-cap';
+import { boardCacheTtlMs } from '../routes/board-cache';
+import { evaluateCachedBoards, mergeL1, partitionByCache } from './board-cache';
 
 interface SeedSource {
   type: string;
@@ -38,6 +44,8 @@ interface DbSource {
   display_name: string;
   enabled: number;
   config_json: string | null;
+  // Start of the last complete successful fetch, or null if never fetched.
+  last_ok_fetch_at?: number | null;
 }
 
 export interface L2JobRow {
@@ -58,12 +66,20 @@ export interface L2JobRow {
 // been over an hour.
 const SCAN_LOCK_STALE_MS = 60 * 60 * 1000; // 1 hour
 
-// Absolute backstop, independent of pid liveness: a lock held this long is stale
-// no matter what process.kill(pid, 0) reports. Without this, a foreign OS pid the
+// Absolute backstop, independent of pid liveness: a lock not refreshed for this
+// long is stale no matter what process.kill(pid, 0) reports. A live run refreshes
+// acquired_at on a heartbeat (startScanLockHeartbeat), so this only ever fires for
+// a lock nobody is tending. Without this, a foreign OS pid the
 // kernel happens to have reused for a live, unrelated process makes
 // isProcessAlive() true forever and every future search 409s — this is the only
 // thing that ever reclaims that case.
 const SCAN_LOCK_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// The heartbeat keeps acquired_at fresh for as long as the process lives, so a run
+// hung inside a live server would otherwise hold the lock until restart. Measured
+// from started_at, which the heartbeat never touches, this reclaims it regardless.
+// The hung run's token-scoped release then cannot free the lock that replaced it.
+const SCAN_LOCK_ABSOLUTE_MAX_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -82,11 +98,12 @@ function isProcessAlive(pid: number): boolean {
 interface ScanLockRow {
   acquired_at: number;
   pid: number | null;
+  started_at: number | null;
 }
 
 function readScanLock(): ScanLockRow | null {
   return db
-    .query<ScanLockRow, []>("SELECT acquired_at, pid FROM scan_locks WHERE key = 'scan'")
+    .query<ScanLockRow, []>("SELECT acquired_at, pid, started_at FROM scan_locks WHERE key = 'scan'")
     .get();
 }
 
@@ -103,6 +120,7 @@ function readScanLock(): ScanLockRow | null {
 // getScanningState) never pass it — there, a matching own-pid really is us.
 function isLockStale(row: ScanLockRow, atBoot = false): boolean {
   if (Date.now() - row.acquired_at > SCAN_LOCK_MAX_AGE_MS) return true;
+  if (row.started_at != null && Date.now() - row.started_at > SCAN_LOCK_ABSOLUTE_MAX_MS) return true;
   if (row.pid != null) {
     if (row.pid === process.pid) return atBoot;
     return !isProcessAlive(row.pid);
@@ -132,7 +150,11 @@ function markOrphanRunsInterrupted(): void {
   console.log(`[recovery] marked ${orphans.length} interrupted run(s) as finished`);
 }
 
-export function tryAcquireScanLock(): boolean {
+/**
+ * Take the single scan lock. Returns the acquisition token the caller must pass
+ * to releaseScanLock / startScanLockHeartbeat, or null when a live scan holds it.
+ */
+export function tryAcquireScanLock(): string | null {
   const row = readScanLock();
   if (row && isLockStale(row)) {
     db.run('DELETE FROM scan_locks WHERE key = ?', ['scan']);
@@ -141,20 +163,46 @@ export function tryAcquireScanLock(): boolean {
     markOrphanRunsInterrupted();
   }
   try {
+    const token = crypto.randomUUID();
     db.run(
-      'INSERT INTO scan_locks (key, acquired_at, pid) VALUES (?, ?, ?)',
-      ['scan', Date.now(), typeof process !== 'undefined' ? process.pid ?? null : null],
+      'INSERT INTO scan_locks (key, acquired_at, pid, token, started_at) VALUES (?, ?, ?, ?, ?)',
+      ['scan', Date.now(), typeof process !== 'undefined' ? process.pid ?? null : null, token, Date.now()],
     );
-    return true;
+    return token;
   } catch (err) {
     // PRIMARY KEY conflict — another (live) scan holds the lock.
-    if (String(err).includes('UNIQUE') || String(err).includes('constraint')) return false;
+    if (String(err).includes('UNIQUE') || String(err).includes('constraint')) return null;
     throw err;
   }
 }
 
-export function releaseScanLock(): void {
-  db.run('DELETE FROM scan_locks WHERE key = ?', ['scan']);
+/**
+ * Release the lock only if `token` still owns it. A run whose lock was reclaimed
+ * as stale (and taken by a newer scan) must not delete the newer scan's lock when
+ * it finally finishes.
+ */
+export function releaseScanLock(token: string): void {
+  db.run("DELETE FROM scan_locks WHERE key = 'scan' AND token = ?", [token]);
+}
+
+const SCAN_LOCK_HEARTBEAT_MS = 60_000;
+
+/**
+ * Keep the lock's acquired_at fresh while the run is alive, so the 12h staleness
+ * ceiling measures time since the last sign of life rather than run length.
+ * Returns a stop function. Stops itself if the lock is no longer ours.
+ */
+export function startScanLockHeartbeat(token: string, intervalMs = SCAN_LOCK_HEARTBEAT_MS): () => void {
+  const timer = setInterval(() => {
+    const res = db.run("UPDATE scan_locks SET acquired_at = ? WHERE key = 'scan' AND token = ?", [Date.now(), token]);
+    if (res.changes === 0) {
+      console.warn('[scan] lost the scan lock, heartbeat stopping');
+      clearInterval(timer);
+    }
+  }, intervalMs);
+  // Never keep the process alive just to refresh a lock.
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 export function getScanningState(): boolean {
@@ -210,7 +258,7 @@ export function loadCriteria(): Criteria {
   return yaml.load(loadCriteriaRaw()) as Criteria;
 }
 
-function seedSources(): void {
+export function seedSources(): void {
   const seedPath = join(process.cwd(), 'src/config/seed-sources.yml');
   const raw = yaml.load(readFileSync(seedPath, 'utf-8')) as {
     sources: SeedSource[];
@@ -231,12 +279,27 @@ function seedSources(): void {
     'UPDATE sources SET enabled = 0 WHERE type = ? AND identifier = ? AND enabled = 1'
   );
 
-  const now = Date.now();
-  for (const s of raw.sources) {
-    const configJson = s.config ? JSON.stringify(s.config) : null;
-    insert.run(s.type, s.identifier, s.display_name, s.enabled ? 1 : 0, configJson, now);
-    if (!s.enabled && !AGGREGATOR_TYPES.has(s.type)) disable.run(s.type, s.identifier);
-  }
+  // A maintainer promoting a discovered board into the curated seed list means
+  // "on by default": adopt the row out of the bulk-toggled discovered pool.
+  const adopt = db.prepare<unknown, [string, string]>(
+    `UPDATE sources SET origin = NULL, enabled = 1
+     WHERE id = (SELECT id FROM sources WHERE type = ? AND lower(identifier) = lower(?) AND origin = 'discovered'
+                 ORDER BY id LIMIT 1)`
+  );
+
+  // One transaction: hundreds of single-statement commits otherwise, each an fsync.
+  db.transaction(() => {
+    const now = Date.now();
+    for (const s of raw.sources) {
+      const configJson = s.config ? JSON.stringify(s.config) : null;
+      // Adopt first and skip the insert when it matched: a case-variant seed slug
+      // would otherwise insert a second, enabled row next to the adopted one.
+      const adopted = s.enabled ? adopt.run(s.type, s.identifier).changes > 0 : false;
+      if (!adopted) insert.run(s.type, s.identifier, s.display_name, s.enabled ? 1 : 0, configJson, now);
+      if (!s.enabled && !AGGREGATOR_TYPES.has(s.type)) disable.run(s.type, s.identifier);
+    }
+    seedDiscoveredSources(now);
+  })();
 }
 
 interface FuzzyCandidateRow {
@@ -284,6 +347,8 @@ interface ExistingUrlRow {
   salary_min_usd: number | null;
   salary_max_usd: number | null;
   salary_currency: string | null;
+  salary_source: string | null;
+  employment_type: string | null;
   jd_text: string | null;
   l1_pass: number;
   l1_reasons: string | null;
@@ -291,50 +356,75 @@ interface ExistingUrlRow {
 }
 
 /**
- * Merge an incoming L1 verdict into a row this run may already have claimed.
- * When the row was already stamped by THIS run (a fold or an earlier yield of the
- * same posting), a pass wins over a fail so an L1-passing posting never vanishes
- * into a failing row. When the row's verdict is from an earlier run, it was graded
- * under that run's criteria and is stale — the incoming verdict replaces it (a
- * plain MAX would let an old pass smuggle a now-failing job into this run's L2).
+ * Insert or refresh one fetched job. `runId` null is the background refresher's mode: it
+ * stores what the board shows (content, salary, posted date, sighting, last_seen, the
+ * verdict/embedding wipe on a real edit) but takes no part in any search, so it never stamps
+ * last_run_id and leaves l1_pass/l1_reasons/l1_rescued exactly as they are (a new row starts
+ * unevaluated). The next scan's cache phase grades the stored job under ITS criteria.
  */
-function mergeL1(
-  row: { l1_pass: number; l1_reasons: string | null; last_run_id: number | null },
-  runId: number,
-  l1Pass: boolean,
-  reasonsJson: string | null,
-): { pass: number; reasons: string | null } {
-  if (row.last_run_id === runId && row.l1_pass === 1 && !l1Pass) {
-    return { pass: 1, reasons: row.l1_reasons };
-  }
-  return { pass: l1Pass ? 1 : 0, reasons: reasonsJson };
-}
-
-function upsertJob(
+export function upsertJob(
   job: Job,
   sourceId: number,
-  runId: number,
+  runId: number | null,
   l1Pass: boolean,
-  l1Reasons: string[]
+  l1Reasons: string[],
+  keepStoredSalary = false,
+  salarySource: SalarySource | null = null,
+  // False for a cached board's job pushed back through here for enrich(): nothing was
+  // fetched, so last_seen and the board sighting must not move.
+  fetched = true,
 ): 'new' | 'seen' {
   const now = Date.now();
   const reasonsJson = l1Reasons.length > 0 ? JSON.stringify(l1Reasons) : null;
+  // 0 clears a stale rescue flag along with the verdict it belonged to. A refresh keeps both.
+  const rescueKeep = runId === null ? 1 : 0;
+  // Which board showed this row, whoever owns it: the board cache reads this to know what
+  // a board lists now (a row can be owned by another source, via the same URL or a fold).
+  const sighted = (jobId: number) =>
+    fetched &&
+    db.query<unknown, [number, number, number]>(
+      `INSERT INTO board_sightings (source_id, job_id, seen_at) VALUES (?, ?, ?)
+       ON CONFLICT (source_id, job_id) DO UPDATE SET seen_at = excluded.seen_at`
+    ).run(sourceId, jobId, now);
 
   const existing = db
     .query<ExistingUrlRow, [string]>(
       `SELECT id, source_id, content_hash, title, company, location, remote,
-              salary_min_usd, salary_max_usd, salary_currency, jd_text, l1_pass, l1_reasons, last_run_id
+              salary_min_usd, salary_max_usd, salary_currency, salary_source, employment_type, jd_text, l1_pass, l1_reasons, last_run_id
        FROM jobs WHERE url = ?`
     )
     .get(job.url);
 
   if (existing) {
-    const l1 = mergeL1(existing, runId, l1Pass, reasonsJson);
+    const l1 = runId === null
+      ? { pass: existing.l1_pass, reasons: existing.l1_reasons }
+      : mergeL1(existing, runId, l1Pass, reasonsJson);
+    const stampRun = runId ?? existing.last_run_id;
     // A JD the adapter didn't fetch this time (e.g. LinkedIn past its enrich
     // budget) is not a content change — hash over the JD the row would keep.
-    const effective: Job = { ...job, jd_text: job.jd_text ?? existing.jd_text ?? undefined };
+    // Salary is treated the same way, but only when the caller says it is
+    // enrich-sourced (Rippling's pay range) and this sighting is listing-only.
+    // For listing-salary adapters a missing salary IS an edit (employer removed
+    // it) and must null the row and clear the verdict.
+    // A JD-derived salary is a function of the JD, so a sighting that carries no JD
+    // of its own (LinkedIn past its enrich budget) keeps it too: the stored JD
+    // still says the same thing.
+    const keepStored =
+      !hasSalary(job) && (keepStoredSalary || (job.jd_text == null && existing.salary_source === 'jd'));
+    const effective: Job = {
+      ...job,
+      jd_text: job.jd_text ?? existing.jd_text ?? undefined,
+      ...(keepStored
+        ? {
+            salary_min_usd: existing.salary_min_usd,
+            salary_max_usd: existing.salary_max_usd,
+            salary_currency: existing.salary_currency,
+          }
+        : {}),
+    };
     const hash = contentHash(effective);
     const row = toDbRow(effective, sourceId, hash);
+    const rowSalarySource = keepStored ? existing.salary_source : salarySource;
 
     // Content may only be refreshed by the source that originally owns this row.
     // Two sources can legitimately report the same canonical URL (a company
@@ -350,22 +440,50 @@ function upsertJob(
     // with the job. Only the fields a real repost would actually change (or a JD
     // that showed up where none existed before) count as "changed" — never a JD
     // that merely re-renders differently from the same underlying text.
+    const salaryDiffers =
+      row.salary_min_usd !== existing.salary_min_usd ||
+      row.salary_max_usd !== existing.salary_max_usd ||
+      row.salary_currency !== existing.salary_currency;
+    // A salary read from the JD where the row had none is a backfill, not an edit:
+    // it is derived from text already hashed, so after an upgrade the first
+    // re-scan must not wipe every salaryless job's verdict and embedding. Any
+    // later movement of a stored salary (JD edit, employer change) still counts.
+    const salaryBackfill =
+      salaryDiffers &&
+      salarySource === 'jd' &&
+      existing.salary_min_usd == null &&
+      existing.salary_max_usd == null &&
+      existing.salary_currency == null;
     const changed =
       sameSource &&
       (row.title !== existing.title ||
         row.company !== existing.company ||
         row.location !== existing.location ||
         row.remote !== existing.remote ||
-        row.salary_min_usd !== existing.salary_min_usd ||
-        row.salary_max_usd !== existing.salary_max_usd ||
-        row.salary_currency !== existing.salary_currency ||
+        (salaryDiffers && !salaryBackfill) ||
         (existing.jd_text == null && row.jd_text != null));
+
+    // employment_type feeds L1 only (it is not in content_hash or `changed`), so a flip
+    // is not an edit and never clears the verdict. It follows every sighting by the
+    // owning source so the board cache re-runs L1 on what a live fetch would have seen.
+    const employmentType = sameSource ? row.employment_type : existing.employment_type;
+    // The earlier-date rule is per owning source: another source's date for the same URL
+    // (an aggregator's, an employer repost) must not pin the job stale.
+    const postedAt = sameSource ? row.posted_at : null;
+    const seenAt = fetched ? now : null;
 
     if (!changed) {
       db.run(
-        'UPDATE jobs SET last_seen = ?, last_run_id = ?, l1_pass = ?, l1_reasons = ?, content_hash = ? WHERE id = ?',
-        [now, runId, l1.pass, l1.reasons, hash, existing.id]
+        'UPDATE jobs SET last_seen = COALESCE(?, last_seen), last_run_id = ?, l1_pass = ?, l1_reasons = ?, l1_rescued = l1_rescued * ?, content_hash = ?, employment_type = ?, posted_at = COALESCE(MIN(posted_at, ?), posted_at, ?) WHERE id = ?',
+        [seenAt, stampRun, l1.pass, l1.reasons, rescueKeep, hash, employmentType, postedAt, postedAt, existing.id]
       );
+      if (sameSource && salaryBackfill) {
+        db.run(
+          'UPDATE jobs SET salary_min_usd = ?, salary_max_usd = ?, salary_currency = ?, salary_source = ? WHERE id = ?',
+          [row.salary_min_usd, row.salary_max_usd, row.salary_currency, rowSalarySource, existing.id]
+        );
+      }
+      sighted(existing.id);
       return 'seen';
     }
 
@@ -374,18 +492,21 @@ function upsertJob(
     // content — the L2 verdict and the embedding. posted_at, first_seen and the
     // user's triage fields (status, notes, applied_at) are deliberately kept.
     db.run(
-      `UPDATE jobs SET last_seen = ?, last_run_id = ?, l1_pass = ?, l1_reasons = ?,
+      `UPDATE jobs SET last_seen = COALESCE(?, last_seen), last_run_id = ?, l1_pass = ?, l1_reasons = ?, l1_rescued = l1_rescued * ?,
          title = ?, company = ?, company_norm = ?, location = ?, remote = ?,
-         salary_min_usd = ?, salary_max_usd = ?, salary_currency = ?, jd_text = ?, content_hash = ?,
+         salary_min_usd = ?, salary_max_usd = ?, salary_currency = ?, salary_source = ?, employment_type = ?, jd_text = ?, content_hash = ?,
+         posted_at = COALESCE(MIN(posted_at, ?), posted_at, ?),
          l2_verdict_json = NULL, l2_score = NULL, l2_fit = NULL, embedding = NULL
        WHERE id = ?`,
       [
-        now, runId, l1.pass, l1.reasons,
+        seenAt, stampRun, l1.pass, l1.reasons, rescueKeep,
         row.title, row.company, normalizeCompany(job.company), row.location, row.remote,
-        row.salary_min_usd, row.salary_max_usd, row.salary_currency, row.jd_text, row.content_hash,
+        row.salary_min_usd, row.salary_max_usd, row.salary_currency, rowSalarySource, employmentType, row.jd_text, row.content_hash,
+        postedAt, postedAt,
         existing.id,
       ]
     );
+    sighted(existing.id);
     return 'seen';
   }
 
@@ -398,23 +519,26 @@ function upsertJob(
   if (fuzzy) {
     const dupes: string[] = fuzzy.duplicate_urls ? JSON.parse(fuzzy.duplicate_urls) : [];
     if (job.url !== fuzzy.url && !dupes.includes(job.url)) dupes.push(job.url);
-    const l1 = mergeL1(fuzzy, runId, l1Pass, reasonsJson);
+    const l1 = runId === null
+      ? { pass: fuzzy.l1_pass, reasons: fuzzy.l1_reasons }
+      : mergeL1(fuzzy, runId, l1Pass, reasonsJson);
     db.run(
-      'UPDATE jobs SET last_seen = ?, last_run_id = ?, duplicate_urls = ?, l1_pass = ?, l1_reasons = ? WHERE id = ?',
-      [now, runId, dupes.length > 0 ? JSON.stringify(dupes) : null, l1.pass, l1.reasons, fuzzy.id]
+      'UPDATE jobs SET last_seen = ?, last_run_id = ?, duplicate_urls = ?, l1_pass = ?, l1_reasons = ?, l1_rescued = l1_rescued * ? WHERE id = ?',
+      [now, runId ?? fuzzy.last_run_id, dupes.length > 0 ? JSON.stringify(dupes) : null, l1.pass, l1.reasons, rescueKeep, fuzzy.id]
     );
+    sighted(fuzzy.id);
     return 'seen';
   }
 
   const hash = contentHash(job);
   const row = toDbRow(job, sourceId, hash);
 
-  db.run(
+  const inserted = db.run(
     `INSERT INTO jobs (
       source_id, external_id, url, title, company, company_norm, location, remote,
-      salary_min_usd, salary_max_usd, salary_currency, posted_at, jd_text, content_hash,
+      salary_min_usd, salary_max_usd, salary_currency, salary_source, posted_at, employment_type, jd_text, content_hash,
       first_seen, last_seen, last_run_id, l1_pass, l1_reasons
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       row.source_id,
       row.external_id,
@@ -427,7 +551,9 @@ function upsertJob(
       row.salary_min_usd,
       row.salary_max_usd,
       row.salary_currency,
+      salarySource,
       row.posted_at,
+      row.employment_type,
       row.jd_text,
       row.content_hash,
       now,
@@ -437,6 +563,7 @@ function upsertJob(
       reasonsJson,
     ]
   );
+  sighted(Number(inserted.lastInsertRowid));
   return 'new';
 }
 
@@ -464,7 +591,7 @@ const L2_BATCH_TIMEOUT_MS = L2_BATCH_SIZE * 24_000;
 // Wall-clock cap on one source's whole scan (fetch + enrich). Generous because
 // Workday and LinkedIn paginate slowly with politeness delays, but finite so one
 // hung board can never stall runScan (the pool would otherwise wait on it forever).
-const SOURCE_DEADLINE_MS = 8 * 60_000;
+export const SOURCE_DEADLINE_MS = 8 * 60_000;
 
 // Max adapter.enrich() calls per source per run. Enrichment costs one extra
 // request per job (LinkedIn also sleeps before each), so it is capped rather than
@@ -527,7 +654,7 @@ export function createRun(query?: string): RunSetup {
 
   const sources = db
     .query<DbSource, []>(
-      'SELECT id, type, identifier, display_name, enabled, config_json FROM sources WHERE enabled = 1'
+      'SELECT id, type, identifier, display_name, enabled, config_json, last_ok_fetch_at FROM sources WHERE enabled = 1'
     )
     .all();
 
@@ -555,19 +682,61 @@ export function createRun(query?: string): RunSetup {
   return { runId, sources, criteria, criteriaYaml, criteriaSourceText };
 }
 
-class SourceDeadlineError extends Error {
+/**
+ * Validates one adapter-yielded job against the contract, or null when it is malformed. A
+ * malformed date string parses to NaN in several adapters, so that is treated as undated
+ * rather than rejecting an otherwise valid job.
+ */
+export function parseListingJob(raw: Job): Job | null {
+  const candidate =
+    typeof raw.posted_at === 'number' && !Number.isFinite(raw.posted_at) ? { ...raw, posted_at: null } : raw;
+  const parsed = JobShape.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+/** The posted_at `sourceId` itself stored for `url`: null when undated, undefined when it doesn't own a row. */
+export function storedPostedAt(url: string, sourceId: number): number | null | undefined {
+  return db
+    .query<{ posted_at: number | null }, [string, number]>('SELECT posted_at FROM jobs WHERE url = ? AND source_id = ?')
+    .get(url, sourceId)?.posted_at;
+}
+
+/**
+ * The earlier of the stored and fetched posted dates. upsertJob keeps the first-sighting
+ * date, but a fetch can re-derive a later one (Workday's "Posted 30+ Days Ago" is recomputed
+ * from today, Rippling's date arrives only via enrich). L1's freshness gate uses this on both
+ * the live and the cached path, so they agree and a relative date can't drift a job newer.
+ */
+export function earliestPosted(stored: number | null | undefined, fetched: number | null | undefined): number | null {
+  if (stored == null) return fetched ?? null;
+  return fetched == null ? stored : Math.min(stored, fetched);
+}
+
+export class SourceDeadlineError extends Error {
   constructor(ms: number) {
     super(`timed out after ${Math.round(ms / 1000)}s`);
     this.name = 'SourceDeadlineError';
   }
 }
 
-/** True when this URL is already stored with a description — re-enriching it would
- * spend budget (and a request) on a JD upsertJob keeps anyway (COALESCE). */
-function hasStoredJd(url: string): boolean {
-  return (
-    db.query<{ x: number }, [string]>('SELECT 1 AS x FROM jobs WHERE url = ? AND jd_text IS NOT NULL').get(url) != null
-  );
+interface StoredEnrichedRow {
+  salary_min_usd: number | null;
+  salary_max_usd: number | null;
+  salary_currency: string | null;
+  salary_source: string | null;
+  jd_text: string;
+}
+
+/** The salary and JD of a URL already stored with a description, or null when it
+ * isn't stored that way. Re-enriching such a URL would spend budget (and a request)
+ * on a JD upsertJob keeps anyway (COALESCE). */
+function storedEnrichedRow(url: string): StoredEnrichedRow | null {
+  return db
+    .query<StoredEnrichedRow, [string]>(
+      `SELECT salary_min_usd, salary_max_usd, salary_currency, salary_source, jd_text
+       FROM jobs WHERE url = ? AND jd_text IS NOT NULL`
+    )
+    .get(url);
 }
 
 /**
@@ -620,14 +789,20 @@ export async function runScan(
   // itself and is recorded in runErrors, never aborts the run). Run via a
   // sliding-window pool so the next source starts the instant one finishes — no
   // batch waits on its slowest member.
-  const scanOne = async (source: DbSource): Promise<void> => {
+  // `fromCache` is set for a cached board's L1 survivors that still need enrich(): they run
+  // the live pipeline from the stored row instead of a fetch, and the board's fetch
+  // bookkeeping (last_scan_at, last_status, last_ok_fetch_at) is left alone.
+  const scanOne = async (source: DbSource, fromCache?: Job[]): Promise<void> => {
     const adapter = getAdapter(source.type);
     if (!adapter) {
       console.log(`  [skip] no adapter for type: ${source.type}`);
       return;
     }
 
-    bus.emit({ runId, type: 'source_start', msg: `Scanning ${source.display_name}`, data: { source: source.display_name } });
+    bus.emit({ runId, type: 'source_start', msg: `Scanning ${source.display_name}${fromCache ? ' (cached)' : ''}`, data: { source: source.display_name } });
+    // Taken before the fetch: every job it sees is stamped last_seen >= this, which is how
+    // the board cache tells the jobs on the board from ones that have since dropped off.
+    const fetchStartedAt = Date.now();
 
     const config: Record<string, unknown> = {
       identifier: source.identifier,
@@ -637,6 +812,7 @@ export async function runScan(
 
     // Per-source controller: the deadline below aborts THIS source only.
     const sourceAbort = new AbortController();
+    let queryDependent = false;
     const ctx: SourceContext = {
       sourceId: source.id,
       config,
@@ -649,46 +825,91 @@ export async function runScan(
         bus.emit({ runId, type: 'job_found', msg, data: { source: source.display_name } });
       },
       abortSignal: sourceAbort.signal,
+      markQueryDependent: () => { queryDependent = true; },
     };
+
+    // Aggregators whose jd_text spans several roles (HN threads) opt out of reading
+    // pay from text: a neighbouring role's salary would become this job's.
+    const fillJd = (j: Job, text?: string): Job | null =>
+      adapter.jdSalaryUnreliable ? null : fillSalaryFromJd(j, text);
 
     let sourceJobCount = 0;
     let invalidCount = 0;
     let enrichCalls = 0;
 
     const consume = async (): Promise<void> => {
-      for await (const raw of adapter.fetch(ctx)) {
+      for await (const raw of fromCache ?? adapter.fetch(ctx)) {
         if (sourceAbort.signal.aborted) break;
-        // A malformed date string parses to NaN in several adapters — treat the
-        // posting as undated rather than rejecting an otherwise valid job.
-        const candidate =
-          typeof raw.posted_at === 'number' && !Number.isFinite(raw.posted_at) ? { ...raw, posted_at: null } : raw;
-        const parsed = JobShape.safeParse(candidate);
-        if (!parsed.success) {
+        const listing = parseListingJob(raw);
+        if (!listing) {
           invalidCount++;
           continue;
         }
-        let job = parsed.data;
+        const priorPosted = storedPostedAt(listing.url, source.id);
+        const withEarliestPosted = (j: Job): Job => {
+          const posted = earliestPosted(priorPosted, j.posted_at);
+          return posted === (j.posted_at ?? null) ? j : { ...j, posted_at: posted };
+        };
+        let job = withEarliestPosted(listing);
+        // Fill a missing salary from the description BEFORE L1 so the floor can act
+        // on it (greenhouse, recruitee, personio and most aggregators publish pay
+        // only as text). Never overrides what the adapter supplied.
+        let salarySource: SalarySource | null = hasSalary(job) ? 'ats' : null;
+        const listingFill = fillJd(job);
+        if (listingFill) {
+          job = listingFill;
+          salarySource = 'jd';
+        }
         let { pass, reasons } = l1Filter(job, criteria, l1Opts);
 
         // Enrichment (e.g. LinkedIn's per-job JD request) only for L1 survivors,
         // sequentially, within this source's budget — never over the full stream.
-        if (
-          pass &&
-          adapter.enrich &&
-          !job.jd_text &&
-          enrichCalls < ENRICH_BUDGET_PER_SOURCE &&
-          !hasStoredJd(job.url)
-        ) {
+        const stored = pass && adapter.enrich && !job.jd_text ? storedEnrichedRow(job.url) : null;
+        if (stored) {
+          // Already enriched on an earlier run: for enrich-sourced salary the listing
+          // carries none, so re-apply the stored one before L1 or a below-floor job
+          // would pass it. Listing-salary adapters (Workable) are left alone: an
+          // absent listing salary there means the employer removed it.
+          // A JD-derived stored salary is re-applied for any adapter: it comes from the
+          // stored JD, not from a listing field the employer could have removed.
+          const storedHasSalary = stored.salary_min_usd != null || stored.salary_max_usd != null;
+          if (!hasSalary(job) && storedHasSalary && (adapter.salaryFromEnrich || stored.salary_source === 'jd')) {
+            job = {
+              ...job,
+              salary_min_usd: stored.salary_min_usd,
+              salary_max_usd: stored.salary_max_usd,
+              salary_currency: stored.salary_currency,
+            };
+            salarySource = stored.salary_source === 'jd' ? 'jd' : 'ats';
+            ({ pass, reasons } = l1Filter(job, criteria, l1Opts));
+          } else if (!hasSalary(job)) {
+            // Rows stored before text extraction existed, or a listing salary the
+            // employer removed: read what the stored JD says now, in this run.
+            const fill = fillJd(job, stored.jd_text);
+            if (fill) {
+              job = fill;
+              salarySource = 'jd';
+              ({ pass, reasons } = l1Filter(job, criteria, l1Opts));
+            }
+          }
+        } else if (pass && adapter.enrich && !job.jd_text && enrichCalls < ENRICH_BUDGET_PER_SOURCE) {
           enrichCalls++;
           const enriched = await enrichJob(adapter, job, ctx, source.display_name);
           if (enriched) {
-            job = enriched;
+            const hadSalary = hasSalary(job);
+            job = withEarliestPosted(enriched);
+            if (!hadSalary) {
+              // Structured pay from the detail endpoint wins over the JD text.
+              const fill = hasSalary(job) ? null : fillJd(job);
+              if (fill) job = fill;
+              salarySource = fill ? 'jd' : hasSalary(job) ? 'ats' : null;
+            }
             ({ pass, reasons } = l1Filter(job, criteria, l1Opts));
           }
           if (sourceAbort.signal.aborted) break;
         }
 
-        const status = upsertJob(job, source.id, runId, pass, reasons);
+        const status = upsertJob(job, source.id, runId, pass, reasons, adapter.salaryFromEnrich === true && !job.jd_text, salarySource, !fromCache);
         jobsFound++;
         sourceJobCount++;
         if (status === 'new') jobsNew++;
@@ -709,10 +930,16 @@ export async function runScan(
     try {
       await Promise.race([work, deadline]);
 
-      db.run(
-        `UPDATE sources SET last_scan_at = ?, last_status = 'ok', last_error = NULL WHERE id = ?`,
-        [Date.now(), source.id]
-      );
+      // Only a fetch that ran to the end advances last_ok_fetch_at: the error path below
+      // never reaches this, so a failed, partial or timed-out fetch leaves the board stale.
+      // A fetch that depended on the search keywords is not the whole board, so it clears it.
+      if (!fromCache) {
+        db.run(
+          `UPDATE sources SET last_scan_at = ?, last_status = 'ok', last_error = NULL, last_ok_fetch_at = ?,
+             refresh_failures = 0, refresh_retry_at = NULL WHERE id = ?`,
+          [Date.now(), queryDependent ? null : fetchStartedAt, source.id]
+        );
+      }
 
       const skipped = invalidCount > 0 ? ` (${invalidCount} malformed skipped)` : '';
       const doneMsg = `${source.display_name}: ${sourceJobCount} jobs${skipped}`;
@@ -740,20 +967,61 @@ export async function runScan(
       const status = timedOut ? 'timeout' : isSourceFetchError(err) ? err.kind : 'http-error';
       console.error(`  [error:${status}] ${source.display_name}: ${msg}`);
       runErrors.push({ source: source.display_name, error: msg });
-      db.run(
-        `UPDATE sources SET last_scan_at = ?, last_status = ?, last_error = ? WHERE id = ?`,
-        [Date.now(), status, msg, source.id]
-      );
+      if (!fromCache) {
+        db.run(
+          `UPDATE sources SET last_scan_at = ?, last_status = ?, last_error = ? WHERE id = ?`,
+          [Date.now(), status, msg, source.id]
+        );
+      }
       bus.emit({ runId, type: 'source_error', msg: `${source.display_name}: ${msg}`, data: { source: source.display_name, error: msg } });
     } finally {
       clearTimeout(timer);
     }
   };
 
+  // Boards fetched within the TTL are served from their stored jobs (board-cache.ts).
+  // This runs before the live pool, not beside it: it finishes in seconds and keeping
+  // the two apart means no live upsert ever races a cache stamp on the same row.
+  const { cached, live } = partitionByCache(sources, scanNow, boardCacheTtlMs());
+  const tasks: { source: DbSource; stored?: Job[] }[] = live.map(source => ({ source }));
+  let cachedJobs = 0;
+  if (cached.length > 0) {
+    bus.emit({
+      runId,
+      type: 'source_start',
+      msg: `${cached.length.toLocaleString()} boards from cache, ${live.length.toLocaleString()} fetched live`,
+      data: { cachedBoards: cached.length, liveBoards: live.length },
+    });
+    const enrichable = new Set(cached.filter(s => getAdapter(s.type)?.enrich).map(s => s.type));
+    const deferredTasks: typeof tasks = [];
+    for await (const res of evaluateCachedBoards(cached, {
+      runId,
+      criteria,
+      l1Opts,
+      canEnrich: type => enrichable.has(type),
+      isFreshnessOnly: reasons => reasons.every(isFreshnessReason),
+    })) {
+      jobsFound += res.found;
+      jobsL1Pass += res.passed;
+      freshnessDropped += res.freshnessDropped;
+      cachedJobs += res.found;
+      if (res.error) runErrors.push({ source: res.source.display_name, error: res.error });
+      if (res.deferred.length > 0) deferredTasks.push({ source: res.source, stored: res.deferred });
+    }
+    // Survivors still needing a JD go first so their enrich budget isn't starved by a long live queue.
+    tasks.unshift(...deferredTasks);
+    bus.emit({
+      runId,
+      type: 'source_done',
+      msg: `${cached.length.toLocaleString()} cached boards: ${cachedJobs.toLocaleString()} stored jobs re-checked`,
+      data: { cachedBoards: cached.length, count: cachedJobs },
+    });
+  }
+
   // runPool's onError is the safety net for anything scanOne itself didn't catch
   // (e.g. a malformed config_json before the try) — it should be rare.
-  await runPool(sources, CONCURRENCY, scanOne, (source, err) => {
-    runErrors.push({ source: source.display_name, error: String(err) });
+  await runPool(tasks, CONCURRENCY, t => scanOne(t.source, t.stored), (t, err) => {
+    runErrors.push({ source: t.source.display_name, error: String(err) });
   });
 
   // NOTE: finished_at is intentionally NOT set here. The run isn't done until L2
@@ -773,6 +1041,7 @@ export async function runScan(
   );
 
   let summary = `Scan complete — found: ${jobsFound}, new: ${jobsNew}, L1 pass: ${jobsL1Pass}`;
+  if (cached.length > 0) summary += ` · ${cached.length.toLocaleString()} boards from cache, ${live.length.toLocaleString()} fetched live`;
   if (freshnessDropped > 0) {
     summary += ` · ${freshnessDropped} more matched but were older than ${freshMaxAge}d (widen in Settings)`;
   }
@@ -788,14 +1057,29 @@ export async function runScan(
 
   // Phase event, NOT terminal — the SSE stream stays open so the L2 events that
   // follow reach the client. The terminal event is 'l2_done' (from runL2Pass).
-  bus.emit({ runId, type: 'scan_done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, freshnessDropped, errors: runErrors.length } });
+  bus.emit({ runId, type: 'scan_done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, freshnessDropped, errors: runErrors.length, cachedBoards: cached.length, liveBoards: live.length } });
 }
 
 function markRunFinished(runId: number): void {
   db.run('UPDATE runs SET finished_at = ? WHERE id = ?', [Date.now(), runId]);
 }
 
-export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?: string): Promise<void> {
+/** L1 survivors of a run that still have no L2 verdict (deferred by the cap, or failed). */
+export function countUngraded(runId: number): number {
+  return db
+    .query<{ n: number }, [number]>(
+      `SELECT COUNT(*) AS n FROM jobs
+       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND duplicate_of IS NULL AND status != 'hidden' AND last_run_id = ?`
+    )
+    .get(runId)!.n;
+}
+
+export async function runL2Pass(
+  runId: number,
+  criteriaYaml: string,
+  userQuery?: string,
+  prerank: typeof prerankSurvivors = prerankSurvivors,
+): Promise<void> {
   // Scope to jobs this run surfaced (upsertJob stamped last_run_id = runId on
   // every job it touched). Keeps L2 from re-scoring out-of-scope jobs from
   // earlier searches and aligns with the scope-to-current-search model.
@@ -803,7 +1087,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
     .query<L2JobRow, [number]>(
       `SELECT id, title, company, location, jd_text, embedding
        FROM jobs
-       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND duplicate_of IS NULL AND last_run_id = ?`
+       WHERE l1_pass = 1 AND l2_verdict_json IS NULL AND duplicate_of IS NULL AND status != 'hidden' AND last_run_id = ?`
     )
     .all(runId);
 
@@ -811,7 +1095,11 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
   // the best jobs earliest (results stream best-first). Reorder only, never drops;
   // no-ops when the embedding feature is off.
   const queryText = criteriaToQueryText(yaml.load(criteriaYaml) as Criteria);
-  const jobs = await prerankSurvivors(survivors, queryText);
+  const ranked = await prerank(survivors, queryText);
+  // Bound the pass: grade only the best-ranked N. The rest keep NULL verdicts, so
+  // an identical re-search (which reuses the criteria) continues with the next N.
+  const cap = l2MaxJobs();
+  const jobs = ranked.slice(0, cap);
 
   if (jobs.length === 0) {
     console.log('L2: no pending jobs');
@@ -829,7 +1117,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
   const resumeText = activeResumeText();
   const verdictShape = resumeText ? BatchVerdictWithResumeShape : BatchVerdictShape;
 
-  const l2Start = `L2 — scoring ${jobs.length} jobs via ${llm.providerName}${resumeText ? ' (resume-aware)' : ''}...`;
+  const l2Start = `L2 — scoring ${jobs.length}${ranked.length > jobs.length ? ` of ${ranked.length}` : ''} jobs via ${llm.providerName}${resumeText ? ' (resume-aware)' : ''}...`;
   console.log(`\n${l2Start}`);
   bus.emit({ runId, type: 'l2_start', msg: l2Start, data: { total: jobs.length } });
 
@@ -949,9 +1237,13 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
 
   db.run('UPDATE runs SET jobs_l2_pass = ? WHERE id = ?', [l2Pass, runId]);
 
-  const doneMsg = aborted
+  const ungraded = countUngraded(runId);
+  const ungradedNote = ungraded > 0
+    ? ` — ${ungraded.toLocaleString()} more not yet graded${ranked.length > cap ? ` (limit ${cap} per search, search again to continue)` : ''}`
+    : '';
+  const doneMsg = (aborted
     ? `L2 aborted — fit: ${l2Pass}, errors: ${errors.length}`
-    : `L2 complete — fit: ${l2Pass}, errors: ${errors.length}`;
+    : `L2 complete — fit: ${l2Pass}, errors: ${errors.length}`) + ungradedNote;
   console.log(doneMsg);
   if (errors.length > 0) {
     for (const e of errors.slice(0, 5)) {
@@ -965,7 +1257,7 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
     runId,
     type: 'l2_done',
     msg: doneMsg,
-    data: { l2Pass, errors: errors.length, aborted, error: abortError },
+    data: { l2Pass, errors: errors.length, aborted, error: abortError, ungraded },
   });
 }
 
@@ -976,13 +1268,17 @@ export async function runL2Pass(runId: number, criteriaYaml: string, userQuery?:
  * searches can't both start a run (see L3 in review notes). This function takes
  * ownership of that already-held lock and is solely responsible for releasing it.
  */
-export async function runFull(setup: RunSetup): Promise<number> {
+export async function runFull(setup: RunSetup, lockToken?: string): Promise<number> {
   const { runId, sources, criteria, criteriaYaml, criteriaSourceText } = setup;
+  const stopHeartbeat = lockToken ? startScanLockHeartbeat(lockToken) : () => {};
   try {
     await runScan(runId, sources, criteria);
+    // Semantic rescue (L1.5) promotes title-only L1 misses that read like the query.
+    // Must run before legitimacy/dedup/L2 so the promoted jobs go through them too.
+    await applySemanticRescue(runId, criteria);
     // Deterministic legitimacy (ghost-job) pass — zero LLM cost, so it runs
     // before L2 and the badges are visible while L2 is still scoring.
-    const scored = applyLegitimacyPass(runId);
+    const scored = await applyLegitimacyPass(runId);
     console.log(`Legitimacy: scored ${scored} jobs`);
     // Semantic dedup runs before L2 so near-duplicate reposts are skipped by the
     // expensive scoring pass (and hidden from the default list). Best-effort.
@@ -1013,7 +1309,8 @@ export async function runFull(setup: RunSetup): Promise<number> {
     bus.emit({ runId, type: 'error', msg });
     throw err; // let the route's .catch log it — runFull itself is fire-and-forget
   } finally {
-    releaseScanLock();
+    stopHeartbeat();
+    if (lockToken) releaseScanLock(lockToken);
   }
 }
 

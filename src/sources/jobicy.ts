@@ -1,6 +1,7 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { fetchJson } from '../core/fetch';
 import { htmlToText, toMillis } from './aggregator-util';
+import { annualizePay } from '../core/salary';
 
 // Jobicy: a keyless public remote-jobs API (v2), in the same honest fetch class as
 // remoteok/arbeitnow/himalayas. The `tag` param drives a server-side search.
@@ -18,9 +19,9 @@ function buildUrl(keyword: string): string {
  * Parse a Jobicy `/api/v2/remote-jobs` response. Jobs live under `jobs`; the apply
  * URL is `url`, the description is HTML (`jobDescription`), the stable id is `id`,
  * and `jobGeo` is a coarse region string. `pubDate` (ISO) maps to posted_at when
- * present. Salary (`salaryMin`/`salaryMax`/`salaryCurrency`) is only mapped when
- * `salaryPeriod` is yearly/annual — an hourly/monthly rate would otherwise be
- * mis-read as a yearly one.
+ * present. Salary (`salaryMin`/`salaryMax`/`salaryCurrency`) is annualised from
+ * `salaryPeriod` (core/salary.ts), so an hourly/monthly rate is never mis-read as
+ * a yearly one; an unknown period is dropped.
  */
 export function parseJobicy(json: unknown): Job[] {
   const items = (json as { jobs?: unknown[] })?.jobs;
@@ -37,11 +38,15 @@ export function parseJobicy(json: unknown): Job[] {
     const geo = typeof j['jobGeo'] === 'string' ? j['jobGeo'] : '';
     const desc = typeof j['jobDescription'] === 'string' ? j['jobDescription'] : '';
 
-    const period = typeof j['salaryPeriod'] === 'string' ? j['salaryPeriod'].toLowerCase() : '';
-    const isAnnual = period === 'yearly' || period === 'annual';
     const salaryMin = j['salaryMin'];
     const salaryMax = j['salaryMax'];
     const salaryCurrency = typeof j['salaryCurrency'] === 'string' ? (j['salaryCurrency'] as string) : null;
+    const pay = annualizePay(
+      typeof salaryMin === 'number' ? salaryMin : null,
+      typeof salaryMax === 'number' ? salaryMax : null,
+      j['salaryPeriod'],
+      salaryCurrency,
+    );
 
     jobs.push({
       external_id: String(j['id'] ?? ''),
@@ -50,9 +55,9 @@ export function parseJobicy(json: unknown): Job[] {
       company,
       location: geo,
       remote: true,
-      salary_min_usd: isAnnual && typeof salaryMin === 'number' ? Math.round(salaryMin) : null,
-      salary_max_usd: isAnnual && typeof salaryMax === 'number' ? Math.round(salaryMax) : null,
-      salary_currency: isAnnual ? salaryCurrency : null,
+      salary_min_usd: pay?.min ?? null,
+      salary_max_usd: pay?.max ?? null,
+      salary_currency: pay ? salaryCurrency : null,
       posted_at: toMillis(j['pubDate']),
       jd_text: htmlToText(desc) || undefined,
     });

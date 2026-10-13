@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { db } from '../db/client';
 import { getScanningState } from '../runner/scan';
+import { boardRefresher } from '../runner/board-refresher';
 import { unlinkAttachment } from './attachments';
 
 export const admin = new Hono();
@@ -15,13 +16,19 @@ admin.post('/clear-jobs', c => {
     return c.json({ error: 'A scan is in progress — wait for it to finish before clearing jobs' }, 409);
   }
 
+  // A board mid-refresh would otherwise finish writing after the wipe and mark itself fresh
+  // with only part of its jobs stored.
+  boardRefresher.cancelInFlight();
+
   const attachmentRows = db.query<{ stored_path: string }, []>('SELECT stored_path FROM attachments').all();
   db.run('DELETE FROM attachments');
   db.run('DELETE FROM jobs');
   db.run('DELETE FROM runs');
 
   // Reset source scan metadata so status dots go back to "never"
-  db.run('UPDATE sources SET last_scan_at = NULL, last_status = NULL, last_error = NULL');
+  // last_ok_fetch_at too: the clear took every board's stored jobs and sightings with it, so a
+  // board left "fresh" would be served from cache as empty until its TTL ran out.
+  db.run('UPDATE sources SET last_scan_at = NULL, last_status = NULL, last_error = NULL, last_ok_fetch_at = NULL, refresh_failures = 0, refresh_retry_at = NULL');
 
   for (const row of attachmentRows) unlinkAttachment(row.stored_path);
 

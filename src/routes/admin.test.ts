@@ -36,3 +36,14 @@ test('POST /api/admin/clear-jobs removes attachment files from disk, not just DB
   expect(existsSync(join(ATT, upBody.stored))).toBe(false);
   expect(memDb.query('SELECT * FROM attachments').all().length).toBe(0);
 });
+
+test('POST /api/admin/clear-jobs drops the cache of every board, since its stored jobs and sightings are gone', async () => {
+  const src = insertSource({ last_ok_fetch_at: Date.now() });
+  const job = insertJob(src);
+  memDb.run('INSERT INTO board_sightings (source_id, job_id, seen_at) VALUES (?, ?, ?)', [src, job, Date.now()]);
+
+  const res = await req('/api/admin/clear-jobs', { method: 'POST' });
+  expect(res.status).toBe(200);
+  expect(memDb.query('SELECT last_ok_fetch_at FROM sources WHERE id = ?').get(src)).toEqual({ last_ok_fetch_at: null });
+  expect(memDb.query('SELECT COUNT(*) AS n FROM board_sightings').get()).toEqual({ n: 0 });
+});

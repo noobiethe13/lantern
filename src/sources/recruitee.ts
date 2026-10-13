@@ -113,7 +113,7 @@ export class RecruiteeAdapter implements SourceAdapter {
     const apiUrl = `https://${host}/api/offers/`;
     ctx.emitProgress(`Fetching ${display_name} (Recruitee)…`);
 
-    const json = await fetchJson(apiUrl, { allowedHosts: [host], retries: 2 });
+    const json = await fetchJson(apiUrl, { allowedHosts: [host], retries: 2, signal: ctx.abortSignal });
     const jobs = parseRecruitee(json, display_name, host);
     ctx.emitProgress(`${display_name}: ${jobs.length} jobs`, jobs.length);
 

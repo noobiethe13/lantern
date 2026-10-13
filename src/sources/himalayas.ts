@@ -2,6 +2,7 @@ import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { fetchJson } from '../core/fetch';
 import { htmlToText, toMillis, sleep } from './aggregator-util';
 import { pickLocation } from './gated-util';
+import { annualizePay } from '../core/salary';
 
 const HIMALAYAS_ALLOWED_HOSTS = ['himalayas.app'];
 // The API silently caps `limit` at 20 regardless of what's requested, so
@@ -30,8 +31,8 @@ function buildUrl(keyword: string, page: number, country?: string): string {
  * the apply URL is `applicationLink` and the stable id is `guid`. Himalayas is
  * a remote-only board, but `locationRestrictions` still narrows WHO can be
  * hired: an empty array means hire-anywhere ("Worldwide"), not "unknown".
- * Salary is only mapped when `salaryPeriod` is annual/yearly — an hourly or
- * weekly rate would otherwise be mis-read as a yearly one.
+ * Salary is annualised from `salaryPeriod` (core/salary.ts), so an hourly or
+ * weekly rate is never mis-read as a yearly one; an unknown period is dropped.
  */
 export function parseHimalayas(json: unknown): Job[] {
   const items = (json as HimalayasPage)?.jobs;
@@ -45,11 +46,15 @@ export function parseHimalayas(json: unknown): Job[] {
     const company = (j['companyName'] as string)?.trim() ?? '';
     if (!title || !url || !company) continue;
 
-    const period = typeof j['salaryPeriod'] === 'string' ? j['salaryPeriod'].toLowerCase() : '';
-    const isAnnual = period === 'annual' || period === 'yearly';
     const currency = typeof j['currency'] === 'string' ? (j['currency'] as string) : null;
     const minSalary = j['minSalary'];
     const maxSalary = j['maxSalary'];
+    const pay = annualizePay(
+      typeof minSalary === 'number' ? minSalary : null,
+      typeof maxSalary === 'number' ? maxSalary : null,
+      j['salaryPeriod'],
+      currency,
+    );
     const locations = j['locationRestrictions'];
 
     jobs.push({
@@ -61,9 +66,9 @@ export function parseHimalayas(json: unknown): Job[] {
       remote: true,
       // Keep the native amount + its currency tag rather than dropping non-USD
       // pay (L1 only compares like-for-like currencies; the rest defers to L2).
-      salary_min_usd: isAnnual && typeof minSalary === 'number' ? Math.round(minSalary) : null,
-      salary_max_usd: isAnnual && typeof maxSalary === 'number' ? Math.round(maxSalary) : null,
-      salary_currency: isAnnual ? currency : null,
+      salary_min_usd: pay?.min ?? null,
+      salary_max_usd: pay?.max ?? null,
+      salary_currency: pay ? currency : null,
       posted_at: toMillis(j['pubDate']),
       jd_text: htmlToText(j['description'] as string) || undefined,
     });

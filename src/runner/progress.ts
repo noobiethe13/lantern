@@ -5,6 +5,8 @@ export type ScanEventType =
   | 'source_done'
   | 'source_error'
   | 'scan_done'
+  | 'rescue_start'
+  | 'rescue_done'
   | 'l2_start'
   | 'l2_progress'
   | 'l2_done'

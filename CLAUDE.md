@@ -62,19 +62,39 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   `SourceContext.keywords`, populated by `scan.ts` from a normalized
   `criteria.title.positive`). Aggregators yield nothing when keywords are empty.
   Per-company adapters MUST populate `jd_text` (description) — L2 grades on it;
-  six do (greenhouse via `?content=true`, lever/ashby/recruitee/personio from
-  their existing payloads, bamboohr via per-job detail). SmartRecruiters,
-  Workable and Workday JD are deferred TODOs. An adapter may implement optional
-  `enrich()` for per-job detail (LinkedIn's JD): the runner calls it only for L1
-  survivors without `jd_text`, sequentially, ≤40 per source per run. Each source
+  six do in `fetch()` (greenhouse via `?content=true`, lever/ashby/recruitee/personio
+  from their existing payloads, bamboohr via per-job detail). An adapter may
+  implement optional `enrich()` for per-job detail — LinkedIn, Rippling,
+  SmartRecruiters (+ search), Workable and Workday fetch their JD this way: the
+  runner calls it only for L1 survivors without `jd_text`, sequentially, ≤40 per
+  source per run. Each source
   runs under its own abort signal + 8-min deadline (`last_status='timeout'`), and
   every yielded job is validated with `JobShape` (invalid ones skipped + counted).
+- **Board cache** (`src/runner/board-cache.ts`): per-company boards are
+  query-independent, so a board whose `sources.last_ok_fetch_at` (start of its last
+  complete successful fetch) is within the TTL (settings KV `board_cache`, default 6h,
+  0 = off) is NOT fetched. The scan re-runs L1 on its stored jobs that the last fetch saw
+  (`board_sightings.seen_at >= last_ok_fetch_at` for that board) and stamps `last_run_id` + the verdict on each, like a
+  fetched job. Aggregators, stale/never-fetched boards and query-dependent fetches (Workable's `?query=`) stay live; failed, partial or
+  timed-out fetches never advance the timestamp. Every `l1Filter` input must be a
+  persisted `jobs` column (`employment_type` is one now).
+- **Background board refresher** (`src/runner/board-refresher.ts`): one loop started
+  from `server.ts` (not under `bun test`) re-fetches stale enabled per-company boards,
+  3 at a time with per-host pacing, so searches hit the board cache. Refresh mode =
+  `upsertJob(..., runId = null)`: same content/sighting/`last_ok_fetch_at` semantics as
+  a live fetch, but no `last_run_id`, no progress events, L1 columns untouched (the
+  scan's cache phase grades them). It never takes the scan lock: it pauses while one is
+  held, aborts in-flight fetches, and writes boards in lock-checked transactions. Toggle:
+  settings KV `board_refresh`, `/api/settings/board-refresh`.
 - **Two-tier filter**: L1 deterministic rules (`src/core/filter.ts`) run inline
   during scan and kill ~80% with zero LLM cost — whole-word term matching (never
   substring) for title (uniform across sources), location (gazetteer + remote
   eligibility), salary floor, company excludes, a seniority gate (drops senior+
   titles only when criteria restricts to junior/mid), and a freshness gate — see
-  `docs/filtering-and-ranking.md`. L2 LLM verdict
+  `docs/filtering-and-ranking.md`. **Semantic rescue** (`src/runner/semantic-rescue.ts`)
+  runs between the scan and L2: jobs whose ONLY L1 failure was the missing title
+  keyword are promoted (`l1_rescued=1`, ≤40/run) when their embedding is close to
+  the centroid of the run's L1 survivors (query anchor if <5). L2 stays the judge. L2 LLM verdict
   runs as a separate **sequential** pass over L1 survivors **scoped to the run**
   (`last_run_id`); verdicts (+ denormalized `l2_score`/`l2_fit`) are stored per
   job and invalidated whenever criteria change. (L2 grades jobs in batches of 20
@@ -82,8 +102,11 @@ runner reads. There is no criteria editor and no `/api/criteria` route.
   uncacheable fixed per-spawn cost; batches run sequentially.)
 - **Run scoping & ranking**: `upsertJob` stamps `last_run_id` on every job a run
   surfaces; the Jobs API filters `?run=latest|<id>` and `?fit=1` and orders fit/L2
-  views by `l2_score DESC`. So each search shows its own ranked result set.
-- **Progress events** (`src/runner/progress.ts`): `scan_done` marks the L1→L2
+  views by fit tier then `l2_score DESC` plus a bounded (±0.1) learned-taste delta from
+  shortlisted/hidden jobs (ranking only, `docs/intelligence.md` §6). So each search shows its own ranked result set.
+- **Progress events** (`src/runner/progress.ts`): `rescue_start`/`rescue_done`
+  (semantic rescue, between `scan_done` and `l2_start`) are non-terminal too.
+  `scan_done` marks the L1→L2
   handoff and is **non-terminal** (the SSE stream stays open for L2 events);
   `l2_done` (or `error`) is terminal. `runs.finished_at` is set only after L2
   (`runL2Pass` writes it right before `l2_done`; `runFull`'s catch before `error`),
@@ -152,6 +175,10 @@ bun test --test-name-pattern "..."        # single test by name
   SmartRecruiters / Workable / Personio): add the slug to
   `src/config/seed-sources.yml`, restart. The seed list is the maintained
   default the user never edits; sources seed lazily on the first scan.
+- **Refresh discovered boards**: `bun scripts/discover-boards.ts` (resumable,
+  see `docs/sources.md`) regenerates `src/config/discovered-sources.json`;
+  those boards seed disabled with `sources.origin='discovered'`, hidden from the
+  roster, and are bulk-toggled by the Settings switch.
 - **Add a new source type**: implement `SourceAdapter` in `src/sources/`,
   register in `src/sources/index.ts`, add the type to the `SourceType` union in
   `src/core/job.ts`, the `sources.type` CHECK in `src/db/schema.sql`,
@@ -228,6 +255,11 @@ internal types — convert at the boundary in src/api/client.ts" -->
   and loaded only via dynamic `import()` — NOT that no browser exists. Still banned:
   a browser in the default/hot fetch path, a static engine import anywhere, and any
   LLM-driven browsing (screenshots/DOM → model).
+- The board cache reads L1 inputs from `jobs` columns, so a new `l1Filter` input needs a
+  persisted column (schema.sql + guarded migrate.ts) or cached and live L1 drift apart.
+  `last_ok_fetch_at` is set only on a live `scanOne` success path, from the fetch START
+  taken before `adapter.fetch`. Cached-board stamping is write-bound (wide rows rewrite
+  ~60us each), so keep per-row work out of it.
 - Claude Code is the only LLM provider; there is no provider switcher or
   `constructionKey()` cache (removed in Phase 1 — the provider takes no
   construction inputs, so a single lazy instance is reused). Per-task model
@@ -260,8 +292,8 @@ internal types — convert at the boundary in src/api/client.ts" -->
   false-active vector, hidden i18n strings a false-expired one). Any non-2xx
   classifies `uncertain`, never expired. Thin content on a SPA
   host (`SPA_HOSTS` in `core/liveness.ts`) classifies `uncertain`, never closed.
-- Adapters that can't fetch a description (LinkedIn guest cards, Workday cxs
-  listing, SmartRecruiters/Workable list endpoints) must OMIT `jd_text` (leave it
+- Adapters whose listing carries no description (LinkedIn guest cards, Workday cxs
+  listing, SmartRecruiters/Workable list endpoints — filled by `enrich()`) must OMIT `jd_text` (leave it
   absent → NULL), never set `''`. `core/legitimacy.ts` treats null jd_text as an
   adapter gap (no flag) but a present-but-empty string as "no job description"
   (a ghost flag) — `''` would wrongly flag every such job.

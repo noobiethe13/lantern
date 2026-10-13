@@ -97,6 +97,11 @@ export const NL_OK = {
   salary_min_usd: null,
   salary_currency: 'USD',
   exclude_companies: [],
+  employment_types: [],
+  visa_sponsorship_required: false,
+  skills: { must: [], nice: [] },
+  industries: { include: [], exclude: [] },
+  company_stage: [],
 };
 
 /** Hits the full server (with the Host/Origin middleware, 404 catch-all, etc). A

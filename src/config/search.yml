@@ -20,3 +20,13 @@ seniority:
 salary_min_usd: null      # native amount in salary_currency (the _usd suffix is legacy)
 salary_currency: USD       # ISO code of the floor, any case. L1 only filters jobs tagged the same
 exclude_companies: []
+employment_types: []      # full_time | part_time | contract | internship | temporary. Empty = any.
+                          # L1 drops a job only when its title or ATS field states a type not listed
+visa_sponsorship_required: false   # true: L1 drops a JD that explicitly refuses sponsorship
+skills:
+  must: []        # required skills, judged by L2 (a clear miss is not a fit)
+  nice: []        # preferred skills, raise the L2 score only
+industries:
+  include: []     # L2 only
+  exclude: []     # whole-word match on company and title in L1, the rest is L2, e.g. ["crypto"]
+company_stage: [] # startup | scaleup | enterprise, judged by L2

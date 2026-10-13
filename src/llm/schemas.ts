@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { EMPLOYMENT_TYPES } from '../core/employment-type';
 
 const SENIORITY_LEVELS = ['junior', 'mid', 'senior', 'staff', 'principal', 'unknown'] as const;
 
@@ -65,6 +66,25 @@ export type BatchVerdictWithResume = z.infer<typeof BatchVerdictWithResumeShape>
 // an always-matching (or always-blank) L1 term.
 const TermList = z.array(z.string()).transform((arr) => arr.map((s) => s.trim()).filter((s) => s.length > 0));
 
+export const COMPANY_STAGES = ['startup', 'scaleup', 'enterprise'] as const;
+export type CompanyStage = (typeof COMPANY_STAGES)[number];
+
+// An enum list that drops off-enum entries instead of failing the whole nl-filter
+// parse (one drifted "freelance" would otherwise cost a retry and then a 502).
+// Same shape as VerdictShape.seniority: `undefined` is passed through untouched so
+// zod-to-json-schema's `safeParse(undefined)` probe keeps the field in `required`.
+// "Empty = any" is carried by an empty array, not null, for the same reason.
+const enumList = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess(
+    (v) =>
+      Array.isArray(v)
+        ? [...new Set(v.map((x) => (typeof x === 'string' ? x.trim().toLowerCase() : x)))].filter(
+            (x) => typeof x === 'string' && (values as readonly string[]).includes(x),
+          )
+        : v,
+    z.array(z.enum(values)),
+  );
+
 export const NLFilterShape = z.object({
   title: z.object({
     positive: TermList,
@@ -97,5 +117,18 @@ export const NLFilterShape = z.object({
   // stored (uppercase) currency, silently disabling the L1 salary floor.
   salary_currency: z.string().transform((s) => s.trim().toUpperCase()),
   exclude_companies: TermList,
+  // The fields below postdate stored criteria rows: they are required here on
+  // purpose, so a pre-upgrade row fails safeParse and routes/runs.ts regenerates
+  // it via nl-filter instead of reusing it. Consumers (filter.ts, prompts) still
+  // tolerate their absence for a no-query re-scan of such a row.
+  // Empty = any.
+  employment_types: enumList(EMPLOYMENT_TYPES),
+  visa_sponsorship_required: z.boolean(),
+  // must: hard requirements (a miss is fit=false at L2). nice: score boosters only.
+  skills: z.object({ must: TermList, nice: TermList }),
+  // include/exclude are industry keywords. exclude is also matched as whole words
+  // against title and company by L1, so entries should be short ("crypto").
+  industries: z.object({ include: TermList, exclude: TermList }),
+  company_stage: enumList(COMPANY_STAGES),
 });
 export type NLFilter = z.infer<typeof NLFilterShape>;

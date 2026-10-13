@@ -114,16 +114,21 @@ describe('parseHimalayas', () => {
     expect(parseHimalayas(null)).toEqual([]);
   });
 
-  test('does not map an hourly rate as if it were annual', () => {
+  test('annualises an hourly rate instead of reading it as yearly', () => {
     const json = {
       jobs: [
         { ...job('h1'), currency: 'USD', minSalary: 60, maxSalary: 60, salaryPeriod: 'hourly' },
       ],
     };
     const j = parseHimalayas(json)[0];
-    expect(j.salary_min_usd).toBeNull();
-    expect(j.salary_max_usd).toBeNull();
-    expect(j.salary_currency).toBeNull();
+    expect(j.salary_min_usd).toBe(124800);
+    expect(j.salary_max_usd).toBe(124800);
+    expect(j.salary_currency).toBe('USD');
+  });
+
+  test('drops pay whose period is unknown', () => {
+    const json = { jobs: [{ ...job('h2'), currency: 'USD', minSalary: 60, maxSalary: 80, salaryPeriod: 'sprint' }] };
+    expect(parseHimalayas(json)[0].salary_currency).toBeNull();
   });
 
   test('sets location to "Worldwide" when locationRestrictions is an explicit empty array', () => {

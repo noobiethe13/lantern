@@ -12,6 +12,7 @@ export interface DbJobRow {
   salary_max_usd: number | null;
   salary_currency: string | null;
   posted_at: number | null;
+  employment_type: string | null;
   jd_text: string | null;
   content_hash: string;
 }
@@ -29,6 +30,7 @@ export function toDbRow(job: Job, sourceId: number, hash: string): DbJobRow {
     salary_max_usd: job.salary_max_usd ?? null,
     salary_currency: job.salary_currency ?? null,
     posted_at: job.posted_at ?? null,
+    employment_type: job.employment_type ?? null,
     jd_text: job.jd_text ?? null,
     content_hash: hash,
   };

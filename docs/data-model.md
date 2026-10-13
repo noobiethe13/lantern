@@ -24,6 +24,8 @@ erDiagram
         int enabled
         text config_json
         text last_status
+        int last_ok_fetch_at "start of last good fetch"
+        text origin "discovered or NULL"
     }
     jobs {
         int id PK
@@ -34,7 +36,9 @@ erDiagram
         text company_norm "indexed dedup key"
         int salary_min_usd "native currency"
         text salary_currency
+        text salary_source "ats or jd"
         int posted_at
+        text employment_type "ATS field or NULL"
         text jd_text
         int l1_pass
         text l2_verdict_json
@@ -112,8 +116,19 @@ Columns worth calling out:
   in the job's **native** currency, tagged by `salary_currency` (the `_usd`
   suffix is legacy). L1 only compares a salary to a floor when both currencies are
   known and equal.
+- **`salary_source`** is `ats` when the figure came from the source's structured
+  field and `jd` when the runner read it out of the description text
+  ([`salary.ts`](../src/core/salary.ts)). NULL means no salary, or a row stored
+  before the column existed (a NULL source with a salary reads as `ats`). The
+  Jobs panel marks a `jd` salary with "≈". A `jd` salary appearing on a row that
+  had none is a backfill and does not count as an edit, so the first re-scan after
+  an upgrade keeps every L2 verdict and embedding. A `jd` salary that later
+  *changes* (the JD was edited) does count, like any other edit.
 - **`last_run_id`** is the run that most recently surfaced this job. Results are
   scoped to a search through this column.
+- **`employment_type`** is the ATS's structured commitment field (Lever, Ashby) or
+  NULL. It is an L1 input, refreshed on every sighting by the owning source and kept
+  out of `content_hash`, so a change never clears a verdict.
 - **`l2_score` / `l2_fit`** are denormalized from the verdict JSON so the Jobs API
   can sort and filter without parsing every row.
 - **`duplicate_of`** is set by the semantic-dedup pass to the canonical job a
@@ -130,10 +145,27 @@ Columns worth calling out:
 One row per board. `enabled` is the user's toggle. The seed sync may turn a
 retired per-company board off, but never turns one on; see
 [sources.md](sources.md). Deleting a source that has saved jobs, or that is a
-seeded default, turns it off instead. `last_status` is `ok`, `timeout` (hit the
+seeded default, turns it off instead. `origin` is `discovered` for boards seeded
+from `discovered-sources.json` (disabled, hidden from the roster, bulk-toggled in
+Settings) and NULL for seeded and user-added rows. `last_status` is `ok`, `timeout` (hit the
 per-source deadline), or an error kind (`http-error`, `http`, `gated`, `auth`,
 `extract`), with `last_error` holding the message. An `apiKey` in `config_json` is
-masked in every API response.
+masked in every API response. `last_scan_at` is the last attempt;
+`refresh_failures` and `refresh_retry_at` are the background refresher's backoff for a
+failing board (consecutive failures, earliest next attempt), reset by any successful
+fetch. `last_ok_fetch_at` is the **start** of the last complete successful fetch, set only
+when a source runs to the end (never by a failed, partial or timed-out fetch) and
+cleared when the board's `config_json` or display name changes (the company name feeds an
+L1 rule). The board cache reads it: a job is on the board iff that board's
+`board_sightings.seen_at >= last_ok_fetch_at`.
+
+### `board_sightings`
+
+`(source_id, job_id, seen_at)`, a `WITHOUT ROWID` table written by `upsertJob` on every
+sighting (insert, re-sighting, fuzzy fold). `jobs.source_id` is only the first source to
+insert a posting, while a later board can list the same URL or fold into the row, so the
+board cache reads this to know what each board currently lists. Rows cascade with their
+source or job.
 
 ### `runs`
 

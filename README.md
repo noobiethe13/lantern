@@ -44,7 +44,7 @@ Lantern takes the middle seat: **honest, local, and selective.** It reads a larg
 - **Ghost-job signal.** A deterministic scorer rates every posting `high` / `caution` / `suspicious` from age, how long it has stayed open, description quality, reachability, and repost patterns. It shows the reasons behind each rating rather than hiding them behind a number.
 - **Two-tier filtering.** Deterministic rules discard roughly 80% of results at zero cost; only the survivors reach the language model, which grades each against your criteria (and, optionally, your résumé).
 - **Semantic intelligence, run locally.** A small on-device embedding model reorders survivors best-first, folds reworded reposts, and powers a "similar jobs" view. No GPU, no external API.
-- **~320 boards out of the box.** Per-company boards across Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, Workable, Personio, BambooHR, and Workday, plus keyword aggregators. Every one is a public HTTP API behind an SSRF guard.
+- **~320 boards out of the box.** Per-company boards across Greenhouse, Ashby, Lever, Recruitee, SmartRecruiters, Workable, Personio, BambooHR, Workday, Breezy HR, Rippling, and Teamtailor, plus keyword aggregators. Every one is a public HTTP API behind an SSRF guard.
 - **Yours to keep.** SQLite on disk, a three-page web UI, and no telemetry.
 
 ## Quickstart

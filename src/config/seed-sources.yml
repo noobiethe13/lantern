@@ -414,6 +414,108 @@ sources:
   - { type: workday, identifier: kyndryl,     display_name: "Kyndryl",                enabled: true, config: { site: KyndrylProfessionalCareers, dc: wd5 } }
   - { type: workday, identifier: ringcentral, display_name: "RingCentral",            enabled: true, config: { site: RingCentral_Careers,        dc: wd1 } }
   - { type: workday, identifier: warnerbros,  display_name: "Warner Bros. Discovery", enabled: true, config: { site: global,                     dc: wd5 } }
+  # Breezy HR (per-company; slug = the subdomain in {slug}.breezy.hr). Live-probed 2026-10-12.
+  - { type: breezy,          identifier: accrete-ai, display_name: "Accrete", enabled: true }
+  - { type: breezy,          identifier: amazingtalker, display_name: "AmazingTalker", enabled: true }
+  - { type: breezy,          identifier: brainscape, display_name: "Brainscape", enabled: true }
+  - { type: breezy,          identifier: cal-com, display_name: "Cal.com", enabled: true }
+  - { type: breezy,          identifier: kenect, display_name: "Kenect", enabled: true }
+  - { type: breezy,          identifier: magellan-ai, display_name: "Magellan AI", enabled: true }
+  - { type: breezy,          identifier: matroid, display_name: "Matroid", enabled: true }
+  - { type: breezy,          identifier: nucleusteq, display_name: "NucleusTeq", enabled: true }
+  - { type: breezy,          identifier: onedome, display_name: "OneDome", enabled: true }
+  - { type: breezy,          identifier: q-block-computing, display_name: "Q-Block Computing", enabled: true }
+  - { type: breezy,          identifier: reveleer, display_name: "Reveleer", enabled: true }
+  - { type: breezy,          identifier: solvative, display_name: "Solvative", enabled: true }
+  - { type: breezy,          identifier: swipejobs, display_name: "swipejobs", enabled: true }
+  - { type: breezy,          identifier: vagaro, display_name: "Vagaro", enabled: true }
+  - { type: breezy,          identifier: vianai-systems, display_name: "Vianai Systems", enabled: true }
+  - { type: breezy,          identifier: votingworks, display_name: "VotingWorks", enabled: true }
+  - { type: breezy,          identifier: zendar, display_name: "Zendar", enabled: true }
+  - { type: breezy,          identifier: bear-robotics, display_name: "Bear Robotics", enabled: true }
+  - { type: breezy,          identifier: carnegie-robotics, display_name: "Carnegie Robotics", enabled: true }
+  - { type: breezy,          identifier: kredivo-group, display_name: "Kredivo Group", enabled: true }
+  - { type: breezy,          identifier: nexo, display_name: "Nexo", enabled: true }
+  - { type: breezy,          identifier: pixieset, display_name: "Pixieset", enabled: true }
+  - { type: breezy,          identifier: playdead, display_name: "Playdead", enabled: true }
+  - { type: breezy,          identifier: rootstock-software, display_name: "Rootstock Software", enabled: true }
+  - { type: breezy,          identifier: socradar, display_name: "SOCRadar", enabled: true }
+  - { type: breezy,          identifier: stake, display_name: "Stake", enabled: true }
+  - { type: breezy,          identifier: wyze-labs, display_name: "Wyze Labs", enabled: true }
+  - { type: breezy,          identifier: zero-hash, display_name: "zerohash", enabled: true }
+  - { type: breezy,          identifier: zetier, display_name: "Zetier", enabled: true }
+  # Rippling ATS (per-company; slug = the first path segment of ats.rippling.com/{slug}). Live-probed 2026-10-12.
+  - { type: rippling,        identifier: rippling, display_name: "Rippling", enabled: true }
+  - { type: rippling,        identifier: anaconda, display_name: "Anaconda", enabled: true }
+  - { type: rippling,        identifier: bedrock-data, display_name: "Bedrock Data", enabled: true }
+  - { type: rippling,        identifier: boom-supersonic, display_name: "Boom Supersonic", enabled: true }
+  - { type: rippling,        identifier: celerdataopenroles, display_name: "CelerData", enabled: true }
+  - { type: rippling,        identifier: combocurve, display_name: "ComboCurve", enabled: true }
+  - { type: rippling,        identifier: copado, display_name: "Copado", enabled: true }
+  - { type: rippling,        identifier: corva, display_name: "Corva", enabled: true }
+  - { type: rippling,        identifier: d-wave-quantum, display_name: "D-Wave Quantum", enabled: true }
+  - { type: rippling,        identifier: daloopa, display_name: "Daloopa", enabled: true }
+  - { type: rippling,        identifier: eridu-ai, display_name: "Eridu AI", enabled: true }
+  - { type: rippling,        identifier: flexai, display_name: "FlexAI", enabled: true }
+  - { type: rippling,        identifier: genlogs-corporation, display_name: "GenLogs", enabled: true }
+  - { type: rippling,        identifier: hammerspace, display_name: "Hammerspace", enabled: true }
+  - { type: rippling,        identifier: kevel-careers, display_name: "Kevel", enabled: true }
+  - { type: rippling,        identifier: koreai-india-careers, display_name: "Kore.ai", enabled: true }
+  - { type: rippling,        identifier: malwarebytes, display_name: "Malwarebytes", enabled: true }
+  - { type: rippling,        identifier: mykaarma, display_name: "myKaarma", enabled: true }
+  - { type: rippling,        identifier: mytra, display_name: "Mytra", enabled: true }
+  - { type: rippling,        identifier: nerdio-careers, display_name: "Nerdio", enabled: true }
+  - { type: rippling,        identifier: netwrix-corporation, display_name: "Netwrix", enabled: true }
+  - { type: rippling,        identifier: opendoor, display_name: "Opendoor", enabled: true }
+  - { type: rippling,        identifier: protopie-careers, display_name: "ProtoPie", enabled: true }
+  - { type: rippling,        identifier: rudderstack-careers, display_name: "RudderStack", enabled: true }
+  - { type: rippling,        identifier: shippo, display_name: "Shippo", enabled: true }
+  - { type: rippling,        identifier: thoughtspot, display_name: "ThoughtSpot", enabled: true }
+  - { type: rippling,        identifier: tixr, display_name: "Tixr", enabled: true }
+  - { type: rippling,        identifier: vouch-inc, display_name: "Vouch", enabled: true }
+  - { type: rippling,        identifier: webull, display_name: "Webull", enabled: true }
+  - { type: rippling,        identifier: zapata-quantum, display_name: "Zapata Quantum", enabled: true }
+  - { type: rippling,        identifier: albert-invent-corp, display_name: "Albert Invent", enabled: true }
+  - { type: rippling,        identifier: alaan-careers, display_name: "Alaan", enabled: true }
+  - { type: rippling,        identifier: rentspree, display_name: "RentSpree", enabled: true }
+  - { type: rippling,        identifier: citrine-informatics, display_name: "Citrine Informatics", enabled: true }
+  - { type: rippling,        identifier: studyfetch, display_name: "StudyFetch", enabled: true }
+  # Teamtailor (per-company; slug = the subdomain in {slug}.teamtailor.com, via its jobs.rss feed). Live-probed 2026-10-12.
+  - { type: teamtailor,      identifier: career, display_name: "Teamtailor", enabled: true }
+  - { type: teamtailor,      identifier: anyfin, display_name: "Anyfin", enabled: true }
+  - { type: teamtailor,      identifier: bambuser, display_name: "Bambuser", enabled: true }
+  - { type: teamtailor,      identifier: bokio, display_name: "Bokio", enabled: true }
+  - { type: teamtailor,      identifier: bryter, display_name: "BRYTER", enabled: true }
+  - { type: teamtailor,      identifier: bunnynet, display_name: "bunny.net", enabled: true }
+  - { type: teamtailor,      identifier: busuu, display_name: "Busuu", enabled: true }
+  - { type: teamtailor,      identifier: detectify, display_name: "Detectify", enabled: true }
+  - { type: teamtailor,      identifier: doodle, display_name: "Doodle", enabled: true }
+  - { type: teamtailor,      identifier: eficode, display_name: "Eficode", enabled: true }
+  - { type: teamtailor,      identifier: embarkstudios, display_name: "Embark Studios", enabled: true }
+  - { type: teamtailor,      identifier: funnel, display_name: "Funnel", enabled: true }
+  - { type: teamtailor,      identifier: heydata, display_name: "heyData", enabled: true }
+  - { type: teamtailor,      identifier: iqm, display_name: "IQM Quantum Computers", enabled: true }
+  - { type: teamtailor,      identifier: kry-1719827697, display_name: "Kry", enabled: true }
+  - { type: teamtailor,      identifier: lunar, display_name: "Lunar", enabled: true }
+  - { type: teamtailor,      identifier: multiversecomputing, display_name: "Multiverse Computing", enabled: true }
+  - { type: teamtailor,      identifier: nplan, display_name: "nPlan", enabled: true }
+  - { type: teamtailor,      identifier: oneflow, display_name: "Oneflow", enabled: true }
+  - { type: teamtailor,      identifier: podimo, display_name: "Podimo", enabled: true }
+  - { type: teamtailor,      identifier: polestar, display_name: "Polestar", enabled: true }
+  - { type: teamtailor,      identifier: rebtel, display_name: "Rebtel", enabled: true }
+  - { type: teamtailor,      identifier: silenteight, display_name: "Silent Eight", enabled: true }
+  - { type: teamtailor,      identifier: spacelift, display_name: "Spacelift", enabled: true }
+  - { type: teamtailor,      identifier: templafy, display_name: "Templafy", enabled: true }
+  - { type: teamtailor,      identifier: tibber, display_name: "Tibber", enabled: true }
+  - { type: teamtailor,      identifier: tradingview, display_name: "TradingView", enabled: true }
+  - { type: teamtailor,      identifier: upcloud, display_name: "UpCloud", enabled: true }
+  - { type: teamtailor,      identifier: ravenpack, display_name: "RavenPack", enabled: true }
+  - { type: teamtailor,      identifier: starship, display_name: "Starship Technologies", enabled: true }
+  - { type: teamtailor,      identifier: stravito, display_name: "Stravito", enabled: true }
+  - { type: teamtailor,      identifier: fortnoxab, display_name: "Fortnox", enabled: true }
+  - { type: teamtailor,      identifier: mynt, display_name: "Mynt", enabled: true }
+  - { type: teamtailor,      identifier: praktika, display_name: "Praktika", enabled: true }
+  - { type: teamtailor,      identifier: appsilon-1739358905, display_name: "Appsilon", enabled: true }
   # Keyword-global aggregators — the role/keyword drives the query; no per-company slug.
   - { type: remoteok,   identifier: remoteok,   display_name: "RemoteOK (remote)",  enabled: true }
   - { type: arbeitnow,  identifier: arbeitnow,  display_name: "Arbeitnow (EU)",     enabled: true }
@@ -424,5 +526,19 @@ sources:
   - { type: linkedin,   identifier: linkedin,   display_name: "LinkedIn (guest)",   enabled: false }
   # Jobicy — keyless public remote-jobs API; honest fetch aggregator like Himalayas.
   - { type: jobicy,     identifier: jobicy,     display_name: "Jobicy (remote)",    enabled: true }
+  # The Muse — keyless; no free-text search, so keywords map to Muse categories (remote only).
+  - { type: themuse,    identifier: themuse,    display_name: "The Muse (remote)",  enabled: true }
+  # SmartRecruiters cross-tenant search — newest 100 matches per keyword, no JD in the list payload.
+  - { type: smartrecruiters_search, identifier: smartrecruiters_search, display_name: "SmartRecruiters (search)", enabled: true }
+  - { type: workingnomads,  identifier: workingnomads,  display_name: "Working Nomads (remote)",    enabled: true }
+  - { type: weworkremotely, identifier: weworkremotely, display_name: "We Work Remotely (remote)", enabled: true }
+  # Remotive — opt-in: its API terms allow ~4 calls/day and require attribution, so the
+  # adapter enforces a persisted daily budget and the source ships disabled.
+  - { type: remotive,   identifier: remotive,   display_name: "Remotive (remote)",  enabled: false }
+  # JobTech — Sweden's public employment service. Sweden-only, so L1's location rules drop it
+  # for searches outside Sweden.
+  - { type: jobtech,    identifier: jobtech,    display_name: "JobTech (Sweden)",   enabled: true }
+  # Hacker News monthly "Who is hiring?" threads (latest two) via the Algolia HN API.
+  - { type: hn_hiring,  identifier: hn_hiring,  display_name: "HN Who is hiring",   enabled: true }
   # Google Jobs (SerpAPI) is NOT seeded — it needs the user's API key, so it's added
   # via Settings → Add a source (key stored in config_json). Covers boards Google indexes.

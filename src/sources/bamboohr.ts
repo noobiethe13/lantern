@@ -143,7 +143,7 @@ export class BambooHrAdapter implements SourceAdapter {
     ctx.emitProgress(`Fetching ${display_name} (BambooHR)…`);
 
     const list = parseBambooList(
-      await fetchJson(listUrl(identifier), { allowedHosts, headers: REQUEST_HEADERS, retries: 1 }),
+      await fetchJson(listUrl(identifier), { allowedHosts, headers: REQUEST_HEADERS, retries: 1, signal: ctx.abortSignal }),
     );
 
     let total = 0;
@@ -161,6 +161,7 @@ export class BambooHrAdapter implements SourceAdapter {
             allowedHosts,
             headers: REQUEST_HEADERS,
             retries: 1,
+            signal: ctx.abortSignal,
           });
           job = bambooDetailToJob(detail, display_name, identifier, item.id);
         } catch (err) {

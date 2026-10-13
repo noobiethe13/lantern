@@ -29,6 +29,9 @@ export interface FetchOpts {
   /** Request body, paired with `method: 'POST'`. A plain object is JSON-encoded
    *  (and a `Content-Type: application/json` header added unless one is set). */
   body?: unknown;
+  /** Caller's abort signal (the runner's per-source one). Aborting cancels the in-flight
+   *  request and any retry sleep, and an aborted call is never retried. */
+  signal?: AbortSignal;
 }
 
 const PRIVATE_HOST_RX = [
@@ -237,8 +240,26 @@ function isRetryable(err: unknown): boolean {
   return true;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function abortedError(): Error {
+  const err = new Error('fetch aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+/** Sleeps `ms`, rejecting early if `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortedError());
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortedError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function buildRequestInit(opts: FetchOpts, signal: AbortSignal): RequestInit {
@@ -262,8 +283,9 @@ function buildRequestInit(opts: FetchOpts, signal: AbortSignal): RequestInit {
 async function fetchOnce(url: string, opts: FetchOpts, kind: 'json' | 'text'): Promise<unknown> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? FETCH_TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([ctrl.signal, opts.signal]) : ctrl.signal;
   try {
-    const res = await fetch(url, buildRequestInit(opts, ctrl.signal));
+    const res = await fetch(url, buildRequestInit(opts, signal));
     if (!res.ok) {
       const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
       const snippet = await bodySnippet(res);
@@ -297,13 +319,14 @@ async function fetchWithRetry(url: string, opts: FetchOpts, kind: 'json' | 'text
   const base = opts.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS;
 
   for (let attempt = 0; ; attempt++) {
+    if (opts.signal?.aborted) throw abortedError();
     try {
       return await fetchOnce(url, opts, kind);
     } catch (err) {
-      if (attempt >= retries || !isRetryable(err)) throw err;
+      if (opts.signal?.aborted || attempt >= retries || !isRetryable(err)) throw err;
       const retryAfter = err instanceof HttpStatusError ? err.retryAfterMs : null;
       const backoff = Math.min(base * 2 ** attempt, RETRY_MAX_DELAY_MS);
-      await sleep((retryAfter ?? backoff) + Math.random() * base);
+      await sleep((retryAfter ?? backoff) + Math.random() * base, opts.signal);
     }
   }
 }

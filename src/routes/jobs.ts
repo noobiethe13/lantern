@@ -4,8 +4,12 @@ import { db } from '../db/client';
 import { runLivenessCheck } from '../runner/liveness';
 import { deserializeVector, topKSimilar } from '../core/embed';
 import { zodErrorBody } from '../server/errors';
+import { compareRank, preferenceAdjustments, type RankableJob } from '../core/preference';
+import { calibrationReport, loadPreferenceModel } from '../runner/preference';
 
 export const jobs = new Hono();
+
+type RankRow = RankableJob & { embedding: Uint8Array | null };
 
 const JOB_STATUSES = ['new', 'shortlist', 'applied', 'interview', 'offer', 'rejected', 'hidden'] as const;
 
@@ -52,7 +56,9 @@ jobs.get('/', c => {
     }
   }
   if (l2 === '1') conditions.push('j.l2_verdict_json IS NOT NULL');
-  if (fit === '1') conditions.push('j.l2_fit = 1');
+  // l1_pass too: a verdict can outlive L1 eligibility (a job rescued in one run and
+  // not in the next keeps its l2_fit), and a job that no longer passes L1 isn't a match.
+  if (fit === '1') conditions.push('j.l2_fit = 1 AND j.l1_pass = 1');
   if (remote === '1') conditions.push('j.remote = 1');
   if (sourceType) {
     // Comma-separated list → s.type IN (...). Supports multi-select source filter.
@@ -82,19 +88,49 @@ jobs.get('/', c => {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // The UI masthead promises "ranked by fit" — honor it in every view:
-  // L2-scored first (best leading), then L1 survivors, then the rest by recency.
-  const orderBy = 'ORDER BY (j.l2_score IS NULL), j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC';
-
-  const rows = db.query<Record<string, unknown>, Binding[]>(
-    `SELECT j.*, s.display_name AS source_name, s.type AS source_type,
+  const fullRow = `SELECT j.*, s.display_name AS source_name, s.type AS source_type,
             (SELECT COUNT(*) FROM jobs d WHERE d.duplicate_of = j.id) AS duplicate_count
      FROM jobs j
-     LEFT JOIN sources s ON s.id = j.source_id
-     ${where}
-     ${orderBy}
-     LIMIT ? OFFSET ?`
-  ).all(...params, limit, offset);
+     LEFT JOIN sources s ON s.id = j.source_id`;
+
+  // The UI masthead promises "ranked by fit" — honor it in every view:
+  // L2-scored first (fits before non-fits, best leading), then L1 survivors, then
+  // the rest by recency (id breaks ties so pages are stable). compareRank (core/preference.ts) must stay in step.
+  const orderBy = 'ORDER BY (j.l2_score IS NULL), j.l2_fit DESC, j.l2_score DESC, j.l1_pass DESC, j.first_seen DESC, j.id DESC';
+
+  // With a learned taste (embeddings on, enough triaged jobs) the order is a blend,
+  // which SQL can't express, so rank in JS over id/score/vector only and fetch full
+  // rows for the requested page. Otherwise the plain SQL order and pagination apply.
+  const model = loadPreferenceModel();
+  let rows: Record<string, unknown>[];
+  let adjust: Map<number, number> | null = null;
+  if (model) {
+    // Only L2-scored rows are blended (unscored ones sort by L1/recency), so the
+    // embedding BLOB is read for those alone.
+    const ranked = db.query<RankRow, Binding[]>(
+      `SELECT j.id, j.l2_score, j.l2_fit, j.l1_pass, j.first_seen,
+              CASE WHEN j.l2_score IS NOT NULL THEN j.embedding END AS embedding
+       FROM jobs j LEFT JOIN sources s ON s.id = j.source_id ${where}`
+    ).all(...params);
+    adjust = preferenceAdjustments(model, ranked.map(r => ({ id: r.id, vec: deserializeVector(r.embedding) })));
+    ranked.sort(compareRank(adjust));
+    const pageIds = ranked.slice(offset, offset + limit).map(r => r.id);
+    const byId = new Map<number, Record<string, unknown>>();
+    if (pageIds.length > 0) {
+      const pageRows = db.query<Record<string, unknown>, number[]>(
+        `${fullRow} WHERE j.id IN (${pageIds.map(() => '?').join(',')})`
+      ).all(...pageIds);
+      for (const r of pageRows) byId.set(Number(r['id']), r);
+    }
+    rows = pageIds.flatMap(id => { const r = byId.get(id); return r ? [r] : []; });
+  } else {
+    rows = db.query<Record<string, unknown>, Binding[]>(
+      `${fullRow}
+       ${where}
+       ${orderBy}
+       LIMIT ? OFFSET ?`
+    ).all(...params, limit, offset);
+  }
 
   // LEFT JOIN sources so a source_type filter (which references s.type) resolves
   // here too — the WHERE clause is shared with the rows query above.
@@ -102,8 +138,17 @@ jobs.get('/', c => {
     `SELECT COUNT(*) AS n FROM jobs j LEFT JOIN sources s ON s.id = j.source_id ${where}`
   ).get(...params)?.n ?? 0;
 
-  return c.json({ jobs: rows.map(parseJobRow), total, limit, offset });
+  // pref_adjust: the score delta personalization applied (null = no model or no
+  // vector), so the UI can say "like jobs you shortlisted" without recomputing.
+  const withPref = rows.map(r => {
+    const delta = adjust?.get(Number(r['id']));
+    return { ...parseJobRow(r), pref_adjust: delta === undefined ? null : Math.round(delta * 1000) / 1000 };
+  });
+  return c.json({ jobs: withPref, total, limit, offset });
 });
+
+// Registered before '/:id' so "calibration" is not read as a job id.
+jobs.get('/calibration', c => c.json(calibrationReport()));
 
 jobs.get('/:id', c => {
   const row = db.query<Record<string, unknown>, [number]>(
@@ -193,7 +238,7 @@ jobs.patch('/:id/status', async c => {
   const id = Number(c.req.param('id'));
   const now = Date.now();
   db.run(
-    `UPDATE jobs SET status = ?, applied_at = CASE WHEN ? = 'applied' AND applied_at IS NULL THEN ? ELSE applied_at END WHERE id = ?`,
+    `UPDATE jobs SET status = ?, applied_at = CASE WHEN ? IN ('applied','interview','offer') AND applied_at IS NULL THEN ? ELSE applied_at END WHERE id = ?`,
     [status, status, now, id]
   );
   return c.json({ ok: true });

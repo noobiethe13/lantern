@@ -11,6 +11,10 @@ import { llmSettings } from './routes/llm-settings';
 import { resumeSettings } from './routes/resume';
 import { embeddingSettings } from './routes/embeddings';
 import { freshnessSettings } from './routes/freshness';
+import { l2CapSettings } from './routes/l2-cap';
+import { boardCacheSettings } from './routes/board-cache';
+import { boardRefreshSettings } from './routes/board-refresh';
+import { startBoardRefresher } from './runner/board-refresher';
 import { recoverInterruptedScans } from './runner/scan';
 
 // db import in routes triggers runMigrations via client.ts singleton
@@ -21,6 +25,11 @@ import { recoverInterruptedScans } from './runner/scan';
 // in review notes). Safe to call unconditionally at startup — it only clears
 // state a dead process left behind, never a lock this process itself just took.
 recoverInterruptedScans();
+
+// Warms stale company boards in the background after a short delay. Skipped when
+// NODE_ENV=test (`bun test` sets it, and the shared test harness imports this file), so
+// importing the app never starts background fetches.
+if (process.env.NODE_ENV !== 'test') startBoardRefresher();
 
 const app = new Hono();
 
@@ -86,6 +95,9 @@ app.route('/api/settings/llm', llmSettings);
 app.route('/api/settings/resume', resumeSettings);
 app.route('/api/settings/embeddings', embeddingSettings);
 app.route('/api/settings/freshness', freshnessSettings);
+app.route('/api/settings/l2-cap', l2CapSettings);
+app.route('/api/settings/board-cache', boardCacheSettings);
+app.route('/api/settings/board-refresh', boardRefreshSettings);
 
 // Anything under /api/* that didn't match a route above (wrong method, unknown
 // path) must 404 as JSON — registered after every real API route but before

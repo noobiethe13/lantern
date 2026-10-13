@@ -23,7 +23,7 @@ describe('parseAshby', () => {
     });
   });
 
-  test('ignores non-annual / non-salary comp components', () => {
+  test('annualises an hourly salary component and ignores non-salary components', () => {
     const json = {
       jobs: [{
         id: 'h1', title: 'Contractor', jobUrl: 'https://jobs.ashbyhq.com/acme/h1',
@@ -35,8 +35,24 @@ describe('parseAshby', () => {
       }],
     };
     expect(parseAshby(json, 'Acme')[0]).toMatchObject({
-      salary_min_usd: null, salary_max_usd: null, salary_currency: null,
+      salary_min_usd: 104000, salary_max_usd: 166400, salary_currency: 'USD',
     });
+  });
+
+  test('prefers a yearly salary component over an hourly one, drops one-time and mislabelled pay', () => {
+    const comp = (components: unknown[]) => ({
+      jobs: [{ id: 'p1', title: 'X', jobUrl: 'https://jobs.ashbyhq.com/acme/p1', compensation: { summaryComponents: components } }],
+    });
+    expect(parseAshby(comp([
+      { compensationType: 'Salary', interval: '1 HOUR', currencyCode: 'USD', minValue: 50, maxValue: 80 },
+      { compensationType: 'Salary', interval: '1 YEAR', currencyCode: 'USD', minValue: 120000, maxValue: 150000 },
+    ]), 'Acme')[0]).toMatchObject({ salary_min_usd: 120000, salary_max_usd: 150000 });
+    expect(parseAshby(comp([
+      { compensationType: 'Salary', interval: 'NONE', currencyCode: 'USD', minValue: 5000, maxValue: 5000 },
+    ]), 'Acme')[0]).toMatchObject({ salary_min_usd: null, salary_currency: null });
+    expect(parseAshby(comp([
+      { compensationType: 'Salary', interval: '1 HOUR', currencyCode: 'USD', minValue: 90000, maxValue: 120000 },
+    ]), 'Acme')[0]).toMatchObject({ salary_min_usd: null, salary_currency: null });
   });
 
   test('no compensation object yields null salary', () => {
@@ -157,5 +173,17 @@ describe('parseAshby', () => {
       const json = { jobs: [{ id: '1', jobUrl: 'https://jobs.ashbyhq.com/acme/1' }] };
       expect(parseAshby(json, 'Acme')).toEqual([]);
     });
+  });
+});
+
+describe('parseAshby employment type', () => {
+  const base = { id: 'j', title: 'Engineer', jobUrl: 'https://jobs.ashbyhq.com/acme/j', location: 'Remote' };
+  test('maps the structured employmentType', () => {
+    expect(parseAshby({ jobs: [{ ...base, employmentType: 'Intern' }] }, 'Acme')[0].employment_type).toBe('internship');
+    expect(parseAshby({ jobs: [{ ...base, employmentType: 'FullTime' }] }, 'Acme')[0].employment_type).toBe('full_time');
+  });
+  test('leaves it absent when missing or unrecognised', () => {
+    expect(parseAshby({ jobs: [base] }, 'Acme')[0]).not.toHaveProperty('employment_type');
+    expect(parseAshby({ jobs: [{ ...base, employmentType: 'Other' }] }, 'Acme')[0]).not.toHaveProperty('employment_type');
   });
 });

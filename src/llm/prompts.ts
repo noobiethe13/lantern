@@ -96,8 +96,16 @@ Grading rubric, in addition to the criteria above:
 - A remote job must be open to candidates in the user's allowed/home region(s)
   (criteria.location.allowed and always_allow). If it's remote but explicitly
   restricted to other countries only, fit=false.
-- When the description is too thin or missing to confirm location or
-  experience, cap score at 0.6 even if other signals look positive.
+- When the description is too thin or missing to confirm location, experience
+  or a must-have skill, cap score at 0.6 even if other signals look positive.
+- criteria.skills.must are hard requirements: a description that clearly lacks
+  one is fit=false. criteria.skills.nice only raise the score.
+- Judge criteria.industries (include/exclude) and company_stage (startup =
+  early-stage, scaleup = growth-stage, enterprise = large/established) from the
+  company and description. A clear mismatch is fit=false.
+- If criteria.visa_sponsorship_required and the description says sponsorship is
+  not offered, fit=false. If criteria.employment_types is set and the posting is
+  clearly a different type, fit=false.
 - salary_min_usd must be an ANNUAL USD amount: if the description states a
   salary in another currency, convert it to an approximate USD figure; if you
   cannot confidently convert it, or it isn't an annual figure, use null rather
@@ -122,7 +130,12 @@ Output ONLY this JSON (no markdown, no commentary):
   "experience_years": {"min": <int|null>, "max": <int|null>} | null,
   "salary_min_usd": <int|null>,
   "salary_currency": "<ISO code, e.g. USD/EUR/GBP/INR>",
-  "exclude_companies": ["..."]
+  "exclude_companies": ["..."],
+  "employment_types": ["full_time","part_time","contract","internship","temporary"],
+  "visa_sponsorship_required": <bool>,
+  "skills": {"must": ["..."], "nice": ["..."]},
+  "industries": {"include": ["..."], "exclude": ["..."]},
+  "company_stage": ["startup","scaleup","enterprise"]
 }
 
 Extraction rules:
@@ -171,5 +184,28 @@ Extraction rules:
   "€90k" -> "EUR"; "£80k" -> "GBP"; "₹20L"/"20 lakh" -> "INR" (and 20 lakh = 2000000).
   Default "USD" when no salary is stated or the currency is ambiguous.
 - exclude_companies: companies to avoid ("not Meta" -> ["meta"]). Empty if none.
+- employment_types: only the types the user asked for ("contract" -> ["contract"],
+  "summer internship" -> ["internship"], "part time" -> ["part_time"], "contract or
+  full-time" -> both). Empty array (= any) when unstated; a plain role search is
+  NOT a request for full_time.
+- visa_sponsorship_required: true only when the user says they need sponsorship
+  or a visa ("need H-1B sponsorship", "visa sponsorship required"), else false.
+- skills.must: technologies/skills the user marks as required ("must know
+  Kubernetes", "needs Rust"). A skill that is just part of the role ("Rust backend
+  engineer") stays in title.positive, not here. skills.nice: ones marked optional
+  ("Kubernetes a plus", "ideally Go", "bonus"). Lowercase. Empty if none.
+- industries.exclude: industries to avoid, as short keywords with 1-3 common
+  variants ("no crypto" -> ["crypto","blockchain","web3"]; "no gambling or
+  defense" -> ["gambling","defense"]). L1 matches these as whole words in the
+  company name and job title, so use industry-specific words ("crypto",
+  "casino", "tobacco", "defense contractor") and never bare function words that
+  also appear in job titles (finance, security, health, payments, ads, data,
+  insurance, marketing, sales): "no fintech" -> ["fintech"], not ["finance"].
+  industries.include: industries the user wants
+  ("climate tech only" -> ["climate"]). Empty if none.
+- company_stage: "early-stage"/"startup"/"seed"/"Series A" -> ["startup"];
+  "growth-stage"/"scale-up"/"Series B-C" -> ["scaleup"]; "big tech"/"large
+  company"/"enterprise"/"FAANG" -> ["enterprise"]. Combine when several apply.
+  Empty if unstated.
 - Ignore anything you cannot map to a field. Never invent constraints.`;
 }
