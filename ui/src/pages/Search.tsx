@@ -1,21 +1,16 @@
 import { useState, useEffect, useRef, useCallback, memo, type CSSProperties } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
-  BarChart3, Clock, AlertTriangle,
+  BarChart3, Clock, AlertTriangle, ChevronRight, ChevronDown,
 } from 'lucide-react';
 import { api, formatMoney, type Run, type InterpretedCriteria } from '@/lib/api';
 import { useSSE, type ScanEvent } from '@/lib/sse';
-import { Button, Spinner, Badge } from '@/components/ui';
+import { Button, Spinner, Badge, Kbd } from '@/components/ui';
 import { EmptyLantern, Embers } from '@/components/brand';
+import { PipelineView, advance, freshPipeline, formatSpan, isL2Trouble, type Pipeline } from '@/components/ScanPipeline';
 
-// An l2_done event whose pass was aborted (fatal provider error) or that logged
-// grading errors is real trouble, not a plain success — don't draw it green.
-function isL2Trouble(event: ScanEvent): boolean {
-  if (event.type !== 'l2_done') return false;
-  const d = event.data;
-  return Boolean(d?.aborted) || (typeof d?.errors === 'number' && d.errors > 0);
-}
+const n = (v: number) => v.toLocaleString();
 
 function eventColor(event: ScanEvent): string {
   if (isL2Trouble(event)) return 'var(--danger)';
@@ -69,9 +64,57 @@ const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
 
 function duration(run: Run): string {
   if (!run.finished_at) return '…';
-  const ms = run.finished_at - run.started_at;
-  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+  return formatSpan(run.finished_at - run.started_at);
+}
+
+// Eases a number up from 0 once, for the moment a search lands.
+function useCountUp(target: number, ms = 900): number {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setV(target); return; }
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - t0) / ms);
+      setV(Math.round(target * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, ms]);
+  return v;
+}
+
+// The landing: the match count set large in the display face, the funnel that
+// produced it in one quiet line beneath, and the obvious next step.
+function ResultSummary({ run, onView }: { run: Run; onView: () => void }) {
+  const matches = useCountUp(run.jobs_l2_pass);
+  const none = run.jobs_l2_pass === 0;
+  return (
+    <div style={{ marginTop: 'var(--space-xl)', animation: 'rise 500ms cubic-bezier(0.22,1,0.36,1) both' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <span className="tnum" style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(48px, 6vw, 64px)', fontWeight: 500, lineHeight: 0.95, letterSpacing: '-0.02em', color: none ? 'var(--text-muted)' : 'var(--accent-text)', textShadow: none ? undefined : '0 0 28px color-mix(in oklch, var(--accent) 35%, transparent)' }}>
+          {matches.toLocaleString()}
+        </span>
+        <span style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '22px', color: 'var(--text)' }}>
+          {run.jobs_l2_pass === 1 ? 'match' : 'matches'}
+        </span>
+      </div>
+      <p className="tnum" style={{ margin: '10px 0 0', fontSize: '13.5px', color: 'var(--text-muted)' }}>
+        from {n(run.jobs_found)} jobs across {n(run.sources_total)} boards
+        <span style={{ color: 'var(--text-faint)' }}> · {n(run.jobs_new)} new · {n(run.jobs_l1_pass)} passed filters · {duration(run)}</span>
+        {(run.l2_pending ?? 0) > 0 && (
+          <span style={{ color: 'var(--text-faint)' }} title="Search the same query again to grade the next batch"> · {n(run.l2_pending!)} not yet graded</span>
+        )}
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 'var(--space-md)' }}>
+        <Button onClick={onView}>
+          {none ? 'Browse everything it found' : 'Review matches'} <ArrowRight size={14} strokeWidth={2.25} />
+        </Button>
+        {none && <span style={{ fontSize: '12.5px', color: 'var(--text-faint)' }}>Try loosening the location or salary.</span>}
+      </div>
+    </div>
+  );
 }
 
 function timeAgo(ts: number): string {
@@ -117,7 +160,7 @@ function runTooltip(run: Run, isLatest: boolean): string {
     `${run.jobs_l1_pass.toLocaleString()} passed L1`,
     `${run.jobs_l2_pass.toLocaleString()} matched`,
   ];
-  if (run.errors.length > 0) bits.push(`${run.errors.length} source error${run.errors.length === 1 ? '' : 's'}`);
+  if (run.error_count > 0) bits.push(`${run.error_count} source error${run.error_count === 1 ? '' : 's'}`);
   const action = isLatest
     ? "view this run's matches"
     : run.query
@@ -158,8 +201,8 @@ function RecentRuns({ runs, onView, onOpenLatest, onRefillQuery }: {
                 </div>
                 <div className="tnum" style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: 2 }}>
                   {timeAgo(run.started_at)} · {duration(run)}
-                  {run.errors.length > 0 && (
-                    <span style={{ color: 'var(--warning)' }}> · {run.errors.length} error{run.errors.length === 1 ? '' : 's'}</span>
+                  {run.error_count > 0 && (
+                    <span style={{ color: 'var(--warning)' }}> · {run.error_count} error{run.error_count === 1 ? '' : 's'}</span>
                   )}
                 </div>
               </div>
@@ -275,7 +318,7 @@ function InterpretedChips({ c }: { c: InterpretedCriteria }) {
 // Rotated through the hero input — for an NL-driven search the placeholder is
 // also teaching: it shows the breadth of what the parser understands.
 const PLACEHOLDERS = [
-  'e.g. Senior backend engineer, remote in Europe, $120k+',
+  'Senior backend engineer, remote in Europe, $120k+',
   'Staff platform engineer, SF or remote US, no agencies',
   'Flutter developer, Berlin or remote EU, €70k+',
   'ML engineer, remote, $150k+, no crypto',
@@ -298,6 +341,10 @@ export default function SearchPage() {
   const [recent, setRecent] = useState<string[]>([]);
   const [showRecent, setShowRecent] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
+  const [pipeline, setPipeline] = useState<Pipeline>(() => freshPipeline());
+  const [scanStartedAt, setScanStartedAt] = useState(0);
+  const [showLog, setShowLog] = useState(false);
+  const location = useLocation();
   const logCounter = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -324,13 +371,19 @@ export default function SearchPage() {
   useEffect(() => {
     loadRuns().then(rs => {
       const active = rs.find(r => !r.finished_at);
-      if (active) { setActiveRunId(active.id); setScanning(true); }
+      if (active) {
+        setPipeline(freshPipeline(true));
+        setScanStartedAt(active.started_at);
+        setActiveRunId(active.id);
+        setScanning(true);
+      }
     });
     loadRecent();
   }, [loadRuns, loadRecent]);
 
   const { reconnecting } = useSSE(activeRunId, (event: ScanEvent) => {
     setLog(prev => [...prev, { id: logCounter.current++, event, tsLabel: formatTs(Date.now()) }]);
+    setPipeline(p => advance(p, event));
     // 'scan_done' is the L1→L2 handoff (not terminal); keep showing progress.
     // The run is finished only on 'l2_done' (or 'done' for an already-finished
     // run, or 'error').
@@ -374,14 +427,16 @@ export default function SearchPage() {
   // The raw query drives the search. The backend interprets it into criteria via
   // Claude (location, salary, seniority, exclusions — all from the sentence), so
   // there's nothing to persist client-side.
-  const handleScan = async () => {
+  const handleScan = async (override?: string) => {
     if (scanning) return;
-    const query = keyword.trim();
+    const query = (override ?? keyword).trim();
     if (!query) return;
     setShowRecent(false);
     setIgniteAt(Date.now());
     setScanning(true);
     setLog([]);
+    setPipeline(freshPipeline());
+    setScanStartedAt(Date.now());
     setLastResult(null);
     setScanError(null);
     setInterpreted(null);
@@ -392,6 +447,11 @@ export default function SearchPage() {
       const res = await api.runs.startScan(query);
       setInterpreted(res.criteria);
       setActiveRunId(res.runId);
+      // The run's 'start' event can fire before this page subscribes; the row
+      // has the board count either way.
+      api.runs.get(res.runId)
+        .then(run => setPipeline(p => (p.boardsTotal ? p : { ...p, phase: p.phase === 'interpreting' ? 'fetching' : p.phase, boardsTotal: run.sources_total })))
+        .catch(e => console.error('run lookup failed', e));
     } catch (err) {
       setScanning(false);
       const msg = String(err);
@@ -399,6 +459,18 @@ export default function SearchPage() {
       setLog(prev => [...prev, { id: logCounter.current++, event: { runId: 0, type: 'error', msg }, tsLabel: formatTs(Date.now()) }]);
     }
   };
+
+  // A search started from the command palette arrives as router state. Run it
+  // once, then drop the state so a refresh or Back doesn't fire it again.
+  const handledNav = useRef<string | null>(null);
+  useEffect(() => {
+    const q = (location.state as { runQuery?: string } | null)?.runQuery;
+    if (!q || handledNav.current === location.key) return;
+    handledNav.current = location.key;
+    setKeyword(q);
+    navigate('.', { replace: true, state: null });
+    handleScan(q);
+  }, [location.key]);
 
   // Cycle the example query while the input is empty (interval matches the
   // ph-cycle keyframe duration so each example fades out before swapping).
@@ -424,7 +496,7 @@ export default function SearchPage() {
   };
 
   return (
-    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '100vh', maxWidth: 740, margin: '0 auto', padding: '0 var(--space-xl)' }}>
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '100vh', maxWidth: 780, margin: '0 auto', padding: '0 var(--space-xl)' }}>
       {/* auto vertical margins center the hero composition while content is light;
           they collapse to 0 as the log / runs grow, restoring normal flow */}
       <div style={{ position: 'relative', margin: 'auto 0', padding: 'var(--space-2xl) 0' }}>
@@ -446,10 +518,12 @@ export default function SearchPage() {
 
       <div style={{ position: 'relative', zIndex: 1 }}>
       <header style={{ marginBottom: 'var(--space-xl)' }}>
-        <h1 style={{ margin: '0 0 var(--space-md)', fontSize: 'clamp(36px, 5.6vw, 60px)', fontWeight: 500, color: 'var(--text)', lineHeight: 1.04, letterSpacing: '-0.015em', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) both' }}>
-          What <em style={{ fontStyle: 'italic', color: 'var(--accent-2)', fontWeight: 500 }}>role</em> are you<br />looking for?
+        {/* The display cut of Bodoni (optical sizing) only shows its hairlines at
+            scale; this is the one place the type is allowed to be that large. */}
+        <h1 style={{ margin: '0 0 var(--space-lg)', fontSize: 'clamp(42px, 6.6vw, 80px)', fontWeight: 480, color: 'var(--text)', lineHeight: 1, letterSpacing: '-0.022em', animation: 'rise 700ms cubic-bezier(0.22,1,0.36,1) both' }}>
+          What <em style={{ fontStyle: 'italic', color: 'var(--accent-2)', fontWeight: 480 }}>role</em> are you<br />looking for?
         </h1>
-        <p style={{ margin: 0, fontSize: '16px', color: 'var(--text-muted)', maxWidth: '52ch', lineHeight: 1.55, fontFamily: 'var(--font-ui)', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 90ms both' }}>
+        <p style={{ margin: 0, fontSize: '16.5px', color: 'var(--text-muted)', maxWidth: '50ch', lineHeight: 1.55, fontFamily: 'var(--font-ui)', animation: 'rise 600ms cubic-bezier(0.22,1,0.36,1) 90ms both' }}>
           Describe it in plain English. Lantern searches 300+ company boards and
           live aggregators, then filters and scores the matches.
         </p>
@@ -504,6 +578,11 @@ export default function SearchPage() {
               </span>
             </span>
           )}
+          {keyword.trim() && !scanning && (
+            <span aria-hidden className="hero-enter" style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', zIndex: 2, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '11.5px', color: 'var(--text-faint)', pointerEvents: 'none' }}>
+              <Kbd>↵</Kbd>
+            </span>
+          )}
           {showRecent && !scanning && suggestions.length > 0 && (
             <div id="recent-searches" role="listbox" aria-label="Recent searches" className="recent-pop">
               {suggestions.map((q, i) => (
@@ -536,7 +615,7 @@ export default function SearchPage() {
             ...(!scanning && !keyword.trim() ? { opacity: 1, background: 'color-mix(in oklch, var(--accent) 30%, var(--surface))', color: 'var(--text-muted)' } : {}),
           }}
         >
-          {scanning ? 'Scanning' : 'Search'}
+          {scanning ? 'Searching' : 'Search'}
           {!scanning && <ArrowRight size={16} strokeWidth={2.25} />}
         </Button>
         <style>{`
@@ -549,7 +628,8 @@ export default function SearchPage() {
             color: var(--text);
             font-family: var(--font-ui);
             font-size: 19px;
-            padding: 19px 22px;
+            padding: 19px 56px 19px 22px;
+            box-shadow: var(--shadow-sm);
             outline: none;
             transition: border-color 150ms ease, box-shadow 150ms ease;
           }
@@ -588,6 +668,7 @@ export default function SearchPage() {
             color: var(--text); font-family: var(--font-ui); font-size: 14px; text-align: left;
           }
           .recent-item:hover, .recent-item.active { background: var(--surface-2); }
+          .hero-enter { animation: fadeIn 160ms ease both; }
         `}</style>
       </div>
       <p style={{ margin: 'var(--space-sm) 0 0', fontSize: '12.5px', color: 'var(--text-faint)' }}>
@@ -596,36 +677,15 @@ export default function SearchPage() {
 
       {interpreted && <InterpretedChips c={interpreted} />}
 
-      {scanning && (
-        <div style={{ marginTop: 'var(--space-lg)' }}>
-          <div style={{ position: 'relative', height: 3, borderRadius: 'var(--radius-full)', background: 'var(--surface-2)', overflow: 'hidden' }}>
-            <div aria-hidden style={{ position: 'absolute', top: 0, left: 0, height: '100%', width: '30%', borderRadius: 'var(--radius-full)', background: 'linear-gradient(90deg, transparent, var(--accent), transparent)', animation: 'sweep 1.3s cubic-bezier(0.45,0,0.55,1) infinite' }} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 'var(--space-sm)', fontSize: '13.5px', color: 'var(--text-muted)' }}>
-            <span aria-hidden style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', animation: 'glow-pulse 1.4s ease-in-out infinite' }} />
-            Fetching sources and scoring matches…
-          </div>
-          {reconnecting && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '12.5px', color: 'var(--warning)' }}>
-              <Spinner size={12} /> Reconnecting…
-            </div>
-          )}
-        </div>
+      {/* Live stages while scanning; they stay up (all checked) after a run
+          finishes in this session so the result reads as the end of the story. */}
+      {(scanning || (lastResult && log.length > 0)) && (
+        <PipelineView p={scanning || pipeline.failed ? pipeline : { ...pipeline, phase: 'done' }} startedAt={scanStartedAt} />
       )}
 
-      {(scanning || log.length > 0) && (
-        <div style={{ marginTop: 'var(--space-lg)' }}>
-          <div ref={logRef} style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1, paddingRight: 4 }}>
-            {log.length === 0 && scanning && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-faint)', fontSize: '12.5px' }}>
-                <Spinner size={12} /> Connecting…
-              </div>
-            )}
-            {/* render only the tail — a scan emits ~1.5-2K events and formatting/
-                mounting every line each render was O(n^2); the full count still
-                accumulates in state, just not all painted */}
-            {(log.length > 300 ? log.slice(log.length - 300) : log).map(entry => <LogLine key={entry.id} entry={entry} />)}
-          </div>
+      {scanning && reconnecting && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: '12.5px', color: 'var(--warning)' }}>
+          <Spinner size={12} /> Reconnecting…
         </div>
       )}
 
@@ -636,15 +696,33 @@ export default function SearchPage() {
       )}
 
       {lastResult && !scanning && (
-        <div style={{ marginTop: 'var(--space-lg)', display: 'flex', alignItems: 'center', gap: 'var(--space-md)', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '14px', color: 'var(--text)' }}>
-            Found <strong className="tnum">{lastResult.jobs_found.toLocaleString()}</strong>,{' '}
-            <strong className="tnum">{lastResult.jobs_new.toLocaleString()}</strong> new ·{' '}
-            <span className="tnum" style={{ color: 'var(--text-muted)' }}>L1 {lastResult.jobs_l1_pass.toLocaleString()} · L2 {lastResult.jobs_l2_pass.toLocaleString()}</span>
-          </span>
-          <Button size="sm" variant="outline" onClick={() => navigate('/jobs?fit=1&run=latest')}>
-            View matches <ArrowRight size={14} />
-          </Button>
+        <ResultSummary
+          run={lastResult}
+          onView={() => navigate(lastResult.jobs_l2_pass > 0 ? '/jobs?fit=1&run=latest' : '/jobs?run=latest', { viewTransition: true })}
+        />
+      )}
+
+      {/* The raw event stream, for when you want to see every board report in.
+          Collapsed by default: the stages above are the readable version. */}
+      {log.length > 0 && (
+        <div style={{ marginTop: 'var(--space-lg)' }}>
+          <button className="log-toggle" onClick={() => setShowLog(s => !s)} aria-expanded={showLog}>
+            {showLog ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            Activity log <span className="tnum" style={{ color: 'var(--text-faint)' }}>· {log.length.toLocaleString()} events</span>
+          </button>
+          {showLog && (
+            <div ref={logRef} style={{ marginTop: 8, maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 1, paddingRight: 4, animation: 'fadeIn 150ms ease' }}>
+              {/* render only the tail — a scan emits ~1.5-2K events and formatting/
+                  mounting every line each render was O(n^2); the full count still
+                  accumulates in state, just not all painted */}
+              {(log.length > 300 ? log.slice(log.length - 300) : log).map(entry => <LogLine key={entry.id} entry={entry} />)}
+            </div>
+          )}
+          <style>{`
+            .log-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; background: none; border: none; cursor: pointer;
+              font-family: var(--font-ui); font-size: 12.5px; color: var(--text-muted); transition: color 150ms ease; }
+            .log-toggle:hover { color: var(--text); }
+          `}</style>
         </div>
       )}
 

@@ -207,14 +207,26 @@
   }
 }
 
+/* Route changes crossfade with a slight rise (View Transitions API, Chromium).
+   The global reduced-motion reset doesn't reach these pseudos, so guard them. */
+@keyframes vt-in  { from { opacity: 0; transform: translateY(6px); } }
+@keyframes vt-out { to   { opacity: 0; } }
+::view-transition-old(root) { animation: vt-out 120ms ease both; }
+::view-transition-new(root) { animation: vt-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
 @keyframes skeleton-shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position:  200% 0; }
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(16px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes fadeIn {
@@ -318,14 +330,6 @@
   .app-sidebar .lantern-toggle { justify-content: center; }
 }
 
-@media (max-width: 760px) {
-  /* detail panel overlays instead of pushing content */
-  .jobs-main { margin-right: auto !important; }
-  /* trim the jobs table to the essentials: fit numeral, role (flex), status */
-  .jobs-grid { grid-template-columns: 46px minmax(0,1fr) 96px !important; }
-  .col-location, .col-seen { display: none !important; }
-}
-
 @layer utilities {
   .font-display { font-family: var(--font-display); }
   .font-serif { font-family: var(--font-serif); }
@@ -338,6 +342,151 @@
   .border-subtle { border-color: var(--border-subtle); }
   .tnum { font-variant-numeric: tabular-nums; }
   .transition-fast { transition: all 150ms cubic-bezier(0.22, 1, 0.36, 1); }
+}
+
+/* Shared controls. States are CSS (not JS style mutation) so hover, press,
+   focus and disabled compose instead of overwriting each other. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-weight: 550; white-space: nowrap; cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 150ms cubic-bezier(0.22,1,0.36,1), color 150ms ease, border-color 150ms ease,
+    box-shadow 150ms ease, transform 120ms cubic-bezier(0.22,1,0.36,1);
+}
+.btn:active:not(:disabled) { transform: translateY(0.5px) scale(0.985); }
+.btn:disabled { cursor: not-allowed; opacity: 0.5; box-shadow: none; }
+.btn[data-loading] { cursor: progress; opacity: 0.75; }
+.btn-sm { padding: 5px 11px; font-size: 12.5px; height: 30px; border-radius: var(--radius-sm); }
+.btn-md { padding: 7px 15px; font-size: 13.5px; height: 34px; border-radius: var(--radius-md); }
+/* the primary fill gets a lit top edge + a warm contact shadow — it reads as a
+   physical lens of lantern glass rather than a flat swatch */
+.btn-default {
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.28), inset 0 -1px 0 oklch(0.3 0.08 50 / 0.12),
+    0 1px 2px oklch(0.45 0.12 55 / 0.22), 0 4px 12px -4px oklch(0.6 0.15 60 / 0.35);
+}
+.btn-default:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-ghost { background: transparent; color: var(--text-muted); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.btn-outline { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: var(--shadow-sm); }
+.btn-outline:hover:not(:disabled) { background: var(--surface-2); }
+.btn-danger { background: transparent; color: var(--danger); border-color: color-mix(in oklch, var(--danger) 35%, transparent); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in oklch, var(--danger) 12%, transparent); }
+
+.field {
+  width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+  color: var(--text); font-family: inherit; font-size: 13.5px; padding: 8px 11px; outline: none;
+  transition: border-color 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 150ms cubic-bezier(0.22,1,0.36,1);
+}
+.field::placeholder { color: var(--text-faint); }
+.field:hover:not(:focus):not(:disabled) { border-color: color-mix(in oklch, var(--text-faint) 45%, var(--border)); }
+.field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.field:disabled { opacity: 0.55; }
+.field-area { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65; padding: 11px 13px; resize: vertical; }
+
+.switch {
+  position: relative; flex-shrink: 0; width: 34px; height: 20px; padding: 0;
+  border: none; border-radius: var(--radius-full); cursor: pointer;
+  background: color-mix(in oklch, var(--text-faint) 38%, var(--border));
+  transition: background 200ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms ease;
+}
+.switch[aria-checked="true"] { background: var(--accent); box-shadow: 0 0 12px -2px color-mix(in oklch, var(--accent) 55%, transparent); }
+.switch:disabled { cursor: not-allowed; opacity: 0.55; }
+.switch[aria-busy="true"] { cursor: progress; }
+.switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--surface); box-shadow: 0 1px 2px oklch(0.2 0.02 60 / 0.25);
+  transition: transform 220ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.switch[aria-checked="true"] .switch-knob { transform: translateX(14px); background: oklch(0.99 0.006 80); }
+.switch:active:not(:disabled) .switch-knob { width: 19px; }
+.switch[aria-checked="true"]:active:not(:disabled) .switch-knob { transform: translateX(11px); }
+
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px;
+  font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; line-height: 1; color: var(--text-muted);
+  background: var(--surface); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--surface-2) 25%, color-mix(in oklch, var(--border) 70%, var(--surface-2)) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s infinite linear;
+}
+
+.toast-stack {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px;
+  width: min(380px, calc(100vw - 32px)); pointer-events: none;
+}
+.toast {
+  position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 11px 12px 11px 14px;
+  border-radius: var(--radius-md); font-size: 13px; line-height: 1.45; color: var(--text); pointer-events: all;
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border); box-shadow: var(--shadow-md);
+  animation: toast-in 260ms cubic-bezier(0.22,1,0.36,1) both;
+}
+.toast[data-leaving] { animation: toast-out 180ms ease both; }
+.toast-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.toast-action {
+  flex-shrink: 0; padding: 4px 9px; border-radius: var(--radius-sm); border: none; cursor: pointer;
+  background: var(--accent-muted); color: var(--accent-text); font-family: inherit; font-size: 12.5px; font-weight: 600;
+  transition: background 140ms ease;
+}
+.toast-action:hover { background: color-mix(in oklch, var(--accent) 28%, var(--accent-muted)); }
+.toast-close { display: flex; flex-shrink: 0; padding: 2px; background: none; border: none; cursor: pointer; color: var(--text-faint); border-radius: 4px; }
+.toast-close:hover { color: var(--text); }
+.toast-timer {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; transform-origin: left;
+  background: color-mix(in oklch, var(--accent) 55%, transparent); animation: toast-timer linear both;
+}
+@keyframes toast-out { to { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes toast-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+/* command palette */
+.cmdk-overlay {
+  position: fixed; inset: 0; z-index: 200; display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 13vh; background: color-mix(in oklch, var(--bg) 45%, transparent);
+  backdrop-filter: blur(5px) saturate(1.05); -webkit-backdrop-filter: blur(5px) saturate(1.05);
+  animation: fadeIn 140ms ease both;
+}
+.cmdk {
+  position: relative; overflow: hidden; width: min(620px, calc(100vw - 32px));
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md), 0 40px 80px -24px oklch(0.25 0.04 60 / 0.35);
+  animation: cmdk-in 200ms cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes cmdk-in { from { opacity: 0; transform: translateY(-6px) scale(0.985); } }
+/* the lantern's light falling on the top edge of the glass */
+.cmdk-glow {
+  position: absolute; top: -90px; left: 50%; width: 420px; height: 160px; transform: translateX(-50%); pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%, color-mix(in oklch, var(--accent) 22%, transparent), transparent 72%);
+}
+.cmdk-input-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 16px 16px 14px 18px; border-bottom: 1px solid var(--border-subtle); }
+.cmdk-input-row input {
+  flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--text);
+  font-family: var(--font-ui); font-size: 16.5px;
+}
+.cmdk-input-row input::placeholder { color: var(--text-faint); }
+.cmdk-list { position: relative; max-height: min(420px, 56vh); overflow-y: auto; padding: 6px; }
+.cmdk-group {
+  padding: 10px 10px 5px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint);
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 11px; padding: 9px 10px; border-radius: var(--radius-md); cursor: pointer;
+  font-size: 13.5px; color: var(--text-muted); scroll-margin: 6px;
+}
+.cmdk-item[aria-selected="true"] { background: var(--surface-2); color: var(--text); }
+.cmdk-icon { display: flex; flex-shrink: 0; color: var(--text-faint); }
+.cmdk-item[aria-selected="true"] .cmdk-icon { color: var(--accent-text); }
+.cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-hint { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11.5px; color: var(--text-faint); }
+.cmdk-empty { padding: 28px 12px; text-align: center; font-size: 13px; color: var(--text-faint); }
+.cmdk-foot {
+  display: flex; align-items: center; gap: 16px; padding: 9px 14px; border-top: 1px solid var(--border-subtle);
+  font-size: 11.5px; color: var(--text-faint); background: color-mix(in oklch, var(--surface-2) 45%, var(--surface));
 }
 
 /* staggered reveal for the detail-panel sections */

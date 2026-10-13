@@ -185,7 +185,9 @@ export interface Run {
   jobs_new: number;
   jobs_l1_pass: number;
   jobs_l2_pass: number;
+  /** A sample on list responses; complete on GET /runs/:id. */
   errors: { source: string; error: string }[];
+  error_count: number;
   trigger: string;
   query: string | null;
   /** Survivors left ungraded when the run finished (cap or failed batches). */
@@ -318,10 +320,12 @@ export const api = {
       if (params?.q) qs.set('q', params.q);
       if (params?.limit) qs.set('limit', String(params.limit));
       if (params?.offset) qs.set('offset', String(params.offset));
-      return request<{ jobs: Job[]; total: number; limit: number; offset: number }>(
+      // total stops at 10,000 (total_capped) — counting a broad filter exactly is a full scan
+      return request<{ jobs: Job[]; total: number; total_capped?: boolean; limit: number; offset: number }>(
         `/jobs?${qs}`
       );
     },
+    statusCounts: () => request<{ counts: Partial<Record<JobStatus, number>> }>('/jobs/status-counts'),
     get: (id: number) => request<Job>(`/jobs/${id}`),
     calibration: () => request<Calibration>('/jobs/calibration'),
     similar: (id: number, limit = 6) =>

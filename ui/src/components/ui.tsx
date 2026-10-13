@@ -5,45 +5,8 @@ import {
 } from 'react';
 import { Loader2, X } from 'lucide-react';
 
-const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
-
 type ButtonVariant = 'default' | 'ghost' | 'danger' | 'outline';
 type ButtonSize = 'sm' | 'md';
-
-const buttonStyles: Record<ButtonVariant, React.CSSProperties> = {
-  default: {
-    background: 'var(--accent)',
-    color: 'var(--accent-ink)',
-    border: '1px solid transparent',
-  },
-  ghost: {
-    background: 'transparent',
-    color: 'var(--text-muted)',
-    border: '1px solid transparent',
-  },
-  danger: {
-    background: 'transparent',
-    color: 'var(--danger)',
-    border: '1px solid color-mix(in oklch, var(--danger) 35%, transparent)',
-  },
-  outline: {
-    background: 'var(--surface)',
-    color: 'var(--text)',
-    border: '1px solid var(--border)',
-  },
-};
-
-const buttonSizes: Record<ButtonSize, React.CSSProperties> = {
-  sm: { padding: '5px 11px', fontSize: '12.5px', height: '30px', borderRadius: 'var(--radius-sm)' },
-  md: { padding: '7px 15px', fontSize: '13.5px', height: '34px', borderRadius: 'var(--radius-md)' },
-};
-
-const buttonHover: Record<ButtonVariant, React.CSSProperties> = {
-  default: { background: 'var(--accent-hover)' },
-  ghost: { background: 'var(--surface-2)', color: 'var(--text)' },
-  danger: { background: 'color-mix(in oklch, var(--danger) 12%, transparent)' },
-  outline: { background: 'var(--surface-2)' },
-};
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -52,46 +15,22 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
+// Hover / press / focus live in globals.css (.btn-*) rather than JS style
+// mutation, so states compose with :disabled and :focus-visible and a caller's
+// inline style can't get "stuck" after mouseleave.
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ variant = 'default', size = 'md', loading, children, style, disabled, onMouseEnter, onMouseLeave, ...props }, ref) => {
-    return (
-      <button
-        ref={ref}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '6px',
-          fontFamily: 'inherit',
-          fontWeight: 550,
-          cursor: disabled || loading ? 'not-allowed' : 'pointer',
-          opacity: disabled || loading ? 0.5 : 1,
-          transition: `background 150ms ${EASE}, color 150ms ${EASE}, border-color 150ms ${EASE}`,
-          whiteSpace: 'nowrap',
-          ...buttonStyles[variant],
-          ...buttonSizes[size],
-          ...style,
-        }}
-        onMouseEnter={e => {
-          if (!disabled && !loading) {
-            Object.assign((e.currentTarget as HTMLButtonElement).style, buttonHover[variant]);
-          }
-          onMouseEnter?.(e);
-        }}
-        onMouseLeave={e => {
-          if (!disabled && !loading) {
-            Object.assign((e.currentTarget as HTMLButtonElement).style, buttonStyles[variant], style);
-          }
-          onMouseLeave?.(e);
-        }}
-        {...props}
-        disabled={disabled || loading}
-      >
-        {loading && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
-        {children}
-      </button>
-    );
-  }
+  ({ variant = 'default', size = 'md', loading, children, className, disabled, ...props }, ref) => (
+    <button
+      ref={ref}
+      className={['btn', `btn-${variant}`, `btn-${size}`, className].filter(Boolean).join(' ')}
+      data-loading={loading || undefined}
+      {...props}
+      disabled={disabled || loading}
+    >
+      {loading && <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />}
+      {children}
+    </button>
+  )
 );
 Button.displayName = 'Button';
 
@@ -136,58 +75,16 @@ export function Badge({ tone = 'neutral', children, style }: BadgeProps) {
   );
 }
 
-const fieldBase: React.CSSProperties = {
-  background: 'var(--surface)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-md)',
-  color: 'var(--text)',
-  fontFamily: 'inherit',
-  fontSize: '13.5px',
-  padding: '8px 11px',
-  outline: 'none',
-  transition: `border-color 150ms ${EASE}, box-shadow 150ms ${EASE}`,
-  width: '100%',
-};
-
-function focusField(el: HTMLElement) {
-  el.style.borderColor = 'var(--accent)';
-  el.style.boxShadow = '0 0 0 3px var(--accent-ring)';
-}
-function blurField(el: HTMLElement) {
-  el.style.borderColor = 'var(--border)';
-  el.style.boxShadow = 'none';
-}
-
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
-  ({ style, ...props }, ref) => (
-    <input
-      ref={ref}
-      style={{ ...fieldBase, ...style }}
-      onFocus={e => { focusField(e.currentTarget); props.onFocus?.(e); }}
-      onBlur={e => { blurField(e.currentTarget); props.onBlur?.(e); }}
-      {...props}
-    />
+  ({ className, ...props }, ref) => (
+    <input ref={ref} className={['field', className].filter(Boolean).join(' ')} {...props} />
   )
 );
 Input.displayName = 'Input';
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
-  ({ style, ...props }, ref) => (
-    <textarea
-      ref={ref}
-      style={{
-        ...fieldBase,
-        fontFamily: 'var(--font-mono)',
-        fontSize: '12.5px',
-        lineHeight: 1.65,
-        padding: '11px 13px',
-        resize: 'vertical',
-        ...style,
-      }}
-      onFocus={e => { focusField(e.currentTarget); props.onFocus?.(e); }}
-      onBlur={e => { blurField(e.currentTarget); props.onBlur?.(e); }}
-      {...props}
-    />
+  ({ className, ...props }, ref) => (
+    <textarea ref={ref} className={['field', 'field-area', className].filter(Boolean).join(' ')} {...props} />
   )
 );
 Textarea.displayName = 'Textarea';
@@ -207,6 +104,36 @@ export function Card({ children, style }: { children: ReactNode; style?: React.C
   );
 }
 
+/**
+ * The one on/off control. Settings used to mix "On/Off" text buttons with the
+ * Jobs refine switches; every boolean now reads the same way.
+ */
+export function Switch({ checked, onChange, disabled, label, busy }: {
+  checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string; busy?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      aria-busy={busy || undefined}
+      disabled={disabled || busy}
+      onClick={() => onChange(!checked)}
+      className="switch"
+    >
+      <span className="switch-knob" />
+    </button>
+  );
+}
+
+/** Keyboard key hint — shortcuts are taught in place, next to what they do. */
+export function Kbd({ children, style }: { children: ReactNode; style?: React.CSSProperties }) {
+  return <kbd className="kbd" style={style}>{children}</kbd>;
+}
+
+export const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+
 export function Spinner({ size = 16 }: { size?: number }) {
   return (
     <Loader2
@@ -225,13 +152,10 @@ interface SkeletonProps {
 export function Skeleton({ width, height, style }: SkeletonProps) {
   return (
     <div
+      className="skeleton"
       style={{
         width: width ?? '100%',
         height: height ?? '14px',
-        borderRadius: 'var(--radius-sm)',
-        background: 'linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%)',
-        backgroundSize: '200% 100%',
-        animation: 'skeleton-shimmer 1.4s infinite linear',
         ...style,
       }}
     />
@@ -239,7 +163,8 @@ export function Skeleton({ width, height, style }: SkeletonProps) {
 }
 
 type ToastType = 'success' | 'error' | 'info';
-type ToastFn = (msg: string, type?: ToastType) => void;
+interface ToastOpts { action?: { label: string; onClick: () => void }; duration?: number }
+type ToastFn = (msg: string, type?: ToastType, opts?: ToastOpts) => void;
 
 const ToastContext = createContext<ToastFn>(() => {});
 
@@ -251,86 +176,57 @@ interface ToastItem {
   id: number;
   msg: string;
   type: ToastType;
+  action?: ToastOpts['action'];
+  duration: number;
+  leaving?: boolean;
 }
 
 const toastColor: Record<ToastType, string> = {
   success: 'var(--success)',
   error: 'var(--danger)',
-  info: 'var(--text)',
+  info: 'var(--accent)',
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
-  const toast = useCallback<ToastFn>((msg, type = 'info') => {
-    const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, msg, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4500);
+  // Two-step removal so the exit animation plays before the node unmounts.
+  const dismiss = useCallback((id: number) => {
+    setToasts(prev => prev.map(t => t.id === id ? { ...t, leaving: true } : t));
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 180);
   }, []);
 
-  const dismiss = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
+  const toast = useCallback<ToastFn>((msg, type = 'info', opts) => {
+    const id = Date.now() + Math.random();
+    const duration = opts?.duration ?? (opts?.action ? 6000 : 4500);
+    setToasts(prev => [...prev.slice(-3), { id, msg, type, action: opts?.action, duration }]);
+    setTimeout(() => dismiss(id), duration);
+  }, [dismiss]);
 
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <div
-        style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          zIndex: 9999,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          maxWidth: 380,
-          pointerEvents: 'none',
-        }}
-      >
-        {toasts.map(t => {
-          const color = toastColor[t.type];
-          return (
-            <div
-              key={t.id}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                padding: '11px 13px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '13px',
-                lineHeight: 1.45,
-                background: 'var(--surface)',
-                border: `1px solid ${t.type === 'info' ? 'var(--border)' : `color-mix(in oklch, ${color} 35%, var(--border))`}`,
-                color: 'var(--text)',
-                boxShadow: 'var(--shadow-md)',
-                animation: `toast-in 200ms ${EASE}`,
-                pointerEvents: 'all',
-              }}
-            >
-              {t.type !== 'info' && (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 6 }} />
-              )}
-              <span style={{ flex: 1 }}>{t.msg}</span>
+      <div className="toast-stack" role="region" aria-label="Notifications" aria-live="polite">
+        {toasts.map(t => (
+          <div key={t.id} className="toast" data-leaving={t.leaving || undefined}>
+            <span aria-hidden className="toast-dot" style={{ background: toastColor[t.type] }} />
+            <span style={{ flex: 1 }}>{t.msg}</span>
+            {t.action && (
               <button
-                onClick={() => dismiss(t.id)}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-faint)',
-                  padding: 0, display: 'flex', alignItems: 'center', flexShrink: 0, marginTop: 2,
-                }}
+                className="toast-action"
+                onClick={() => { t.action!.onClick(); dismiss(t.id); }}
               >
-                <X size={13} />
+                {t.action.label}
               </button>
-            </div>
-          );
-        })}
+            )}
+            <button className="toast-close" aria-label="Dismiss notification" onClick={() => dismiss(t.id)}>
+              <X size={13} />
+            </button>
+            {/* time-remaining hairline: tells you how long Undo stays available */}
+            <span aria-hidden className="toast-timer" style={{ animationDuration: `${t.duration}ms` }} />
+          </div>
+        ))}
       </div>
     </ToastContext.Provider>
   );
-}
-
-if (typeof document !== 'undefined' && !document.getElementById('ui-keyframes')) {
-  const style = document.createElement('style');
-  style.id = 'ui-keyframes';
-  style.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
-  document.head.appendChild(style);
 }

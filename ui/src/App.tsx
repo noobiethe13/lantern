@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
 import { Search, LayoutList, Settings as SettingsIcon } from 'lucide-react';
-import Jobs from './pages/Jobs';
+import Jobs from './pages/jobs';
 import SearchPage from './pages/Search';
-import Settings from './pages/Settings';
-import { ToastProvider } from './components/ui';
+import Settings from './pages/settings';
+import { ToastProvider, Kbd, MOD_KEY } from './components/ui';
 import { LanternMark, PageBackdrop } from './components/brand';
+import { CommandPalette } from './components/CommandPalette';
+import { api } from './lib/api';
 
 function useTheme() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -25,6 +27,37 @@ function useTheme() {
 
   const toggle = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
   return { theme, toggle };
+}
+
+// Whether a search is running anywhere, so the rail can say so from any page.
+// Polls only while the tab is visible; the server is local so a 5s tick is free.
+function useScanActive(): boolean {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const check = () => {
+      if (document.hidden) return;
+      api.runs.list(1)
+        .then(({ runs }) => { if (live) setActive(Boolean(runs[0] && runs[0].finished_at == null)); })
+        .catch(e => console.error('run status poll failed', e));
+    };
+    check();
+    const iv = setInterval(check, 5000);
+    document.addEventListener('visibilitychange', check);
+    return () => { live = false; clearInterval(iv); document.removeEventListener('visibilitychange', check); };
+  }, []);
+  return active;
+}
+
+const TITLES: Record<string, string> = { '/jobs': 'Jobs', '/settings': 'Settings' };
+
+function DocumentTitle({ scanning }: { scanning: boolean }) {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    const page = TITLES[pathname];
+    document.title = `${scanning ? '● ' : ''}${page ? `${page} · ` : ''}Lantern`;
+  }, [pathname, scanning]);
+  return null;
 }
 
 function Wordmark() {
@@ -53,8 +86,9 @@ const NAV = [
   { to: '/settings', label: 'Settings', icon: SettingsIcon, end: false },
 ];
 
-function Sidebar() {
-  const { theme, toggle } = useTheme();
+function Sidebar({ theme, toggle, scanning, onOpenPalette }: {
+  theme: 'dark' | 'light'; toggle: () => void; scanning: boolean; onOpenPalette: () => void;
+}) {
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     [
@@ -87,15 +121,23 @@ function Sidebar() {
         animation: 'breathe 7s ease-in-out infinite',
       }} />
 
-      <div style={{ position: 'relative', zIndex: 1, marginBottom: 28 }}>
+      <div style={{ position: 'relative', zIndex: 1, marginBottom: 22 }}>
         <Wordmark />
       </div>
 
+      <button className="cmdk-trigger" onClick={onOpenPalette} aria-label="Open command menu" title={`Command menu (${MOD_KEY}+K)`}>
+        <Search size={14} strokeWidth={2} style={{ flexShrink: 0 }} />
+        <span className="nav-label" style={{ flex: 1, textAlign: 'left' }}>Jump to…</span>
+        <span className="nav-label cmdk-keys"><Kbd>{MOD_KEY}</Kbd><Kbd>K</Kbd></span>
+      </button>
+
       <nav style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
         {NAV.map(({ to, label, icon: Icon, end }) => (
-          <NavLink key={to} to={to} end={end} className={navClass}>
+          <NavLink key={to} to={to} end={end} className={navClass} viewTransition>
             <Icon size={16} strokeWidth={2} />
             <span className="nav-label">{label}</span>
+            {/* a search in flight keeps its lantern lit on the rail, wherever you are */}
+            {to === '/' && scanning && <span className="nav-live" title="A search is running" aria-label="A search is running" />}
           </NavLink>
         ))}
       </nav>
@@ -133,6 +175,25 @@ function Sidebar() {
         .nav-link:hover { color: var(--text); background: var(--surface-2); }
         .nav-link-active { color: var(--accent-text); background: var(--accent-muted); }
         .nav-link-active:hover { color: var(--accent-text); background: var(--accent-muted); }
+        .nav-link { position: relative; }
+        .nav-live {
+          margin-left: auto; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+          background: var(--accent); box-shadow: 0 0 10px var(--accent);
+          animation: glow-pulse 1.4s ease-in-out infinite;
+        }
+        .cmdk-trigger {
+          position: relative; z-index: 1; display: flex; align-items: center; gap: 9px; width: 100%;
+          margin-bottom: 14px; padding: 7px 8px 7px 11px; border-radius: var(--radius-md);
+          background: color-mix(in oklch, var(--surface) 70%, transparent); border: 1px solid var(--border-subtle);
+          color: var(--text-faint); font-family: inherit; font-size: 13px; cursor: pointer;
+          transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+        }
+        .cmdk-trigger:hover { color: var(--text-muted); border-color: var(--border); background: var(--surface); }
+        .cmdk-keys { display: inline-flex; gap: 3px; }
+        @media (max-width: 860px) {
+          .cmdk-trigger { justify-content: center; padding: 8px; }
+          .nav-live { position: absolute; top: 6px; right: 8px; }
+        }
         .lantern-toggle {
           display: flex; align-items: center; gap: 10px; width: 100%;
           padding: 8px 11px; border-radius: var(--radius-md);
@@ -158,24 +219,50 @@ function AppBackdrop() {
   return <PageBackdrop quiet={pathname.startsWith('/jobs') || pathname.startsWith('/settings')} />;
 }
 
+function Shell() {
+  const { theme, toggle } = useTheme();
+  const scanning = useScanActive();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Ctrl/Cmd+K works from anywhere, inputs included, since that's the point of it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <>
+      <DocumentTitle scanning={scanning} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} theme={theme} onToggleTheme={toggle} />
+      <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
+        <Sidebar theme={theme} toggle={toggle} scanning={scanning} onOpenPalette={() => setPaletteOpen(true)} />
+        <main style={{ position: 'relative', flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', height: '100vh' }}>
+          <AppBackdrop />
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <Routes>
+              <Route path="/" element={<SearchPage />} />
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </div>
+        </main>
+      </div>
+    </>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <ToastProvider>
-        <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--bg)' }}>
-          <Sidebar />
-          <main style={{ position: 'relative', flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', height: '100vh' }}>
-            <AppBackdrop />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <Routes>
-                <Route path="/" element={<SearchPage />} />
-                <Route path="/jobs" element={<Jobs />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </div>
-          </main>
-        </div>
+        <Shell />
       </ToastProvider>
     </BrowserRouter>
   );
