@@ -3,10 +3,10 @@ import { db } from '../db/client';
 import { getAdapter } from '../sources/index';
 import { AGGREGATOR_TYPES } from '../routes/sources';
 import { boardCacheTtlMs } from '../routes/board-cache';
-import { HttpStatusError } from '../core/fetch';
 import { isSourceFetchError } from '../server/errors';
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import { registerRefreshCancel } from './refresh-control';
+import { HostPacer, hostKey, hostLimit, hostPacer, isRateLimited } from './host-pacer';
 import { fillSalaryFromJd, hasSalary, type SalarySource } from './jd-salary';
 import {
   SOURCE_DEADLINE_MS,
@@ -67,21 +67,6 @@ const SCAN_POLL_MS = 15_000;
 const WRITE_CHUNK = 200;
 const ABORT_POLL_MS = 1_000;
 
-// Minimum gap between two board fetches STARTING on the same API host (each start is jittered
-// to 75-125%, so 400 means 0.3-0.5s). Only hosts shared by
-// many boards need it: the per-tenant hosts (Personio, Recruitee, Teamtailor, Breezy, BambooHR,
-// Workday) spread their load by construction. Workable is the one known to 429 under load.
-const HOST_PACE_MS: Record<string, number> = {
-  greenhouse: 400,
-  ashby: 400,
-  lever: 400,
-  smartrecruiters: 400,
-  rippling: 600,
-  workable: 1_500,
-};
-/** After a 429 the whole host rests for BASE * 2^(strikes-1), capped. Any success clears it. */
-const HOST_BACKOFF_BASE_MS = 30_000;
-const HOST_BACKOFF_MAX_MS = 10 * 60_000;
 /** A board that keeps failing is retried after BASE * 2^(failures-1), capped. */
 const FAILURE_BACKOFF_BASE_MS = 15 * 60_000;
 const FAILURE_BACKOFF_MAX_MS = 24 * 3_600_000;
@@ -141,11 +126,6 @@ class RefreshAbortedError extends Error {
   }
 }
 
-function isRateLimited(err: unknown): boolean {
-  if (err instanceof HttpStatusError) return err.status === 429;
-  return err instanceof Error && /\bHTTP 429\b/.test(err.message);
-}
-
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export interface RefresherOptions {
@@ -155,8 +135,9 @@ export interface RefresherOptions {
   busyGapMs?: number;
   idleMs?: number;
   sourceDeadlineMs?: number;
-  /** Per-type minimum start gap, 0 for none. Tests pass () => 0. */
-  paceMs?: (type: string) => number;
+  /** Per-host-group minimum start gap, 0 for none. Tests pass () => 0. */
+  paceMs?: (key: string) => number;
+  pacer?: HostPacer;
 }
 
 export class BoardRefresher {
@@ -166,7 +147,7 @@ export class BoardRefresher {
   private readonly busyGapMs: number;
   private readonly idleMs: number;
   private readonly deadlineMs: number;
-  private readonly paceMs: (type: string) => number;
+  private readonly pacer: HostPacer;
 
   private running = false;
   private stopping = false;
@@ -175,8 +156,6 @@ export class BoardRefresher {
   private wakeSleep: (() => void) | null = null;
 
   private readonly inflight = new Map<AbortController, { sourceId: number; name: string }>();
-  private readonly nextStartAt = new Map<string, number>();
-  private readonly hostBlock = new Map<string, { until: number; strikes: number }>();
 
   private idleReason: TickResult['idleReason'] = null;
   private lastTickAt: number | null = null;
@@ -192,7 +171,12 @@ export class BoardRefresher {
     this.busyGapMs = opts.busyGapMs ?? BUSY_GAP_MS;
     this.idleMs = opts.idleMs ?? IDLE_MS;
     this.deadlineMs = opts.sourceDeadlineMs ?? SOURCE_DEADLINE_MS;
-    this.paceMs = opts.paceMs ?? (type => HOST_PACE_MS[type] ?? 0);
+    const paceMs = opts.paceMs;
+    // The process-wide pacer, so a rest started by a scan holds here too and vice versa. Tests that
+    // override the pace get a private one instead.
+    this.pacer = paceMs
+      ? new HostPacer({ limit: key => ({ ...hostLimit(key), paceMs: paceMs(key) }) })
+      : opts.pacer ?? hostPacer;
   }
 
   start(): void {
@@ -301,7 +285,7 @@ export class BoardRefresher {
     try {
       const candidates = this.selectCandidates(ttlMs);
       if (candidates.length === 0) {
-        const blocked = [...this.hostBlock.values()].map(b => b.until).filter(u => u > Date.now());
+        const blocked = this.pacer.restingKeys().map(k => this.pacer.restingUntil(k));
         const untilUnblock = blocked.length > 0 ? Math.min(...blocked) - Date.now() : this.idleMs;
         return finish('nothing-stale', Math.max(1_000, Math.min(this.idleMs, untilUnblock)));
       }
@@ -327,7 +311,9 @@ export class BoardRefresher {
 
   private selectCandidates(ttlMs: number): Candidate[] {
     const now = Date.now();
-    const blockedTypes = [...this.hostBlock.entries()].filter(([, b]) => b.until > now).map(([type]) => type);
+    // Resting keys that are plain types are cheapest to leave out in SQL. A resting Workday tenant
+    // (key 'workday:host') is filtered below.
+    const blockedTypes = this.pacer.restingKeys(now).filter(k => !k.includes(':'));
     const excluded = [...AGGREGATOR_TYPES, ...blockedTypes];
     return db
       .query<Candidate, (string | number)[]>(
@@ -341,12 +327,7 @@ export class BoardRefresher {
          LIMIT ?`,
       )
       .all(...excluded, now - refreshCutoffMs(ttlMs), now, this.batchSize)
-      .filter(c => getAdapter(c.type) !== null);
-  }
-
-  private readyAt(c: Candidate): number {
-    const block = this.hostBlock.get(c.type);
-    return Math.max(this.nextStartAt.get(c.type) ?? 0, block?.until ?? 0);
+      .filter(c => getAdapter(c.type) !== null && !this.pacer.isResting(hostKey(c), now));
   }
 
   private async runBatch(candidates: Candidate[], result: TickResult): Promise<void> {
@@ -362,14 +343,14 @@ export class BoardRefresher {
       const now = Date.now();
       // A host that started resting meanwhile keeps its boards for a later tick rather than
       // holding a concurrency slot idle for minutes.
-      queue = queue.filter(c => (this.hostBlock.get(c.type)?.until ?? 0) <= now);
+      queue = queue.filter(c => !this.pacer.isResting(hostKey(c), now));
 
       while (running.size < this.concurrency) {
-        const i = queue.findIndex(c => this.readyAt(c) <= now);
+        const i = queue.findIndex(c => this.pacer.canStart(hostKey(c), now));
         if (i < 0) break;
         const [c] = queue.splice(i, 1) as [Candidate];
-        const pace = this.paceMs(c.type);
-        if (pace > 0) this.nextStartAt.set(c.type, now + pace * (0.75 + Math.random() * 0.5));
+        const key = hostKey(c);
+        this.pacer.begin(key, now);
         result.attempted++;
         const p: Promise<void> = this.refreshBoard(c)
           .catch((err): Outcome => {
@@ -381,15 +362,19 @@ export class BoardRefresher {
             else if (outcome === 'failed') result.failed++;
             else if (outcome === 'aborted') result.aborted++;
           })
-          .finally(() => running.delete(p));
+          .finally(() => {
+            this.pacer.end(key);
+            running.delete(p);
+          });
         running.add(p);
       }
 
       if (queue.length === 0 && running.size === 0) break;
       const waits: Promise<unknown>[] = [...running];
       if (running.size < this.concurrency && queue.length > 0) {
-        const soonest = Math.min(...queue.map(c => this.readyAt(c)));
-        waits.push(sleep(Math.max(10, soonest - Date.now())));
+        // Infinity for hosts at their in-flight cap: those wake on a completion instead.
+        const soonest = Math.min(...queue.map(c => this.pacer.startableAt(hostKey(c))));
+        if (Number.isFinite(soonest)) waits.push(sleep(Math.max(10, soonest - Date.now())));
       }
       await Promise.race(waits);
     }
@@ -447,7 +432,7 @@ export class BoardRefresher {
       });
       await Promise.race([work, deadline]);
 
-      this.noteHostSuccess(source.type);
+      this.pacer.succeeded(hostKey(source));
       return 'ok';
     } catch (err) {
       if (!timedOut && (abort.signal.aborted || err instanceof RefreshAbortedError)) return 'aborted';
@@ -528,12 +513,7 @@ export class BoardRefresher {
     upsertJob(job, source.id, null, false, [], adapter.salaryFromEnrich === true && !job.jd_text, salarySource);
   }
 
-  private noteHostSuccess(type: string): void {
-    this.hostBlock.delete(type);
-  }
-
   private recordFailure(source: Candidate, err: unknown, timedOut: boolean, queryDependent: boolean): Outcome {
-    const type = source.type;
     const msg = err instanceof Error ? err.message : String(err);
     const now = Date.now();
     if (queryDependent) {
@@ -548,14 +528,11 @@ export class BoardRefresher {
     let failures = source.refresh_failures;
     let retryAt: number | null;
 
-    if (isRateLimited(err) && type in HOST_PACE_MS) {
-      // A shared API host is the problem, not this board: rest the whole host, and don't count
-      // it against the board. Per-tenant hosts fall through to the ordinary failure path.
+    if (isRateLimited(err)) {
+      // The vendor's host is the problem, not this board: rest the whole host group, and don't
+      // count it against the board.
       status = 'rate-limited';
-      const strikes = (this.hostBlock.get(type)?.strikes ?? 0) + 1;
-      const rest = Math.min(HOST_BACKOFF_BASE_MS * 2 ** (strikes - 1), HOST_BACKOFF_MAX_MS) * (0.9 + Math.random() * 0.2);
-      this.hostBlock.set(type, { until: now + rest, strikes });
-      retryAt = now + rest;
+      retryAt = this.pacer.rateLimited(hostKey(source), now);
     } else {
       status = timedOut ? 'timeout' : isSourceFetchError(err) ? err.kind : 'http-error';
       failures += 1;
@@ -605,7 +582,7 @@ export class BoardRefresher {
       idleReason: this.idleReason,
       boards: { total: row.total, fresh, stale: row.total - fresh, backedOff: row.backed_off ?? 0 },
       refreshing: [...this.inflight.values()].map(i => i.name),
-      restingHosts: [...this.hostBlock].filter(([, b]) => b.until > now).map(([type]) => type),
+      restingHosts: this.pacer.restingKeys(now),
       lastTickAt: this.lastTickAt,
       lastTick: this.lastTick,
       nextTickAt: this.nextTickAt,

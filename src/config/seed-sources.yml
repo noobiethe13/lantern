@@ -16,7 +16,7 @@ sources:
   - { type: greenhouse,      identifier: affirm,            display_name: "Affirm",            enabled: true }
   - { type: greenhouse,      identifier: airbnb,            display_name: "Airbnb",            enabled: true }
   - { type: greenhouse,      identifier: airtable,          display_name: "Airtable",          enabled: true }
-  - { type: greenhouse,      identifier: amplitude,         display_name: "Amplitude",         enabled: true }
+  - { type: greenhouse,      identifier: amplitude,         display_name: "Amplitude",         enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (amplitude), see the entry in that section
   - { type: greenhouse,      identifier: anthropic,         display_name: "Anthropic",         enabled: true }
   - { type: greenhouse,      identifier: archer,            display_name: "Archer Aviation",   enabled: true }
   - { type: greenhouse,      identifier: arizeai,           display_name: "Arize AI",          enabled: true }
@@ -28,7 +28,7 @@ sources:
   - { type: greenhouse,      identifier: betterment,        display_name: "Betterment",        enabled: true }
   - { type: greenhouse,      identifier: bigid,             display_name: "BigID",             enabled: true }
   - { type: greenhouse,      identifier: bitwarden,         display_name: "Bitwarden",         enabled: true }
-  - { type: greenhouse,      identifier: blackforestlabs,   display_name: "Black Forest Labs", enabled: true }
+  - { type: greenhouse,      identifier: blackforestlabs,   display_name: "Black Forest Labs", enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (black-forest-labs), see the entry in that section
   - { type: greenhouse,      identifier: blend,             display_name: "Blend",             enabled: true }
   - { type: greenhouse,      identifier: braze,             display_name: "Braze",             enabled: true }
   - { type: greenhouse,      identifier: brex,              display_name: "Brex",              enabled: true }
@@ -43,7 +43,7 @@ sources:
   - { type: greenhouse,      identifier: chime,             display_name: "Chime",             enabled: true }
   - { type: greenhouse,      identifier: circleci,          display_name: "CircleCI",          enabled: true }
   - { type: greenhouse,      identifier: clara,             display_name: "Clara",             enabled: true }
-  - { type: greenhouse,      identifier: clickhouse,        display_name: "ClickHouse",        enabled: true }
+  - { type: greenhouse,      identifier: clickhouse,        display_name: "ClickHouse",        enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (clickhouse), see the entry in that section
   - { type: greenhouse,      identifier: cloudflare,        display_name: "Cloudflare",        enabled: true }
   - { type: greenhouse,      identifier: cockroachlabs,     display_name: "Cockroach Labs",    enabled: true }
   - { type: greenhouse,      identifier: consensys,         display_name: "ConsenSys",         enabled: true }
@@ -70,7 +70,7 @@ sources:
   - { type: greenhouse,      identifier: figma,             display_name: "Figma",             enabled: true }
   - { type: greenhouse,      identifier: figure,            display_name: "Figure",            enabled: true }
   - { type: greenhouse,      identifier: fireblocks,        display_name: "Fireblocks",        enabled: true }
-  - { type: greenhouse,      identifier: fireworksai,       display_name: "Fireworks AI",      enabled: true }
+  - { type: greenhouse,      identifier: fireworksai,       display_name: "Fireworks AI",      enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (fireworks), see the entry in that section
   - { type: greenhouse,      identifier: fivetran,          display_name: "Fivetran",          enabled: true }
   - { type: greenhouse,      identifier: flatironhealth,    display_name: "Flatiron Health",   enabled: true }
   - { type: greenhouse,      identifier: flexport,          display_name: "Flexport",          enabled: true }
@@ -90,7 +90,7 @@ sources:
   - { type: greenhouse,      identifier: headway,           display_name: "Headway",           enabled: false }  # board slug 404s as of 2026-06-15 (left Greenhouse); recheck or replace slug
   - { type: greenhouse,      identifier: hellofresh,        display_name: "HelloFresh",        enabled: true }
   - { type: greenhouse,      identifier: helsing,           display_name: "Helsing",           enabled: true }
-  - { type: greenhouse,      identifier: hightouch,         display_name: "Hightouch",         enabled: true }
+  - { type: greenhouse,      identifier: hightouch,         display_name: "Hightouch",         enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (hightouch-inc), see the entry in that section
   - { type: greenhouse,      identifier: hootsuite,         display_name: "Hootsuite",         enabled: true }
   - { type: greenhouse,      identifier: humeai,            display_name: "Hume AI",           enabled: true }
   - { type: greenhouse,      identifier: hyperproof,        display_name: "Hyperproof",        enabled: true }
@@ -110,7 +110,7 @@ sources:
   - { type: greenhouse,      identifier: lithic,            display_name: "Lithic",            enabled: true }
   - { type: greenhouse,      identifier: lucidsoftware,     display_name: "Lucid Software",    enabled: true }
   - { type: greenhouse,      identifier: lyft,              display_name: "Lyft",              enabled: true }
-  - { type: greenhouse,      identifier: marqeta,           display_name: "Marqeta",           enabled: true }
+  - { type: greenhouse,      identifier: marqeta,           display_name: "Marqeta",           enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (marqeta-inc), see the entry in that section
   - { type: greenhouse,      identifier: masterclass,       display_name: "MasterClass",       enabled: true }
   - { type: greenhouse,      identifier: mercury,           display_name: "Mercury",           enabled: true }
   - { type: greenhouse,      identifier: mixpanel,          display_name: "Mixpanel",          enabled: true }
@@ -126,7 +126,7 @@ sources:
   - { type: greenhouse,      identifier: okta,              display_name: "Okta",              enabled: true }
   - { type: greenhouse,      identifier: orcasecurity,      display_name: "Orca Security",     enabled: true }
   - { type: greenhouse,      identifier: oura,              display_name: "Oura",              enabled: true }
-  - { type: greenhouse,      identifier: outschool,         display_name: "Outschool",         enabled: true }
+  - { type: greenhouse,      identifier: outschool,         display_name: "Outschool",         enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (outschool), see the entry in that section
   - { type: greenhouse,      identifier: pagerduty,         display_name: "PagerDuty",         enabled: true }
   - { type: greenhouse,      identifier: paradigm,          display_name: "Paradigm",          enabled: true }
   - { type: greenhouse,      identifier: parloa,            display_name: "Parloa",            enabled: true }
@@ -137,7 +137,7 @@ sources:
   - { type: greenhouse,      identifier: pinterest,         display_name: "Pinterest",         enabled: true }
   - { type: greenhouse,      identifier: planetscale,       display_name: "PlanetScale",       enabled: true }
   - { type: greenhouse,      identifier: polyai,            display_name: "PolyAI",            enabled: true }
-  - { type: greenhouse,      identifier: postman,           display_name: "Postman",           enabled: true }
+  - { type: greenhouse,      identifier: postman,           display_name: "Postman",           enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: greenhouse,      identifier: public,            display_name: "Public",            enabled: true }
   - { type: greenhouse,      identifier: purestorage,       display_name: "Pure Storage",      enabled: true }
   - { type: greenhouse,      identifier: reddit,            display_name: "Reddit",            enabled: true }
@@ -170,14 +170,14 @@ sources:
   - { type: greenhouse,      identifier: tailscale,         display_name: "Tailscale",         enabled: true }
   - { type: greenhouse,      identifier: thunes,            display_name: "Thunes",            enabled: true }
   - { type: greenhouse,      identifier: traderepublicbank, display_name: "Trade Republic",    enabled: true }
-  - { type: greenhouse,      identifier: transcarent,       display_name: "Transcarent",       enabled: true }
+  - { type: greenhouse,      identifier: transcarent,       display_name: "Transcarent",       enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: greenhouse,      identifier: twilio,            display_name: "Twilio",            enabled: true }
   - { type: greenhouse,      identifier: udemy,             display_name: "Udemy",             enabled: true }
-  - { type: greenhouse,      identifier: unity3d,           display_name: "Unity",             enabled: true }
+  - { type: greenhouse,      identifier: unity3d,           display_name: "Unity",             enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: greenhouse,      identifier: vannevarlabs,      display_name: "Vannevar Labs",     enabled: true }
   - { type: greenhouse,      identifier: vercel,            display_name: "Vercel",            enabled: true }
   - { type: greenhouse,      identifier: waymo,             display_name: "Waymo",             enabled: true }
-  - { type: greenhouse,      identifier: wayve,             display_name: "Wayve",             enabled: true }
+  - { type: greenhouse,      identifier: wayve,             display_name: "Wayve",             enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (wayve), see the entry in that section
   - { type: greenhouse,      identifier: webflow,           display_name: "Webflow",           enabled: true }
   - { type: greenhouse,      identifier: wrike,             display_name: "Wrike",             enabled: true }
   # India coverage (live-probed 2026-09-25); Canonical is worldwide home-based remote, Flutter-heavy
@@ -209,7 +209,7 @@ sources:
   - { type: ashby,           identifier: arcade,       display_name: "Arcade",        enabled: true }
   - { type: ashby,           identifier: attio,        display_name: "Attio",         enabled: true }
   - { type: ashby,           identifier: authzed,      display_name: "AuthZed",       enabled: true }
-  - { type: ashby,           identifier: aviator,      display_name: "Aviator",       enabled: true }
+  - { type: ashby,           identifier: aviator,      display_name: "Aviator",       enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: baseten,      display_name: "Baseten",       enabled: true }
   - { type: ashby,           identifier: braintrust,   display_name: "Braintrust",    enabled: true }
   - { type: ashby,           identifier: browserbase,  display_name: "Browserbase",   enabled: true }
@@ -221,8 +221,8 @@ sources:
   - { type: ashby,           identifier: cognition,    display_name: "Cognition",     enabled: true }
   - { type: ashby,           identifier: cohere,       display_name: "Cohere",        enabled: true }
   - { type: ashby,           identifier: column,       display_name: "Column",        enabled: true }
-  - { type: ashby,           identifier: commonroom,   display_name: "Common Room",   enabled: true }
-  - { type: ashby,           identifier: continue,     display_name: "Continue",      enabled: true }
+  - { type: ashby,           identifier: commonroom,   display_name: "Common Room",   enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
+  - { type: ashby,           identifier: continue,     display_name: "Continue",      enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: crusoe,       display_name: "Crusoe",        enabled: true }
   - { type: ashby,           identifier: cursor,       display_name: "Cursor",        enabled: true }
   - { type: ashby,           identifier: decagon,      display_name: "Decagon",       enabled: true }
@@ -265,7 +265,7 @@ sources:
   - { type: ashby,           identifier: n8n,          display_name: "n8n",           enabled: true }
   - { type: ashby,           identifier: nango,        display_name: "Nango",         enabled: true }
   - { type: ashby,           identifier: notion,       display_name: "Notion",        enabled: true }
-  - { type: ashby,           identifier: nuon,         display_name: "Nuon",          enabled: true }
+  - { type: ashby,           identifier: nuon,         display_name: "Nuon",          enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: openevidence, display_name: "OpenEvidence",  enabled: true }
   - { type: ashby,           identifier: orb,          display_name: "Orb",           enabled: true }
   - { type: ashby,           identifier: oso,          display_name: "Oso",           enabled: true }
@@ -288,14 +288,14 @@ sources:
   - { type: ashby,           identifier: resend,       display_name: "Resend",        enabled: true }
   - { type: ashby,           identifier: rilla,        display_name: "Rilla",         enabled: true }
   - { type: ashby,           identifier: rillet,       display_name: "Rillet",        enabled: true }
-  - { type: ashby,           identifier: robin-ai,     display_name: "Robin AI",      enabled: true }
+  - { type: ashby,           identifier: robin-ai,     display_name: "Robin AI",      enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: rogo,         display_name: "Rogo",          enabled: true }
   - { type: ashby,           identifier: runway,       display_name: "Runway",        enabled: true }
   - { type: ashby,           identifier: sardine,      display_name: "Sardine",       enabled: true }
   - { type: ashby,           identifier: speak,        display_name: "Speak",         enabled: true }
   - { type: ashby,           identifier: speakeasy,    display_name: "Speakeasy",     enabled: true }
   - { type: ashby,           identifier: sphere,       display_name: "Sphere",        enabled: true }
-  - { type: ashby,           identifier: statsig,      display_name: "Statsig",       enabled: true }
+  - { type: ashby,           identifier: statsig,      display_name: "Statsig",       enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: stigg,        display_name: "Stigg",         enabled: true }
   - { type: ashby,           identifier: stytch,       display_name: "Stytch",        enabled: true }
   - { type: ashby,           identifier: succinct,     display_name: "Succinct",      enabled: true }
@@ -308,11 +308,20 @@ sources:
   - { type: ashby,           identifier: vanta,        display_name: "Vanta",         enabled: true }
   - { type: ashby,           identifier: vapi,         display_name: "Vapi",          enabled: true }
   - { type: ashby,           identifier: watershed,    display_name: "Watershed",     enabled: true }
-  - { type: ashby,           identifier: windmill,     display_name: "Windmill",      enabled: true }
+  - { type: ashby,           identifier: windmill,     display_name: "Windmill",      enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: ashby,           identifier: workos,       display_name: "WorkOS",        enabled: true }
   - { type: ashby,           identifier: writer,       display_name: "Writer",        enabled: true }
   - { type: ashby,           identifier: zapier,       display_name: "Zapier",        enabled: true }
   - { type: ashby,           identifier: zed,          display_name: "Zed",           enabled: true }
+  - { type: ashby, identifier: amplitude, display_name: "Amplitude", enabled: true }  # moved from greenhouse/amplitude, live-probed 2026-10-13
+  - { type: ashby, identifier: black-forest-labs, display_name: "Black Forest Labs", enabled: true }  # moved from greenhouse/blackforestlabs, live-probed 2026-10-13
+  - { type: ashby, identifier: clickhouse, display_name: "ClickHouse", enabled: true }  # moved from greenhouse/clickhouse, live-probed 2026-10-13
+  - { type: ashby, identifier: fireworks, display_name: "Fireworks AI", enabled: true }  # moved from greenhouse/fireworksai, live-probed 2026-10-13
+  - { type: ashby, identifier: hightouch-inc, display_name: "Hightouch", enabled: true }  # moved from greenhouse/hightouch, live-probed 2026-10-13
+  - { type: ashby, identifier: marqeta-inc, display_name: "Marqeta", enabled: true }  # moved from greenhouse/marqeta, live-probed 2026-10-13
+  - { type: ashby, identifier: outschool, display_name: "Outschool", enabled: true }  # moved from greenhouse/outschool, live-probed 2026-10-13
+  - { type: ashby, identifier: wayve, display_name: "Wayve", enabled: true }  # moved from greenhouse/wayve, live-probed 2026-10-13
+  - { type: ashby, identifier: ledger, display_name: "Ledger", enabled: true }  # moved from lever/ledger, live-probed 2026-10-13
   # India coverage (live-probed 2026-09-25)
   - { type: ashby,           identifier: aiprise,     display_name: "AiPrise",         enabled: true }
   - { type: ashby,           identifier: almabase,    display_name: "Almabase",        enabled: true }
@@ -331,7 +340,7 @@ sources:
   - { type: lever,           identifier: anchorage,  display_name: "Anchorage",   enabled: true }
   - { type: lever,           identifier: highspot,   display_name: "Highspot",    enabled: true }
   - { type: lever,           identifier: kavak,      display_name: "Kavak",       enabled: true }
-  - { type: lever,           identifier: ledger,     display_name: "Ledger",      enabled: true }
+  - { type: lever,           identifier: ledger,     display_name: "Ledger",      enabled: false }  # board slug 404s as of 2026-10-13, moved to ashby (ledger), see the entry in that section
   - { type: lever,           identifier: matchgroup, display_name: "Match Group", enabled: true }
   - { type: lever,           identifier: mistral,    display_name: "Mistral AI",  enabled: true }
   - { type: lever,           identifier: palantir,   display_name: "Palantir",    enabled: true }
@@ -388,7 +397,7 @@ sources:
   - { type: personio,        identifier: ottonova,  display_name: "ottonova",  enabled: true }
   - { type: personio,        identifier: penta,     display_name: "Penta",     enabled: true }
   - { type: personio,        identifier: personio,  display_name: "Personio",  enabled: true }
-  - { type: personio,        identifier: pitch,     display_name: "Pitch",     enabled: true }
+  - { type: personio,        identifier: pitch,     display_name: "Pitch",     enabled: false }  # board slug 404s as of 2026-10-13, no replacement board found on greenhouse/ashby/lever/personio. recheck or replace slug
   - { type: personio,        identifier: userlane,  display_name: "Userlane",  enabled: true }
   - { type: personio,        identifier: workpath,  display_name: "Workpath",  enabled: true }
   # Workable (5)

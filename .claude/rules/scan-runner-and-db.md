@@ -76,6 +76,21 @@ paths:
   `refresh_retry_at` (exponential, 24h cap), a 429 on a shared host rests the host,
   query-dependent boards are skipped for a day. Admin `clear-jobs` calls
   `cancelInFlight()`. Tests drive `new BoardRefresher({paceMs: () => 0}).tick()`.
+- **Per-host pacing.** The scan's live pool is `runHostPool` (`runner/host-pacer.ts`),
+  not a plain FIFO pool: boards are grouped by `hostKey` (vendor, so all `*.recruitee.com`
+  tenants share a budget), each group has an in-flight cap + jittered start gap
+  (`hostLimit`), and a 429 that outlived the fetch retries rests the group
+  (`HostPacer.rateLimited`, 30s doubling to 10min). A rest <= `MAX_REST_WAIT_MS` (60s) is
+  waited out, a longer one skips the group's queued boards. Per-company boards only (an
+  aggregator 429 is an ordinary error). `scanOne` marks the 429'd and skipped boards
+  `last_status='rate-limited'` (never `last_ok_fetch_at`, never `refresh_failures`,
+  `refresh_retry_at` = rest end), then `stampStored` serves those with a stored fetch from
+  their open jobs however old (better stale than missing). Per-board errors are NOT pushed
+  into `runErrors`: one aggregated entry per host goes there instead, plus a
+  `source_warning` event and `rateLimited` in `scan_done`. `enrich()` calls take a paced turn
+  (`waitForTurn`) and a 429 from one rests the vendor. The pacer is the process-wide
+  `hostPacer`, shared with the refresher (scan tests pass their own). Each source's 8-min
+  deadline starts inside `scanOne`, after the pool released it, so queueing never counts.
 - **Learned taste.** `loadPreferenceModel` (`runner/preference.ts`) builds liked/
   disliked centroids from triaged jobs' cached vectors (signal = `SIGNAL_SQL`,
   shared with the calibration report). It ranks only: the Jobs list blends a

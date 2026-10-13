@@ -19,7 +19,7 @@ import { applySemanticDedupPass } from './semantic-dedup';
 import { applySemanticRescue } from './semantic-rescue';
 import { prerankSurvivors } from './preranker';
 import { criteriaToQueryText } from '../core/embed';
-import { runPool } from '../core/pool';
+import { HostPacer, hostKey, hostPacer, isRateLimited, runHostPool, waitForTurn } from './host-pacer';
 import { bus, type ScanEvent } from './progress';
 import { isSourceFetchError } from '../server/errors';
 import { AGGREGATOR_TYPES } from '../routes/sources';
@@ -567,11 +567,10 @@ export function upsertJob(
   return 'new';
 }
 
-// Max source adapters fetched at once, via a sliding-window pool (runPool). Kept
-// at 10 deliberately: Greenhouse/Ashby/Lever boards each share one API host, so a
-// higher global width raises per-host request rate (and rate-limit risk) more than
-// it buys — the real speedup is the pool itself (no idle gaps waiting on a batch's
-// slowest member), not a bigger number.
+// Max source adapters fetched at once, via a sliding-window pool (runHostPool). The
+// total width only buys parallelism ACROSS vendors: per-host in-flight caps, start
+// gaps and 429 rests (host-pacer.ts) decide how hard any one vendor is hit, because
+// thousands of boards share a few API hosts and a plain wide pool floods them.
 const CONCURRENCY = 10;
 
 // L2 grades jobs in batches of this size per `claude` call to amortize the large
@@ -615,6 +614,7 @@ export interface RunSetup {
 /** Test seams for runScan; production callers pass nothing. */
 export interface ScanOptions {
   sourceDeadlineMs?: number;
+  pacer?: HostPacer;
 }
 
 /**
@@ -745,11 +745,18 @@ function storedEnrichedRow(url: string): StoredEnrichedRow | null {
  * but a buggy adapter must not fail the whole source over one optional detail
  * fetch, so a throw is logged and treated as "no patch".
  */
-async function enrichJob(adapter: SourceAdapter, job: Job, ctx: SourceContext, sourceName: string): Promise<Job | null> {
+async function enrichJob(
+  adapter: SourceAdapter,
+  job: Job,
+  ctx: SourceContext,
+  sourceName: string,
+  onRateLimited: () => void,
+): Promise<Job | null> {
   let patch: Partial<Job> | null;
   try {
     patch = (await adapter.enrich?.(job, ctx)) ?? null;
   } catch (err) {
+    if (isRateLimited(err)) onRateLimited();
     console.error(`  [enrich] ${sourceName}: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
@@ -784,6 +791,28 @@ export async function runScan(
   const l1Opts = { now: scanNow, maxAgeDays: freshMaxAge };
   const keywords = normalizeKeywords(criteria.title?.positive ?? []);
   const deadlineMs = opts.sourceDeadlineMs ?? SOURCE_DEADLINE_MS;
+  const pacer = opts.pacer ?? hostPacer;
+  // Boards a vendor refused with 429 (or that were skipped while it rested), per host group.
+  // Reported as one aggregated line instead of one error each. Those with a stored fetch are
+  // then served from it, however old: stale results beat a board vanishing from the search.
+  const rateLimited = new Map<string, { boards: number; stale: number }>();
+  const staleFallback: DbSource[] = [];
+  const markRateLimited = (source: DbSource, msg: string): void => {
+    const key = hostKey(source);
+    const entry = rateLimited.get(key) ?? { boards: 0, stale: 0 };
+    entry.boards++;
+    if (source.last_ok_fetch_at != null) {
+      entry.stale++;
+      staleFallback.push(source);
+    }
+    rateLimited.set(key, entry);
+    // refresh_retry_at lets the background refresher pick the board up as soon as the host's
+    // rest is over. last_ok_fetch_at and refresh_failures stay as they were: this is not the board's fault.
+    db.run(
+      `UPDATE sources SET last_scan_at = ?, last_status = 'rate-limited', last_error = ?, refresh_retry_at = ? WHERE id = ?`,
+      [Date.now(), msg, pacer.restingUntil(key), source.id]
+    );
+  };
 
   // Per-source scan. Owns its own error handling (a failed or hung board marks
   // itself and is recorded in runErrors, never aborts the run). Run via a
@@ -892,9 +921,14 @@ export async function runScan(
               ({ pass, reasons } = l1Filter(job, criteria, l1Opts));
             }
           }
-        } else if (pass && adapter.enrich && !job.jd_text && enrichCalls < ENRICH_BUDGET_PER_SOURCE) {
+        // Enrich calls hit the same vendor as the listing: take a paced turn first. No turn (the
+        // vendor rests longer than is worth waiting for, or the source was aborted) leaves the job unenriched.
+        } else if (
+          pass && adapter.enrich && !job.jd_text && enrichCalls < ENRICH_BUDGET_PER_SOURCE
+          && await waitForTurn(pacer, hostKey(source), sourceAbort.signal)
+        ) {
           enrichCalls++;
-          const enriched = await enrichJob(adapter, job, ctx, source.display_name);
+          const enriched = await enrichJob(adapter, job, ctx, source.display_name, () => pacer.rateLimited(hostKey(source)));
           if (enriched) {
             const hadSalary = hasSalary(job);
             job = withEarliestPosted(enriched);
@@ -939,6 +973,7 @@ export async function runScan(
              refresh_failures = 0, refresh_retry_at = NULL WHERE id = ?`,
           [Date.now(), queryDependent ? null : fetchStartedAt, source.id]
         );
+        pacer.succeeded(hostKey(source));
       }
 
       const skipped = invalidCount > 0 ? ` (${invalidCount} malformed skipped)` : '';
@@ -951,6 +986,11 @@ export async function runScan(
       });
     } catch (err) {
       const timedOut = err instanceof SourceDeadlineError;
+      if (!timedOut && !fromCache && !AGGREGATOR_TYPES.has(source.type) && isRateLimited(err)) {
+        pacer.rateLimited(hostKey(source));
+        markRateLimited(source, err instanceof Error ? err.message : String(err));
+        return;
+      }
       if (timedOut) {
         // The adapter may still be parked in an await that ignores abortSignal.
         // Its loop stops writing once it resumes (the aborted checks above); a
@@ -982,6 +1022,31 @@ export async function runScan(
   // Boards fetched within the TTL are served from their stored jobs (board-cache.ts).
   // This runs before the live pool, not beside it: it finishes in seconds and keeping
   // the two apart means no live upsert ever races a cache stamp on the same row.
+  // Re-runs L1 over each board's stored open jobs and stamps them into this run. Returns the jobs
+  // stamped. Survivors still needing a JD are handed back as tasks when `deferred` is given.
+  const stampStored = async (
+    boards: DbSource[],
+    canEnrich: (type: string) => boolean,
+    deferred?: { source: DbSource; stored?: Job[] }[],
+  ): Promise<number> => {
+    let stamped = 0;
+    for await (const res of evaluateCachedBoards(boards, {
+      runId,
+      criteria,
+      l1Opts,
+      canEnrich,
+      isFreshnessOnly: reasons => reasons.every(isFreshnessReason),
+    })) {
+      jobsFound += res.found;
+      jobsL1Pass += res.passed;
+      freshnessDropped += res.freshnessDropped;
+      stamped += res.found;
+      if (res.error) runErrors.push({ source: res.source.display_name, error: res.error });
+      if (res.deferred.length > 0) deferred?.push({ source: res.source, stored: res.deferred });
+    }
+    return stamped;
+  };
+
   const { cached, live } = partitionByCache(sources, scanNow, boardCacheTtlMs());
   const tasks: { source: DbSource; stored?: Job[] }[] = live.map(source => ({ source }));
   let cachedJobs = 0;
@@ -994,20 +1059,7 @@ export async function runScan(
     });
     const enrichable = new Set(cached.filter(s => getAdapter(s.type)?.enrich).map(s => s.type));
     const deferredTasks: typeof tasks = [];
-    for await (const res of evaluateCachedBoards(cached, {
-      runId,
-      criteria,
-      l1Opts,
-      canEnrich: type => enrichable.has(type),
-      isFreshnessOnly: reasons => reasons.every(isFreshnessReason),
-    })) {
-      jobsFound += res.found;
-      jobsL1Pass += res.passed;
-      freshnessDropped += res.freshnessDropped;
-      cachedJobs += res.found;
-      if (res.error) runErrors.push({ source: res.source.display_name, error: res.error });
-      if (res.deferred.length > 0) deferredTasks.push({ source: res.source, stored: res.deferred });
-    }
+    cachedJobs += await stampStored(cached, type => enrichable.has(type), deferredTasks);
     // Survivors still needing a JD go first so their enrich budget isn't starved by a long live queue.
     tasks.unshift(...deferredTasks);
     bus.emit({
@@ -1018,11 +1070,41 @@ export async function runScan(
     });
   }
 
-  // runPool's onError is the safety net for anything scanOne itself didn't catch
+  // onError is the safety net for anything scanOne itself didn't catch
   // (e.g. a malformed config_json before the try) — it should be rare.
-  await runPool(tasks, CONCURRENCY, t => scanOne(t.source, t.stored), (t, err) => {
-    runErrors.push({ source: t.source.display_name, error: String(err) });
-  });
+  await runHostPool(
+    tasks,
+    CONCURRENCY,
+    {
+      pacer,
+      keyOf: t => hostKey(t.source),
+      // A cache-backed task only wants an enrich pass: its board was already stamped from
+      // storage, so skipping it loses nothing but the JD. Its deferred jobs are stamped below.
+      onSkip: t => {
+        if (t.stored) staleFallback.push(t.source);
+        else markRateLimited(t.source, 'HTTP 429: host was rate-limiting this run, skipped');
+      },
+    },
+    t => scanOne(t.source, t.stored),
+    (t, err) => {
+      runErrors.push({ source: t.source.display_name, error: String(err) });
+    },
+  );
+
+  // Rate-limited boards keep their last known jobs in this search, however old: better stale than missing.
+  // A board skipped for its enrich pass is re-stamped too (harmless, it is already in this run).
+  if (staleFallback.length > 0) await stampStored(staleFallback, () => false);
+
+  let rateLimitedTotal = 0;
+  for (const [host, { boards, stale }] of rateLimited) {
+    rateLimitedTotal += boards;
+    const served = stale > 0 ? ` (${stale.toLocaleString()} served from older cache)` : '';
+    const msg = `${boards.toLocaleString()} ${boards === 1 ? 'board' : 'boards'} rate-limited by ${host}${served} — will retry in the background`;
+    console.warn(`  [rate-limited] ${msg}`);
+    // Kept in the run's errors so history shows it, as one entry per host rather than one per board.
+    runErrors.push({ source: host, error: msg });
+    bus.emit({ runId, type: 'source_warning', msg, data: { host, rateLimited: boards, servedFromCache: stale } });
+  }
 
   // NOTE: finished_at is intentionally NOT set here. The run isn't done until L2
   // finishes (runL2Pass sets finished_at itself, right before its terminal l2_done
@@ -1042,6 +1124,7 @@ export async function runScan(
 
   let summary = `Scan complete — found: ${jobsFound}, new: ${jobsNew}, L1 pass: ${jobsL1Pass}`;
   if (cached.length > 0) summary += ` · ${cached.length.toLocaleString()} boards from cache, ${live.length.toLocaleString()} fetched live`;
+  if (rateLimitedTotal > 0) summary += ` · ${rateLimitedTotal.toLocaleString()} boards rate-limited (retrying in the background)`;
   if (freshnessDropped > 0) {
     summary += ` · ${freshnessDropped} more matched but were older than ${freshMaxAge}d (widen in Settings)`;
   }
@@ -1057,7 +1140,7 @@ export async function runScan(
 
   // Phase event, NOT terminal — the SSE stream stays open so the L2 events that
   // follow reach the client. The terminal event is 'l2_done' (from runL2Pass).
-  bus.emit({ runId, type: 'scan_done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, freshnessDropped, errors: runErrors.length, cachedBoards: cached.length, liveBoards: live.length } });
+  bus.emit({ runId, type: 'scan_done', msg: summary, data: { jobsFound, jobsNew, jobsL1Pass, freshnessDropped, rateLimited: rateLimitedTotal, errors: runErrors.length, cachedBoards: cached.length, liveBoards: live.length } });
 }
 
 function markRunFinished(runId: number): void {

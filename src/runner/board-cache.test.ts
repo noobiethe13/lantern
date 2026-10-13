@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import type { Criteria } from '../core/filter';
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import type { ScanEvent } from './progress';
+import { HostPacer } from './host-pacer';
 import { REPO, memDb, scan, bus, insertSource, resetDb, req, NL_OK } from '../test-harness';
 
 const { adapterRegistry } = await import(`${REPO}/src/sources/index.ts`);
@@ -10,6 +11,10 @@ const originalGreenhouse = registry.greenhouse;
 const originalRemoteok = registry.remoteok;
 
 const DAY = 86_400_000;
+
+// The process-wide pacer would add real per-host delays between enrich calls here.
+const runScan = (...[runId, sources, criteria, opts]: Parameters<typeof scan.runScan>) =>
+  scan.runScan(runId, sources, criteria, { pacer: new HostPacer({ limit: () => ({ maxInFlight: 99, paceMs: 0 }) }), ...(opts ?? {}) });
 const HOUR = 3_600_000;
 
 beforeEach(() => {
@@ -71,7 +76,7 @@ async function runWith(sourceId: number, criteria: Criteria = NL_OK as Criteria)
   const runId = newRun();
   const events: ScanEvent[] = [];
   const unsub = bus.subscribe(runId, (e: ScanEvent) => events.push(e));
-  await scan.runScan(runId, [sourceRow(sourceId)], criteria);
+  await runScan(runId, [sourceRow(sourceId)], criteria);
   unsub();
   return { runId, events };
 }
@@ -189,7 +194,7 @@ test('a failed, partial or timed-out fetch never advances last_ok_fetch_at', asy
     },
   });
   const runId = newRun();
-  await scan.runScan(runId, [sourceRow(id)], NL_OK as Criteria, { sourceDeadlineMs: 30 });
+  await runScan(runId, [sourceRow(id)], NL_OK as Criteria, { sourceDeadlineMs: 30 });
   expect(sourceRow(id).last_ok_fetch_at).toBeNull();
   expect(memDb.query('SELECT last_status FROM sources WHERE id = ?').get(id)).toEqual({ last_status: 'timeout' });
 
@@ -397,7 +402,7 @@ test('a pass already claimed by this run is not downgraded by a cached fail', as
 
   const runId = newRun();
   memDb.run(`UPDATE jobs SET last_run_id = ?, l1_pass = 1, l1_reasons = NULL`, [runId]);
-  await scan.runScan(runId, [sourceRow(id)], NL_OK as Criteria);
+  await runScan(runId, [sourceRow(id)], NL_OK as Criteria);
   expect(byUrl('https://boards.test/acme/jobs/1')).toMatchObject({ l1_pass: 1, last_run_id: runId });
 });
 

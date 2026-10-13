@@ -334,6 +334,14 @@ internal types — convert at the boundary in src/api/client.ts" -->
   startup unless `env` is passed — the claude provider passes `env: process.env`
   so a CLI installed after the server started is found.
 
+- The scan's live pool is per-host paced (`runner/host-pacer.ts`, `runHostPool`) by one
+  process-wide `hostPacer` shared with the background refresher: boards group by vendor
+  (`hostKey`), with an in-flight cap + jittered start gap per group (enrich calls too) and a rest
+  after a 429 (<=60s waited out, longer skips the queue). A 429'd or skipped per-company source is
+  `last_status='rate-limited'`, served from its older stored jobs, and reported as one aggregated
+  `errors_json` entry per host. Don't go back to a plain wide pool: 15k discovered boards flood
+  Workable/Recruitee and every board 429s.
+
 ## Architectural notes — work with these, not against them
 
 _None yet. When the team accepts a non-obvious pattern as the way things are done here — something Claude might otherwise try to "fix" — record it as 1–3 factual lines so future sessions respect it._

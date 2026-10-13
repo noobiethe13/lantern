@@ -5,6 +5,8 @@ import yaml from 'js-yaml';
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
 import type { ScanEvent } from './progress';
 import { TITLE_MISSING_REASON } from '../core/filter';
+import { HttpStatusError } from '../core/fetch';
+import { HostPacer } from './host-pacer';
 import {
   REPO,
   WORK,
@@ -15,6 +17,7 @@ import {
   llmCalls,
   seedEmbeddingsOff,
   insertSource,
+  insertJob,
   resetDb,
   NL_OK,
 } from '../test-harness';
@@ -26,6 +29,11 @@ const SEED_PATH = join(WORK, 'src/config/seed-sources.yml');
 const originalSeed = readFileSync(SEED_PATH, 'utf-8');
 
 const DAY = 86_400_000;
+
+// The process-wide pacer would add real per-host delays (and leak rests) between tests.
+const unpaced = () => new HostPacer({ limit: () => ({ maxInFlight: 99, paceMs: 0 }) });
+const runScan = (...[runId, sources, criteria, opts]: Parameters<typeof scan.runScan>) =>
+  scan.runScan(runId, sources, criteria, { pacer: unpaced(), ...(opts ?? {}) });
 
 beforeEach(() => {
   resetDb();
@@ -92,7 +100,7 @@ async function scanWith(
   const { contexts } = fakeAdapter(jobs, opts.adapter);
   const events: ScanEvent[] = [];
   bus.subscribe(runId, (e: ScanEvent) => events.push(e));
-  await scan.runScan(runId, [sourceRow(sourceId)], NL_OK, { sourceDeadlineMs: opts.deadlineMs });
+  await runScan(runId, [sourceRow(sourceId)], NL_OK, { sourceDeadlineMs: opts.deadlineMs });
   return { runId, sourceId, events, contexts };
 }
 
@@ -288,6 +296,136 @@ test('a hung source times out on its own deadline without stalling the scan', as
   expect(jobs().map(j => j.title)).toEqual(['Backend Engineer']);
 });
 
+test('the live pool never runs more than the per-host cap on one host at once', async () => {
+  let active = 0;
+  let peak = 0;
+  const ids = [1, 2, 3, 4, 5, 6].map(n => insertSource({ type: 'greenhouse', identifier: `g${n}`, enabled: 1 }));
+  fakeAdapter([], {
+    fetchImpl: () =>
+      (async function* () {
+        active++;
+        peak = Math.max(peak, active);
+        await new Promise(r => setTimeout(r, 15));
+        active--;
+        yield job();
+      })(),
+  });
+  const pacer = new HostPacer({ limit: () => ({ maxInFlight: 2, paceMs: 0 }) });
+  await runScan(newRun(), ids.map(sourceRow), NL_OK, { pacer });
+  expect(peak).toBe(2);
+  expect(memDb.query("SELECT COUNT(*) AS n FROM sources WHERE last_status = 'ok'").get()).toEqual({ n: 6 });
+});
+
+test("a long-resting host's queue is skipped, served from older stored jobs, and reported as one run error", async () => {
+  const ids = [1, 2, 3, 4].map(n =>
+    insertSource({ type: 'greenhouse', identifier: `g${n}`, display_name: `G${n}`, enabled: 1, last_ok_fetch_at: 5 }));
+  // The second board's stored job is older than any cache TTL: it must still land in this run.
+  const stored = insertJob(ids[1]!, { title: 'Backend Engineer', location: 'Berlin' });
+  memDb.run('INSERT INTO board_sightings (source_id, job_id, seen_at) VALUES (?, ?, 6)', [ids[1], stored]);
+  let calls = 0;
+  fakeAdapter([], {
+    fetchImpl: () =>
+      (async function* () {
+        calls++;
+        yield* [] as Job[];
+        throw new HttpStatusError(429, null, 'HTTP 429');
+      })(),
+  });
+  const runId = newRun();
+  const events: ScanEvent[] = [];
+  bus.subscribe(runId, (e: ScanEvent) => events.push(e));
+  // A first-strike rest well beyond what a scan is willing to wait out.
+  const pacer = new HostPacer({ limit: () => ({ maxInFlight: 1, paceMs: 0 }), backoffBaseMs: 10 * 60_000 });
+  // sourceRow omits last_ok_fetch_at (it would turn re-scans in other tests into cache hits).
+  await runScan(runId, ids.map(id => ({ ...sourceRow(id), last_ok_fetch_at: 5 })), NL_OK, { pacer });
+
+  expect(calls).toBe(1);
+  const rows = memDb
+    .query('SELECT last_status, last_ok_fetch_at, refresh_failures, refresh_retry_at FROM sources ORDER BY id')
+    .all() as { last_status: string; last_ok_fetch_at: number | null; refresh_failures: number; refresh_retry_at: number | null }[];
+  expect(rows.map(r => r.last_status)).toEqual(['rate-limited', 'rate-limited', 'rate-limited', 'rate-limited']);
+  for (const r of rows) {
+    expect(r.last_ok_fetch_at).toBe(5);
+    expect(r.refresh_failures).toBe(0);
+    expect(r.refresh_retry_at).toBeGreaterThan(Date.now());
+  }
+  expect(memDb.query('SELECT last_run_id FROM jobs WHERE id = ?').get(stored)).toEqual({ last_run_id: runId });
+  expect(events.some(e => e.type === 'source_error')).toBe(false);
+  const line = 'rate-limited by greenhouse (4 served from older cache) — will retry in the background';
+  const warning = events.find(e => e.type === 'source_warning');
+  expect(warning?.msg).toBe(`4 boards ${line}`);
+  expect(events.find(e => e.type === 'scan_done')!.data).toMatchObject({ errors: 1, rateLimited: 4 });
+  const stored_errors = memDb.query('SELECT errors_json FROM runs WHERE id = ?').get(runId) as { errors_json: string };
+  expect(JSON.parse(stored_errors.errors_json)).toEqual([{ source: 'greenhouse', error: `4 boards ${line}` }]);
+});
+
+test('a brief rest after a 429 is waited out: the rest of the host still gets fetched', async () => {
+  const ids = [1, 2, 3].map(n => insertSource({ type: 'greenhouse', identifier: `g${n}`, enabled: 1 }));
+  let calls = 0;
+  fakeAdapter([], {
+    fetchImpl: () =>
+      (async function* () {
+        if (++calls === 1) throw new HttpStatusError(429, null, 'HTTP 429');
+        yield job();
+      })(),
+  });
+  const pacer = new HostPacer({ limit: () => ({ maxInFlight: 1, paceMs: 0 }), backoffBaseMs: 40 });
+  await runScan(newRun(), ids.map(sourceRow), NL_OK, { pacer });
+  expect(calls).toBe(3);
+  const rows = memDb.query('SELECT last_status FROM sources ORDER BY id').all() as { last_status: string }[];
+  expect(rows.map(r => r.last_status)).toEqual(['rate-limited', 'ok', 'ok']);
+});
+
+test('a 429 from an aggregator stays an ordinary source error', async () => {
+  const id = insertSource({ type: 'remoteok', identifier: 'remoteok', enabled: 1 });
+  const original = registry.remoteok;
+  registry.remoteok = {
+    type: 'remoteok',
+    fetch: () => (async function* () {
+      yield* [] as Job[];
+      throw new HttpStatusError(429, null, 'HTTP 429');
+    })(),
+  };
+  try {
+    const runId = newRun();
+    await runScan(runId, [sourceRow(id)], NL_OK, { pacer: new HostPacer({ limit: () => ({ maxInFlight: 1, paceMs: 0 }) }) });
+    expect(memDb.query('SELECT last_status FROM sources WHERE id = ?').get(id)).toEqual({ last_status: 'http-error' });
+  } finally {
+    registry.remoteok = original;
+  }
+});
+
+test('an enrich 429 rests the vendor and later enrich calls are not made while it rests', async () => {
+  const enriched: string[] = [];
+  const pacer = new HostPacer({ limit: () => ({ maxInFlight: 1, paceMs: 0 }), backoffBaseMs: 10 * 60_000 });
+  const id = insertSource({ type: 'greenhouse', identifier: 'enr', enabled: 1 });
+  fakeAdapter([job({ title: 'Backend Engineer' }), job({ title: 'Platform Engineer' })], {
+    async enrich(j) {
+      enriched.push(j.url);
+      throw new HttpStatusError(429, null, 'HTTP 429');
+    },
+  });
+  await runScan(newRun(), [sourceRow(id)], NL_OK, { pacer });
+  expect(enriched.length).toBe(1);
+  expect(pacer.isResting('greenhouse')).toBe(true);
+});
+
+test('a source queued behind its host does not start its deadline until it runs', async () => {
+  const ids = [1, 2].map(n => insertSource({ type: 'greenhouse', identifier: `g${n}`, enabled: 1 }));
+  fakeAdapter([], {
+    fetchImpl: () =>
+      (async function* () {
+        await new Promise(r => setTimeout(r, 70));
+        yield job();
+      })(),
+  });
+  // The second board waits ~70ms for the first, then needs 70ms itself: 140ms in total, over
+  // its 100ms deadline if the clock had started when it was queued.
+  const pacer = new HostPacer({ limit: () => ({ maxInFlight: 1, paceMs: 0 }) });
+  await runScan(newRun(), ids.map(sourceRow), NL_OK, { pacer, sourceDeadlineMs: 100 });
+  expect(memDb.query("SELECT COUNT(*) AS n FROM sources WHERE last_status = 'ok'").get()).toEqual({ n: 2 });
+});
+
 test('jobs that fail JobShape are skipped and counted, never stored', async () => {
   const { events } = await scanWith([job(), job({ url: '' }), job({ title: '' })]);
   expect(jobs().length).toBe(1);
@@ -389,7 +527,7 @@ test('re-scan re-applies the stored salary before L1, so a below-floor enriched 
 
   const runId = newRun();
   fakeAdapter([listing], adapter);
-  await scan.runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
+  await runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
   expect(jobs()[0].l1_pass).toBe(0);
   expect(jobs()[0].l1_reasons).toContain('below floor');
 });
@@ -437,7 +575,7 @@ const PAY_JD = (range: string) => `About the role.\nThe salary range for this ro
 test('a salary read from the JD is filled before L1, so a below-floor job is dropped', async () => {
   const sourceId = insertSource({ type: 'greenhouse', enabled: 1 });
   fakeAdapter([job({ location: 'Remote - US', jd_text: PAY_JD('$60,000 - $80,000') })]);
-  await scan.runScan(newRun(), [sourceRow(sourceId)], { ...NL_OK, salary_min_usd: 100000 });
+  await runScan(newRun(), [sourceRow(sourceId)], { ...NL_OK, salary_min_usd: 100000 });
   const row = derivedRow();
   expect(row.l1_pass).toBe(0);
   expect(row.l1_reasons).toContain('below floor');
@@ -449,7 +587,7 @@ test('a salary read from the JD is filled before L1, so a below-floor job is dro
 test('a JD salary above the floor passes and is stored as text-derived', async () => {
   const sourceId = insertSource({ type: 'greenhouse', enabled: 1 });
   fakeAdapter([job({ location: 'Remote - US', jd_text: PAY_JD('$140,000 - $190,000') })]);
-  await scan.runScan(newRun(), [sourceRow(sourceId)], { ...NL_OK, salary_min_usd: 150000 });
+  await runScan(newRun(), [sourceRow(sourceId)], { ...NL_OK, salary_min_usd: 150000 });
   expect(derivedRow().l1_pass).toBe(1);
   expect(derivedRow().salary_source).toBe('jd');
 });
@@ -566,7 +704,7 @@ test('re-scan re-applies a JD-derived stored salary before L1 for an enrich adap
   const first = await scanWith([listing], { adapter });
   const runId = newRun();
   fakeAdapter([listing], adapter);
-  await scan.runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
+  await runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
   expect(derivedRow().l1_pass).toBe(0);
   expect(derivedRow().l1_reasons).toContain('below floor');
 });
@@ -600,7 +738,7 @@ test('a removed listing salary is replaced in the same run by what the stored JD
 
   const runId = newRun();
   fakeAdapter([{ ...listing, salary_min_usd: null, salary_max_usd: null, salary_currency: null }], adapter);
-  await scan.runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
+  await runScan(runId, [sourceRow(first.sourceId)], { ...NL_OK, salary_min_usd: 100000 });
   const row = derivedRow();
   expect(row.l1_pass).toBe(0);
   expect(row.salary_max_usd).toBe(80000);

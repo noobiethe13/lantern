@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, memo, type CSSProperties } fr
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight, Circle, CheckCircle2, XCircle, Sparkles, Flag,
-  BarChart3, Clock,
+  BarChart3, Clock, AlertTriangle,
 } from 'lucide-react';
 import { api, formatMoney, type Run, type InterpretedCriteria } from '@/lib/api';
 import { useSSE, type ScanEvent } from '@/lib/sse';
@@ -22,6 +22,7 @@ function eventColor(event: ScanEvent): string {
   switch (event.type) {
     case 'source_done': case 'l2_done': case 'done': return 'var(--success)';
     case 'source_error': case 'error': return 'var(--danger)';
+    case 'source_warning': return 'var(--warning)';
     case 'l2_progress': case 'l2_start': case 'scan_done': case 'rescue_start': case 'rescue_done': return 'var(--accent-text)';
     default: return 'var(--text-faint)';
   }
@@ -33,6 +34,7 @@ function EventIcon({ event }: { event: ScanEvent }) {
   switch (event.type) {
     case 'source_done': return <CheckCircle2 {...p} />;
     case 'source_error': case 'error': return <XCircle {...p} />;
+    case 'source_warning': return <AlertTriangle {...p} />;
     case 'l2_progress': return <Sparkles {...p} />;
     case 'l2_start': case 'l2_done': case 'scan_done': case 'rescue_start': case 'rescue_done': return <BarChart3 {...p} />;
     case 'done': return <Flag {...p} />;

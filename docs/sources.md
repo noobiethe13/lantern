@@ -47,6 +47,23 @@ What the runner does around an adapter:
   deadline covering fetch and enrichment. On timeout the signal fires, the source
   is marked `last_status = 'timeout'`, and the scan moves on. Long paginated
   fetches should check `ctx.abortSignal` between pages.
+- **Per-host politeness.** Thousands of boards share a few API hosts, so the live
+  pool is wide only across vendors. [`host-pacer.ts`](../src/runner/host-pacer.ts)
+  groups boards by vendor (every `*.recruitee.com` tenant is one group; Workday
+  tenants stay separate), caps in-flight fetches per group (Greenhouse, Ashby and
+  Lever 4, Workable 1, the rest 2) and jitters the gap between starts (Workable
+  1.5s, Recruitee 0.6s, the big three 0.2s). `enrich()` calls take a paced turn on
+  the same group. After a 429 that survived the fetch layer's retries the whole
+  group rests (30s, doubling to 10 minutes). A rest of up to a minute is waited
+  out. A longer one skips the group's remaining queue. The board that got the 429
+  and every skipped board end as `last_status = 'rate-limited'` (not an error line,
+  no freshness advance, `refresh_retry_at` set so the background refresher picks
+  them up), and are served from their last stored jobs however old, so a search
+  never loses them. The run reports one warning line and one `errors_json` entry
+  per host ("N boards rate-limited by workable (M served from older cache)").
+  Aggregators are not covered: their 429s are ordinary errors. One process-wide
+  pacer serves scans and the refresher, so a rest carries across both. The 8-minute
+  deadline starts when a source actually starts, not while it waits for its host.
 - **Contract validation.** Every yielded job is checked against `JobShape`
   (`src/core/job.ts`). A job that fails (for example an empty URL or title) is
   skipped and counted in the source's `source_done` message, never stored.
@@ -177,6 +194,10 @@ the file on demand. To keep a scan across that many boards bounded, L2 grades at
 most the **grading limit** (Settings, default 300) best-ranked survivors per
 search. The rest stay ungraded ("N more not yet graded" on the Jobs page and in the
 final progress message) and an identical re-search grades the next batch.
+
+Pacing makes a cold start slow on purpose: Workable allows one request every 1.5s,
+so its 2,400 or so boards alone take about an hour to warm (the refresher does it in
+the background, and boards not yet warm are fetched by a search at the same pace).
 
 Seeding follows the same rules as the curated list, minus the retire sync: rows
 are `INSERT OR IGNORE`d, an existing row is never touched, nothing is ever

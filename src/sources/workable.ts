@@ -1,5 +1,5 @@
 import type { Job, SourceAdapter, SourceContext } from '../core/job';
-import { assertValidSlug, fetchJson, fetchText } from '../core/fetch';
+import { HttpStatusError, assertValidSlug, fetchJson, fetchText } from '../core/fetch';
 import { htmlToText } from './aggregator-util';
 
 const WORKABLE_HOST = 'apply.workable.com';
@@ -135,13 +135,15 @@ export class WorkableAdapter implements SourceAdapter {
       // himalayas/jobicy's per-keyword isolation) — only throw once every
       // keyword's request has failed and there is nothing to show for this source.
       let failures = 0;
+      let lastError: unknown;
       for (const kw of keywords) {
         const kwUrl = `${feedUrl}?query=${encodeURIComponent(kw)}`;
         let kwText: string;
         try {
           kwText = await fetchText(kwUrl, { allowedHosts: [WORKABLE_HOST], retries: 2, signal: ctx.abortSignal });
-        } catch {
+        } catch (err) {
           failures++;
+          lastError = err;
           ctx.emitProgress(`${display_name}: search for "${kw}" failed`);
           continue;
         }
@@ -152,6 +154,8 @@ export class WorkableAdapter implements SourceAdapter {
         }
       }
       if (failures === keywords.length) {
+        // A 429 must surface as one so the runner rests the host instead of logging a hard failure.
+        if (lastError instanceof HttpStatusError && lastError.status === 429) throw lastError;
         throw new Error(`Workable account "${display_name}": all search requests failed`);
       }
       jobs = merged;
@@ -174,6 +178,8 @@ export class WorkableAdapter implements SourceAdapter {
       const url = `https://${WORKABLE_HOST}/api/v2/accounts/${identifier}/jobs/${code}`;
       return parseWorkableDetail(await fetchJson(url, { allowedHosts: [WORKABLE_HOST], retries: 1 }));
     } catch (err) {
+      // Surfaced so the runner rests the vendor instead of hammering a host that is refusing us.
+      if (err instanceof HttpStatusError && err.status === 429) throw err;
       ctx.emitProgress(`Workable: JD enrich failed for ${code} (${err instanceof Error ? err.message : String(err)})`);
       return null;
     }

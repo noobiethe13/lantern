@@ -105,6 +105,8 @@ function SourceRow({ source, onToggle, onDelete }: { source: Source; onToggle: (
     ? <Circle size={8} style={{ color: 'var(--text-faint)' }} />
     : source.last_status === 'ok'
     ? <CheckCircle2 size={8} style={{ color: 'var(--success)' }} />
+    : source.last_status === 'rate-limited'
+    ? <Circle size={8} style={{ color: 'var(--warning)' }} />
     : <XCircle size={8} style={{ color: 'var(--danger)' }} />;
 
   return (
@@ -124,6 +126,8 @@ function SourceRow({ source, onToggle, onDelete }: { source: Source; onToggle: (
       <div
         title={source.last_status === 'ok' || !source.last_scan_at
           ? undefined
+          : source.last_status === 'rate-limited'
+          ? `Rate-limited by the host ${timeAgo(source.last_scan_at)} - will retry in the background`
           : `Last attempt ${timeAgo(source.last_scan_at)} failed${source.last_error ? `: ${source.last_error}` : ''}`}
         style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '11px', color: 'var(--text-faint)' }}
       >

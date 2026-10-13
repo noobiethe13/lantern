@@ -7,7 +7,7 @@ import { REPO, memDb, scan, bus, insertSource, insertJob, resetDb, req, NL_OK } 
 const { adapterRegistry } = await import(`${REPO}/src/sources/index.ts`);
 const { BoardRefresher, failureBackoffMs, refreshCutoffMs } = await import(`${REPO}/src/runner/board-refresher.ts`);
 const registry = adapterRegistry as Record<string, SourceAdapter>;
-const originals = { greenhouse: registry.greenhouse, ashby: registry.ashby, workable: registry.workable, remoteok: registry.remoteok };
+const originals = { greenhouse: registry.greenhouse, ashby: registry.ashby, workable: registry.workable, remoteok: registry.remoteok, recruitee: registry.recruitee };
 
 const HOUR = 3_600_000;
 
@@ -25,7 +25,7 @@ afterAll(() => {
 
 type Fetch = (ctx: SourceContext) => AsyncIterable<Job>;
 
-function install(type: 'greenhouse' | 'ashby' | 'workable' | 'remoteok', fetch: Fetch, extra: Partial<SourceAdapter> = {}) {
+function install(type: 'greenhouse' | 'ashby' | 'workable' | 'remoteok' | 'recruitee', fetch: Fetch, extra: Partial<SourceAdapter> = {}) {
   registry[type] = { type, fetch, ...extra } as SourceAdapter;
 }
 
@@ -611,6 +611,22 @@ test('status reports hosts resting after a 429', async () => {
   const r = refresher();
   await r.tick();
   expect(r.getStatus().restingHosts).toEqual(['greenhouse']);
+  errors.mockRestore();
+});
+
+test('a 429 on a per-tenant vendor (recruitee) rests the whole vendor, not just that tenant', async () => {
+  const fetched: string[] = [];
+  install('recruitee', ctx => {
+    fetched.push(ctx.config['identifier'] as string);
+    throw new HttpStatusError(429, null, 'HTTP 429');
+  });
+  insertSource({ type: 'recruitee', identifier: 'r1', enabled: 1 });
+  insertSource({ type: 'recruitee', identifier: 'r2', enabled: 1 });
+  const errors = spyOn(console, 'error').mockImplementation(() => {});
+  const r = refresher();
+  await r.tick();
+  expect(fetched.length).toBe(1);
+  expect(r.getStatus().restingHosts).toEqual(['recruitee']);
   errors.mockRestore();
 });
 

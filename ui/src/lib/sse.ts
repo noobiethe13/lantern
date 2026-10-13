@@ -9,6 +9,7 @@ export interface ScanEvent {
     | 'job_found'
     | 'source_done'
     | 'source_error'
+    | 'source_warning'
     | 'scan_done'
     | 'rescue_start'
     | 'rescue_done'
